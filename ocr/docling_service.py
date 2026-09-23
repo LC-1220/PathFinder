@@ -251,9 +251,11 @@ def _get_docling_converter():
     pipeline_options = PdfPipelineOptions(
         do_ocr=True,
         do_table_structure=True,
-        images_scale=2.0,
+        images_scale=1.5,
     )
-    pipeline_options.table_structure_options.mode = TableFormerMode.ACCURATE
+    # FAST mode trades some table-structure accuracy for much lower CPU inference time,
+    # needed to stay under the hosting platform's request timeout.
+    pipeline_options.table_structure_options.mode = TableFormerMode.FAST
     pipeline_options.table_structure_options.do_cell_matching = True
     _DOCLING_CONVERTER = DocumentConverter(
         format_options={
