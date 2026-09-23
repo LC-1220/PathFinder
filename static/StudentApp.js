@@ -1596,7 +1596,13 @@ function clearInputs() {
             formData.append('report_card', blob, blob.name || 'report-card.png');
 
             const response = await fetch('/ocr_report_card', { method: 'POST', body: formData });
-            const data = await response.json();
+            let data;
+            try{
+                data = await response.json();
+            }catch(parseError){
+                // Server likely crashed/timed out (e.g. free-tier memory limit) and returned a non-JSON response.
+                throw new Error(`Server did not return a valid response (status ${response.status}). It may have run out of memory or timed out processing this file. Please try again in a moment.`);
+            }
 
             if(!data || !data.success){
                 throw new Error((data && data.message) || 'Docling could not process this file.');
