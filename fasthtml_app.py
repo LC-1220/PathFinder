@@ -2198,7 +2198,9 @@ def main():
     os.makedirs(UPLOAD_FOLDER, exist_ok=True)
     init_database()
     port = int(os.getenv("PORT", "5000"))
-    serve(port=port)
+    # reload=False: file-watching restarts (e.g. from uploads) would kill in-flight requests in production.
+    serve(port=port, reload=False)
+
 
 
 if __name__ == "__main__":
