@@ -230,17 +230,47 @@ def _subjects_from_table(rows):
     return subjects
 
 
+_DOCLING_CONVERTER = None
+
+
+def _get_docling_converter():
+    """Build the Docling converter once and reuse it; rebuilding reloads OCR/TableFormer models every call."""
+    global _DOCLING_CONVERTER
+    if _DOCLING_CONVERTER is not None:
+        return _DOCLING_CONVERTER
+
+    from docling.datamodel.base_models import InputFormat
+    from docling.datamodel.pipeline_options import PdfPipelineOptions, TableFormerMode
+    from docling.document_converter import (
+        DocumentConverter,
+        ImageFormatOption,
+        PdfFormatOption,
+        StandardPdfPipeline,
+    )
+
+    pipeline_options = PdfPipelineOptions(
+        do_ocr=True,
+        do_table_structure=True,
+        images_scale=2.0,
+    )
+    pipeline_options.table_structure_options.mode = TableFormerMode.ACCURATE
+    pipeline_options.table_structure_options.do_cell_matching = True
+    _DOCLING_CONVERTER = DocumentConverter(
+        format_options={
+            InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options),
+            InputFormat.IMAGE: ImageFormatOption(
+                pipeline_cls=StandardPdfPipeline,
+                pipeline_options=pipeline_options,
+            ),
+        }
+    )
+    return _DOCLING_CONVERTER
+
+
 def scan_report_card_docling(file_bytes, filename="report_card.pdf"):
     """Convert one report card with Docling and return the app's OCR payload shape."""
     try:
-        from docling.datamodel.base_models import InputFormat
-        from docling.datamodel.pipeline_options import PdfPipelineOptions, TableFormerMode
-        from docling.document_converter import (
-            DocumentConverter,
-            ImageFormatOption,
-            PdfFormatOption,
-            StandardPdfPipeline,
-        )
+        converter = _get_docling_converter()
     except ImportError as exc:
         raise RuntimeError(
             "Docling is not installed. Run 'python -m pip install -r requirements.txt' first."
@@ -255,22 +285,6 @@ def scan_report_card_docling(file_bytes, filename="report_card.pdf"):
         temp_path = temp_file.name
 
     try:
-        pipeline_options = PdfPipelineOptions(
-            do_ocr=True,
-            do_table_structure=True,
-            images_scale=2.0,
-        )
-        pipeline_options.table_structure_options.mode = TableFormerMode.ACCURATE
-        pipeline_options.table_structure_options.do_cell_matching = True
-        converter = DocumentConverter(
-            format_options={
-                InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options),
-                InputFormat.IMAGE: ImageFormatOption(
-                    pipeline_cls=StandardPdfPipeline,
-                    pipeline_options=pipeline_options,
-                ),
-            }
-        )
         result = converter.convert(temp_path)
         markdown = result.document.export_to_markdown()
         table_rows = _markdown_table_rows(markdown)
@@ -286,6 +300,7 @@ def scan_report_card_docling(file_bytes, filename="report_card.pdf"):
             os.remove(temp_path)
         except OSError:
             pass
+
 
     normalized_table = _normalize_report_card_table(table_rows)
     original_subjects = _subjects_from_table(table_rows)
