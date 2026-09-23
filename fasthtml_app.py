@@ -2205,7 +2205,8 @@ def main():
         print(f"Docling warm-up skipped: {exc}")
     port = int(os.getenv("PORT", "5000"))
     # reload=False: file-watching restarts (e.g. from uploads) would kill in-flight requests in production.
-    serve(port=port, reload=False)
+    # forwarded_allow_ips/proxy_headers: trust Railway's proxy so url_for reports https, not http (fixes OAuth redirect_uri_mismatch).
+    serve(port=port, reload=False, proxy_headers=True, forwarded_allow_ips="*")
 
 
 
