@@ -2197,6 +2197,12 @@ async def ocr_report_card(req):
 def main():
     os.makedirs(UPLOAD_FOLDER, exist_ok=True)
     init_database()
+    try:
+        # Load Docling/RapidOCR models now so the first upload doesn't pay this cost and risk a proxy timeout.
+        from ocr.docling_service import _get_docling_converter
+        _get_docling_converter()
+    except Exception as exc:
+        print(f"Docling warm-up skipped: {exc}")
     port = int(os.getenv("PORT", "5000"))
     # reload=False: file-watching restarts (e.g. from uploads) would kill in-flight requests in production.
     serve(port=port, reload=False)
