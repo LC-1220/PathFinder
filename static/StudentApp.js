@@ -1902,6 +1902,12 @@ function clearInputs() {
             return files.filter(file => file && file.name).slice(0, 10);
         }
 
+        function isSupportedReportCardImage(file){
+            const name = String(file?.name || '').toLowerCase();
+            return /\.(jpg|jpeg|png|webp)$/.test(name)
+                && (!file.type || ['image/jpeg', 'image/png', 'image/webp'].includes(file.type.toLowerCase()));
+        }
+
         function setUploadMessage(message, type = 'status'){
             if(uploadStatus){
                 uploadStatus.textContent = type === 'status' ? message : '';
@@ -1916,9 +1922,13 @@ function clearInputs() {
         }
 
         function setInputFiles(files){
-            const transfer = new DataTransfer();
-            files.forEach(file => transfer.items.add(file));
-            input.files = transfer.files;
+            try{
+                const transfer = new DataTransfer();
+                files.forEach(file => transfer.items.add(file));
+                input.files = transfer.files;
+            }catch(error){
+                console.warn('Could not update the file picker on this browser', error);
+            }
         }
 
         function appendOcrText(rawText) {
@@ -2262,7 +2272,14 @@ function clearInputs() {
 
         input.addEventListener('change', (e)=>{
             setUploadMessage('');
-            const incomingFiles = parseFilesFromInput(e.target.files);
+            const selectedInputFiles = parseFilesFromInput(e.target.files);
+            const unsupportedFiles = selectedInputFiles.filter(file => !isSupportedReportCardImage(file));
+            if(unsupportedFiles.length){
+                setUploadMessage('Use JPG, JPEG, PNG, or WEBP report-card images. HEIC, PDF, and Word files are not supported.', 'error');
+                input.value = '';
+                return;
+            }
+            const incomingFiles = selectedInputFiles;
             selectedFileIndex = null;
             const existingKeys = new Set(queuedFiles.map(file => `${file.name}|${file.size}|${file.lastModified}`));
             const addedFiles = incomingFiles.filter(file => {
@@ -2552,6 +2569,9 @@ function clearInputs() {
 
                 for (let i = 0; i < files.length; i++) {
                     const file = files[i];
+                    if(!isSupportedReportCardImage(file)){
+                        throw new Error('Use a JPG, JPEG, PNG, or WEBP report-card image. HEIC, PDF, and Word files are not supported.');
+                    }
                     setProgress(Math.round((i / total) * 100), `Processing file ${i + 1}/${total}: ${file.name}`);
 
                     const rawText = await imageBlobToText(file);
