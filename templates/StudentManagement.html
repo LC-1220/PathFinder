@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="{{ url_for('static', filename='Student.css') }}">
+<link href="https://fonts.googleapis.com/css2?family=Nunito:ital,wght@0,200..1000;1,200..1000&family=Roboto:ital,wght@0,100..900;1,100..900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/7.0.1/css/all.min.css" integrity="sha512-2SwdPD6INVrV/lHTZbO2nodKhrnDdJK9/kg2XD1r9uGqPo1cUbujc+IYdlYdEErWNu69gVcYgdxlmVmzTWnetw==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+    <title>PathFinder</title>
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='images/PathFinder2.png') }}">
+</head>
+<body data-home-mode="{{ 'true' if home_mode|default(false) else 'false' }}" data-guest="{{ 'true' if is_guest|default(false) else 'false' }}">
+        {% if home_mode|default(false) %}
+        <header class="focus-header">
+            <a href="/home" class="focus-brand"><i class="fa-brands fa-google-scholar"></i><span>PathFinder</span></a>
+            <div class="focus-account">
+                <span>{{ 'Anonymous guest' if is_guest|default(false) else name }}</span>
+                <button id="profile-menu-trigger" class="focus-profile-trigger" type="button" aria-label="Open account menu" aria-haspopup="true" aria-expanded="false">
+                    {% if is_guest|default(false) %}<span class="focus-profile-icon"><i class="fa-solid fa-user-secret"></i></span>{% else %}<img src="{{ profile_image }}" alt="{{ name }} profile picture">{% endif %}
+                </button>
+                <div id="profile-menu" class="profile-menu" hidden>
+                    <div class="profile-menu-header"><strong>{{ 'Guest' if is_guest|default(false) else name }}</strong><span>{{ 'Anonymous session' if is_guest|default(false) else email }}</span></div>
+                    {% if is_guest|default(false) %}
+                    <button id="profile-privacy-link" type="button"><i class="fa-solid fa-shield-halved"></i> Privacy notice</button>
+                    {% else %}
+                    <a href="#inline-recommendations"><i class="fa-solid fa-ranking-star"></i> Saved recommendations</a>
+                    <button type="button" class="profile-menu-action" data-show-grades><i class="fa-solid fa-table-list"></i> View saved grades</button>
+                    <button type="button" class="profile-menu-action" data-show-upload><i class="fa-solid fa-cloud-arrow-up"></i> Upload another report</button>
+                    <button type="button" class="profile-menu-action" data-open-settings><i class="fa-solid fa-user-gear"></i> Profile settings</button>
+                    {% endif %}
+                    <a href="/logout" class="profile-menu-logout"><i class="fa-solid fa-right-from-bracket"></i> Log out</a>
+                </div>
+            </div>
+        </header>
+        {% else %}
+  
+        <div class="sidebar">
+       <ul>
+            <li>
+                <a href="/home" class="logo">
+                    <span class="picture" ><i class="fa-brands fa-google-scholar" ></i></span>
+                    <span class="textlogo">PathFinder</span>
+                </a>
+            </li>
+            <li class="nav-spacer" aria-hidden="true"></li>
+ 
+            <li>
+                <a href="/home" class="logo">
+                    <span class="icon" ><i class="fa-solid fa-house"></i></span>
+                    <span class="text">Home</span>
+                </a>
+            </li>
+ 
+            <li>
+                <a href="#ocr" class="logo">
+                    <span class="icon" ><i class="fa-solid fa-address-card"></i></span>
+                    <span class="text">Student Profile</span>
+                </a>
+            </li>
+
+            <li>
+                <a href="#inline-recommendations" class="logo">
+                    <span class="icon" ><i class="fa-brands fa-yelp"></i></span>
+                    <span class="text">Course Recommendation</span>
+                </a>
+            </li>
+
+            <li>
+                <a href="#recommendation-analytics" class="logo">
+                    <span class="icon" ><i class="fa-solid fa-chart-line"></i></span>
+                    <span class="text">Performance Analytics</span>
+                </a>
+            </li>
+
+            <li>
+                <a href="#pathfinder-chat-panel" class="logo">
+                    <span class="icon" ><i class="fa-solid fa-book-open"></i></span>
+                    <span class="text">PathFinder AI</span>
+                </a>
+            </li>
+ 
+             <li>
+                <a href="#settings" class="logo" data-open-settings>
+                    <span class="icon" ><i class="fa-solid fa-gear"></i></span>
+                    <span class="text">Settings</span>
+                </a>
+            </li>
+ 
+             <li>
+                <a href="#" class="logo">
+                    <span class="icon" ><i class="fa-solid fa-circle-info"></i></span>
+                    <span class="text">About</span>
+                </a>
+            </li>
+ 
+             <li>
+                <a href="#" onclick="openLogout(); return false;" class="logo">
+                    <span class="icon" ><i class="fa-solid fa-right-from-bracket"></i></span>
+                    <span class="text">Logout</span>
+                </a>
+            </li>
+           
+           
+       </ul>
+        </div>
+        <button class="mobile-menu-toggle" type="button" aria-label="Open navigation" aria-expanded="false"><i class="fa-solid fa-bars"></i></button>
+
+        <div class="logout-popup" id="logoutPopup">
+            <div class="logout-content">
+                <h2>Are you sure you <br> want to log out?</h2>
+                <p class="logoutTxt">Log out of PathFinder as</p>
+                <p class="logoutTxt">{{ email }}?</p>
+                <div class="logout-buttons">
+                    <a href="/logout"><button class="Logoutbtn2">Logout</button></a>
+                    <button class="Logoutbtn" onclick="closeLogout()">Cancel</button>   
+                </div>
+            </div>
+        </div>
+ 
+        <div class="usercontainer">
+            <div class="user">
+                <img id="profilePicture" src="{{ profile_image }}" alt="Profile Picture">
+                <span class="tooltip">StudentPathFinder Account<br>{{name}}<br>{{email}}</span>
+            </div>
+         </div>
+ 
+         <hr id="break">
+        {% endif %}
+ 
+        <div class="container student-tools-container">
+            <div class="DMT">  
+                <br>
+                <h1 class="MT">
+                    {{ 'Find your course match' if home_mode|default(false) else 'Welcome to Student Information' }}
+                </h1>
+                {% if home_mode|default(false) %}<p class="focus-subtitle">Upload your report card and get course recommendations from your grades.</p>{% endif %}
+            </div>
+            
+            <div class="Course-Container">
+ 
+                {% if not home_mode|default(false) %}<div id="studentList"></div>
+ 
+                <div id="studentProfile">
+                    <h3>Student Profile</h3>
+                    <p>Select a student to view details.</p>
+                </div>
+
+                <hr style="margin-top:20px;" />{% endif %}
+                <section id="ocr" style="margin-top:10px;">
+                    <h3>{{ 'Report card upload' if home_mode|default(false) else 'Student Information' }}</h3>
+
+                    <div id="ocr-identity-status" class="student-entry-card ocr-identity-card">
+                        <div class="review-section-title">Student details are read from your report card</div>
+                        <p>OCR will extract the student number, first name, middle initial, last name, and SHS strand or track together with the subjects and grades.</p>
+                        <div id="ocr-identity-preview" class="ocr-identity-preview" aria-live="polite"></div>
+                    </div>
+
+                    <section id="saved-grades-panel" class="saved-grades-panel" hidden aria-labelledby="saved-grades-title">
+                        <div class="saved-grades-header">
+                            <div><span>Saved academic record</span><h2 id="saved-grades-title">Subjects and grades</h2></div>
+                            <button id="close-saved-grades" type="button" aria-label="Close saved grades"><i class="fa-solid fa-xmark"></i></button>
+                        </div>
+                        <div class="saved-grades-table-wrap">
+                            <table class="saved-grades-table">
+                                <thead><tr><th>Subject</th><th>Grade</th><th>Status</th></tr></thead>
+                                <tbody id="saved-grades-body"></tbody>
+                            </table>
+                        </div>
+                    </section>
+
+                    <div id="ocr-upload-area">
+                    <ol class="journey-steps" aria-label="Recommendation progress">
+                        <li class="active" data-step="1"><span>1</span><strong>Select</strong></li>
+                        <li data-step="2"><span>2</span><strong>Extract</strong></li>
+                        <li data-step="3"><span>3</span><strong>Review</strong></li>
+                        <li data-step="4"><span>4</span><strong>Results</strong></li>
+                    </ol>
+
+                    <div id="dropzone" class="dropzone" role="button" tabindex="0" aria-controls="image-input" aria-label="Choose report card files">
+                        <i class="fa-solid fa-cloud-arrow-up dropzone-icon"></i>
+                        <p class="dropzone-text">Drag &amp; drop files here, or <span class="dropzone-browse">browse</span></p>
+                        <p class="dropzone-sub">Upload multiple images, PDFs, or Word reports</p>
+                        <div id="selected-files" class="selected-files" aria-live="polite"><img id="preview" alt="" hidden /></div>
+                        <input type="file" id="image-input" accept="image/*,.pdf,.doc,.docx,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" multiple hidden />
+                    </div>
+
+                    <div id="file-actions" class="file-actions" hidden>
+                        <button id="replace-files" type="button"><i class="fa-solid fa-rotate"></i> Replace files</button>
+                        <button id="clear-files" type="button"><i class="fa-solid fa-trash"></i> Clear</button>
+                    </div>
+
+                    
+
+                    <div style="margin-top:8px;">
+                        <label style="display:flex; align-items:center; gap:8px; font-size:14px; margin-bottom:8px;">
+                            <input type="checkbox" id="privacy-consent" disabled />
+                            <span>I confirm I have read and agree to the <a href="#" id="open-terms-link">privacy notice and data handling terms</a>.</span>
+                        </label>
+                        <button id="run-ocr">Extract subjects and grades</button>
+                    </div>
+
+                    <div id="upload-status" class="upload-status" role="status" aria-live="polite" hidden></div>
+                    <div id="upload-error" class="upload-error" role="alert" hidden></div>
+
+                    <div id="progress-wrap" class="progress-wrap" style="display:none;" role="status" aria-live="polite">
+                        <div class="progress-bar">
+                            <div id="progress-fill" class="progress-fill"></div>
+                        </div>
+                        <div id="progress-label" class="progress-label">Preparing upload</div>
+                    </div>
+                    </div>
+
+                    <div id="ocr-review-panel" class="ocr-review-panel" style="display:none; margin-top:20px;">
+                        <h4>Review extracted subjects and grades</h4>
+                        <div id="ocr-review-form" class="ocr-review-form"></div>
+                    </div>
+
+                    <section id="inline-recommendations" class="inline-recommendations" style="display:none;" aria-live="polite">
+                        <div class="recommendation-heading">
+                            <span>Based on your grades</span>
+                            <h2>Your top 3 course matches</h2>
+                        </div>
+                        <div id="inline-recommendation-list" class="inline-recommendation-list"></div>
+                        <div id="inline-course-analysis" class="inline-course-analysis"></div>
+                        <div id="recommendation-analytics" class="recommendation-analytics"></div>
+                        <div class="recommendation-disclaimer"><i class="fa-solid fa-circle-info"></i><p>Course matches are academic guidance based on the grades provided. They do not guarantee admission, eligibility, or career outcomes. Consider your interests and speak with a guidance counselor before deciding.</p></div>
+                        <div class="result-actions">
+                            <button id="upload-another" type="button"><i class="fa-solid fa-arrow-rotate-left"></i> Upload another report card</button>
+                        </div>
+                    </section>
+
+                </section>
+            </div>
+        </div>
+
+        {% if home_mode|default(false) %}
+        <button id="pathfinder-chat-toggle" class="pathfinder-chat-toggle" type="button" aria-label="Open PathFinder AI" aria-controls="pathfinder-chat-panel" aria-expanded="false" title="PathFinder AI">
+            <i class="fa-solid fa-robot"></i>
+            <span>AI</span>
+        </button>
+        <aside id="pathfinder-chat-panel" class="pathfinder-chat-panel" hidden aria-label="PathFinder AI assistant">
+            <header class="pathfinder-chat-header">
+                <div class="pathfinder-chat-avatar"><i class="fa-solid fa-robot"></i></div>
+                <div><strong>PathFinder AI</strong><span>Course assistant</span></div>
+                <button id="pathfinder-chat-close" type="button" aria-label="Close PathFinder AI"><i class="fa-solid fa-xmark"></i></button>
+            </header>
+            <div id="pathfinder-chat-messages" class="pathfinder-chat-messages" aria-live="polite">
+                <div class="pathfinder-chat-message assistant">Ask me about your recommended courses, course fit, or ways to strengthen your profile.</div>
+            </div>
+            <div id="pathfinder-chat-quick" class="pathfinder-chat-quick">
+                <button type="button" data-question="List my top courses">Top courses</button>
+                <button type="button" data-question="Why is my best course recommended?">Why this match?</button>
+                <button type="button" data-question="How can I improve my academic profile?">How to improve</button>
+            </div>
+            <div id="pathfinder-chat-status" class="pathfinder-chat-status" hidden>PathFinder AI is thinking...</div>
+            <div class="pathfinder-chat-input-row">
+                <input id="pathfinder-chat-input" type="text" placeholder="Ask about a course..." autocomplete="off">
+                <button id="pathfinder-chat-send" type="button" aria-label="Send question" title="Send"><i class="fa-solid fa-paper-plane"></i></button>
+            </div>
+        </aside>
+        {% endif %}
+
+        <div id="settings-modal" class="settings-modal" hidden>
+            <div class="settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+                <aside class="settings-sidebar" aria-label="Settings sections">
+                    <div class="settings-sidebar-heading"><i class="fa-solid fa-sliders"></i><span>Settings</span></div>
+                    <button type="button" class="settings-tab active" data-settings-tab="profile"><i class="fa-solid fa-user"></i> Profile</button>
+                    <button type="button" class="settings-tab" data-settings-tab="account"><i class="fa-solid fa-shield-halved"></i> Account</button>
+                </aside>
+                <section class="settings-panel">
+                    <header class="settings-panel-header">
+                        <div><span class="settings-eyebrow">Personal settings</span><h2 id="settings-title">Your profile</h2><p>Keep your PathFinder account details up to date.</p></div>
+                        <button type="button" class="settings-close" data-close-settings aria-label="Close settings"><i class="fa-solid fa-xmark"></i></button>
+                    </header>
+                    <div class="settings-panel-body">
+                        <div class="settings-tab-panel active" data-settings-panel="profile">
+                            <div class="settings-avatar-row">
+                                <img id="settings-preview-image" src="{{ profile_image }}" alt="{{ name }} profile picture">
+                                <div><h3>Profile picture</h3><p>Use a clear image so your account is easy to recognize.</p><label for="settings-picture-input" class="settings-upload-button"><i class="fa-solid fa-camera"></i> Choose image</label><input id="settings-picture-input" type="file" accept="image/*" hidden><span id="settings-picture-status" class="settings-status"></span></div>
+                            </div>
+                            <form id="account-name-form" class="settings-form">
+                                <label for="settings-name">Display name</label>
+                                <div class="settings-name-row"><input id="settings-name" name="name" type="text" value="{{ name }}" autocomplete="name" required><button type="submit" class="settings-save-button">Save name</button></div>
+                                <span id="settings-name-status" class="settings-status" role="status"></span>
+                            </form>
+                        </div>
+                        <div class="settings-tab-panel" data-settings-panel="account" hidden>
+                            <div class="settings-account-note"><i class="fa-solid fa-envelope"></i><div><h3>Account email</h3><p>{{ email }}</p><small>Your email is used for signing in and cannot be changed here.</small></div></div>
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </div>
+
+        <div id="terms-modal-overlay" class="terms-modal-overlay" style="display:none;">
+            <div class="terms-modal" role="dialog" aria-modal="true" aria-labelledby="terms-modal-title">
+                <div class="terms-modal-header">
+                    <h3 id="terms-modal-title">Terms and Conditions and Consent Form</h3>
+                    <button type="button" id="terms-modal-close" class="terms-modal-close" aria-label="Close">&times;</button>
+                </div>
+                <div class="terms-modal-body" id="terms-modal-body">
+                    <p>Please read the following terms and conditions carefully before uploading your report card.</p>
+
+                    <h4>1. Purpose of the System</h4>
+                    <p>This website is developed as part of an academic thesis/research project. The system is designed to process students' academic records through Optical Character Recognition (OCR) and use the extracted academic information to generate possible college course recommendations.</p>
+                    <p>The recommendations provided by the system are intended for research and academic guidance purposes only. They do not constitute official academic, career, or admission advice and do not guarantee admission, academic performance, or success in any recommended course.</p>
+
+                    <h4>2. Information to Be Collected</h4>
+                    <p>By using this system, you understand that information contained in your uploaded report card may be collected and processed, including but not limited to:</p>
+                    <ul>
+                        <li>Full name</li>
+                        <li>Student number or learner identification number</li>
+                        <li>Grade level</li>
+                        <li>Academic strand or track</li>
+                        <li>Subject names and subject codes</li>
+                        <li>Grades</li>
+                        <li>General average</li>
+                        <li>Academic year or semester</li>
+                        <li>Other academic information appearing on the uploaded report card</li>
+                    </ul>
+                    <p>The uploaded report card may be processed by the system to extract relevant information through OCR.</p>
+                    <p>You are advised not to upload documents containing information that is unrelated to the purpose of this research.</p>
+
+                    <h4>3. Use of Your Information</h4>
+                    <p>The information collected from your report card will be used for the following purposes:</p>
+                    <ul>
+                        <li>To extract academic information using OCR.</li>
+                        <li>To organize and process your academic records.</li>
+                        <li>To analyze your grades and academic performance.</li>
+                        <li>To generate possible college course recommendations.</li>
+                        <li>To evaluate the functionality and performance of the proposed system.</li>
+                        <li>To support the analysis and findings of the academic thesis.</li>
+                    </ul>
+                    <p>Your information will not be intentionally used for advertising, marketing, or unrelated commercial purposes.</p>
+
+                    <h4>4. Automated Processing</h4>
+                    <p>The system may use automated processing to analyze your academic records and generate course recommendations based on the information extracted from your report card.</p>
+                    <p>You understand that automated processing may produce inaccurate or incomplete results, particularly if information is incorrectly extracted through OCR. You should review the extracted information before proceeding.</p>
+                    <p>The recommendations generated by the system should not be considered a final decision regarding your choice of college course.</p>
+
+                    <h4>5. Data Privacy</h4>
+                    <p>The collection and processing of your personal information will be conducted in accordance with applicable Philippine data privacy laws and regulations, including Republic Act No. 10173, also known as the Data Privacy Act of 2012, its Implementing Rules and Regulations, and applicable issuances of the National Privacy Commission.</p>
+                    <p>The system will follow the principles of transparency, legitimate purpose, and proportionality in the processing of personal information.</p>
+                    <p>Reasonable organizational, physical, and technical measures will be implemented to protect your personal information against unauthorized access, disclosure, alteration, loss, or destruction.</p>
+
+                    <h4>6. Disclosure and Sharing of Information</h4>
+                    <p>Your personal information will only be accessed by authorized individuals involved in the development, administration, evaluation, and research activities of this thesis, subject to applicable privacy and research requirements.</p>
+                    <p>If third-party services are used for necessary functions such as hosting, storage, OCR, or other technical services, the processing of personal information will be subject to applicable privacy requirements and appropriate safeguards.</p>
+
+                    <h4>7. Data Retention</h4>
+                    <p>Your personal information and uploaded report card will only be retained for the period necessary to fulfill the purposes of the research and in accordance with the approved research protocol and applicable institutional policies.</p>
+                    <p>After the applicable retention period, personal information and uploaded files will be securely deleted, destroyed, or anonymized when appropriate.</p>
+                    <p>Retention Period: [INSERT APPROVED RETENTION PERIOD]</p>
+
+                    <h4>8. Voluntary Participation</h4>
+                    <p>Participation in this research is voluntary. You may choose not to upload your report card or participate in the system.</p>
+                    <p>Where consent is the applicable legal basis for processing, you may withdraw your consent, subject to applicable legal, research, and institutional requirements.</p>
+                    <p>Your decision not to participate will not result in any penalty or discrimination.</p>
+
+                    <h4>9. Your Rights</h4>
+                    <p>Under applicable Philippine data privacy laws, you may have rights concerning your personal information, including the right to:</p>
+                    <ul>
+                        <li>Be informed about the processing of your personal information.</li>
+                        <li>Access your personal information.</li>
+                        <li>Request correction of inaccurate or incomplete information.</li>
+                        <li>Object to certain forms of processing.</li>
+                        <li>Withdraw consent where consent is the applicable basis for processing.</li>
+                        <li>Request deletion or blocking where applicable.</li>
+                        <li>Exercise data portability where applicable.</li>
+                        <li>File a complaint regarding the processing of your personal information when appropriate.</li>
+                    </ul>
+                    <p>These rights are subject to the limitations and conditions provided by applicable laws and regulations.</p>
+
+                    <h4>10. Accuracy of Information</h4>
+                    <p>You are responsible for ensuring that the report card you upload belongs to you and that the information provided is accurate.</p>
+                    <p>OCR technology may incorrectly recognize characters, numbers, subjects, or grades. You should review the information extracted by the system before it is used for course recommendation.</p>
+
+                    <h4>11. Research Use</h4>
+                    <p>The information collected through this system may be used for the academic evaluation and documentation of the thesis.</p>
+                    <p>Where research results are presented in reports, presentations, publications, or other academic materials, reasonable measures will be taken to prevent the unnecessary disclosure of personally identifiable information.</p>
+
+                    <h4>12. Consent</h4>
+                    <p>By checking the consent box and proceeding with the report card upload, you confirm that:</p>
+                    <ul>
+                        <li>I have read and understood the Terms and Conditions and Consent Form.</li>
+                        <li>I voluntarily agree to participate in the research and allow the system to collect and process the information contained in my report card for the purposes stated above.</li>
+                        <li>I understand that my report card will be processed using OCR and that the extracted information may be used to generate possible college course recommendations.</li>
+                        <li>I understand that the system uses automated processing and that the recommendations generated by the system are for academic research and guidance purposes only.</li>
+                        <li>I understand my rights under applicable Philippine data privacy laws and regulations.</li>
+                        <li>I understand that I may decline to participate and, where applicable, withdraw my consent subject to legal and institutional requirements.</li>
+                        <li>I confirm that the report card I am uploading belongs to me and that I have the authority to provide it for the purposes described in this document.</li>
+                    </ul>
+
+                    <p class="terms-meta">Researcher/Research Group: Lauke Rommel P. Carlos, Nathaniel O. Rodenas<br>
+                    Research Title: PathFinder: A Web-Based Course Recommendation and Academic Performance Analytics Platform Using Machine Learning for Senior High School Students<br>
+                    School/University: University of Perpetual Help System Dalta Las Pinas<br>
+                    Research Adviser: [INSERT NAME]<br>
+                    Contact Information: laukerommel.carlos@perpetual.edu.ph<br>
+                    Data Protection Officer/Privacy Contact: [INSERT INFORMATION]</p>
+                </div>
+                <div class="terms-modal-footer">
+                    <p id="terms-scroll-hint" class="terms-scroll-hint">Scroll to the bottom to enable the agree button.</p>
+                    <div class="terms-modal-actions">
+                        <button type="button" id="terms-decline-btn" class="terms-btn terms-btn-secondary">Cancel</button>
+                        <button type="button" id="terms-agree-btn" class="terms-btn terms-btn-primary" disabled>I Agree</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    
+        <script src="{{ url_for('static', filename='StudentApp.js') }}"></script>
+        <script src="{{ url_for('static', filename='Logout.js') }}"></script>
+    </body>
+</html>

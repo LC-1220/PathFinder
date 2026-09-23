@@ -1,0 +1,617 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Admin Dashboard</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='Admin.css') }}">
+  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@300;400;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/7.0.1/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.3.0/dist/chart.umd.min.js"></script>
+</head>
+<body class="admin-page" data-can-manage-students="{{ 'true' if can_manage_students|default(false) else 'false' }}">
+  <div class="sidebar admin-plain-sidebar">
+    <ul>
+      <li><a href="#dashboard" class="logo admin-view-link" data-admin-view="dashboard"><span class="icon"><i class="fa-solid fa-chart-line"></i></span><span class="text">Dashboard</span></a></li>
+      {% if can_manage_students|default(false) %}<li><a href="#add-users" class="logo admin-view-link" data-admin-view="add-users"><span class="icon"><i class="fa-solid fa-user-plus"></i></span><span class="text">Add Users</span></a></li>{% endif %}
+      {% if can_manage_students|default(false) %}<li><a href="#view-students" class="logo admin-view-link" data-admin-view="view-students"><span class="icon"><i class="fa-solid fa-users"></i></span><span class="text">View Students</span></a></li>{% endif %}
+    </ul>
+  </div>
+  <header class="admin-topbar">
+    <div class="admin-topbar-brand"><button id="admin-sidebar-toggle" class="admin-sidebar-toggle" type="button" aria-label="Open admin navigation" aria-expanded="false"><i class="fa-solid fa-bars"></i></button><a href="#dashboard"><i class="fa-brands fa-google-scholar"></i><strong>PathFinder</strong></a></div>
+    <div class="admin-account-wrap">
+      <button id="admin-account-trigger" class="admin-account-trigger" type="button" aria-expanded="false"><span>{{ admin }}</span><img src="{{ profile_image }}" alt="{{ admin }} profile picture"></button>
+      <div id="admin-profile-menu" class="admin-profile-menu" hidden>
+        <button type="button" data-admin-settings><i class="fa-solid fa-gear"></i> Settings</button>
+        <a href="/admin/logout"><i class="fa-solid fa-right-from-bracket"></i> Logout</a>
+      </div>
+    </div>
+  </header>
+  <div class="wrap admin-dashboard-page" id="dashboard">
+    <div class="top">
+      <h2>Admin Dashboard</h2>
+      <div>
+      </div>
+    </div>
+    <div class="stats-row admin-dashboard-content" id="statsRow">
+      <div class="stat-card"><div class="stat-value" id="statTotalStudents">...</div><div class="stat-label">Total Students</div></div>
+      <div class="stat-card"><div class="stat-value" id="statTotalReportCards">...</div><div class="stat-label">Report Cards Uploaded</div></div>
+      <div class="stat-card"><div class="stat-value" id="statTotalRecommendations">...</div><div class="stat-label">Recommendations Generated</div></div>
+      <div class="stat-card"><div class="stat-value" id="statAvailableCourses">...</div><div class="stat-label">Available Courses</div></div>
+      <div class="stat-card"><div class="stat-value" id="statPendingEvaluations">...</div><div class="stat-label">Pending Evaluations</div></div>
+    </div>
+    <div id="dashboardError" class="admin-dashboard-content" style="margin-top:18px;color:#b91c1c;font-weight:600;display:none"></div>
+
+    {% if can_manage_students|default(false) %}
+    <section id="add-users" class="admin-section-card">
+      <div class="admin-section-heading"><span>Account management</span><h3>Add user</h3></div>
+      <form id="add-subadmin-form" class="admin-user-form">
+        <input name="name" type="text" placeholder="Subadmin name" required>
+        <input name="email" type="email" placeholder="Email" required>
+        <input name="password" type="password" placeholder="Temporary password" minlength="6" required>
+        <label class="role-choice"><input type="checkbox" checked disabled> View-only dashboard access</label>
+        <button class="btn btn-primary" type="submit">Add subadmin</button>
+      </form>
+      <div id="add-subadmin-status" class="admin-form-status" role="status"></div>
+    </section>
+    {% endif %}
+
+    <div class="cards admin-dashboard-content">
+        <div class="card">
+          <h4>Recommended Courses</h4>
+          <div class="chart-wrap"><canvas id="chartRecs"></canvas></div>
+        </div>
+        <div class="card">
+          <h4>Monthly Uploads</h4>
+          <div class="chart-wrap"><canvas id="chartMonthly"></canvas></div>
+        </div>
+        <div class="card">
+          <h4>Students per Strand</h4>
+          <div class="chart-wrap"><canvas id="chartStrand"></canvas></div>
+        </div>
+        <div class="card">
+          <h4>GWA Distribution</h4>
+          <div class="chart-wrap"><canvas id="chartGwa"></canvas></div>
+        </div>
+        <div class="card">
+          <h4>Top Recommended Courses</h4>
+          <div id="topRecommended" style="padding:8px"></div>
+        </div>
+        <div class="card card-narrow">
+          <h4>All Recommended Courses</h4>
+          <div id="allRecommended" class="panel-scroll">
+            <div class="no-courses">Loading recommended courses...</div>
+          </div>
+        </div>
+    </div>
+
+    <div id="view-students" class="admin-students-section" style="margin-top:22px">
+      <div class="admin-student-list-heading"><h3>Students</h3>{% if can_manage_students|default(false) %}<label class="admin-global-search"><i class="fa-solid fa-magnifying-glass"></i><input id="globalSearch" type="search" placeholder="Search students" aria-label="Search students"></label>{% endif %}</div>
+      <div id="studentsWrap">Loading...</div>
+    </div>
+  </div>
+
+  <aside id="admin-settings-panel" class="admin-settings-panel" hidden>
+    <div class="admin-settings-card">
+      <aside class="admin-settings-sidebar"><strong><i class="fa-solid fa-sliders"></i> Settings</strong><span class="active"><i class="fa-solid fa-user"></i> Profile</span><span><i class="fa-solid fa-shield-halved"></i> Account</span></aside>
+      <section class="admin-settings-content">
+        <div class="admin-settings-heading"><span>Account settings</span><button id="close-admin-settings" type="button" aria-label="Close settings"><i class="fa-solid fa-xmark"></i></button></div>
+        <div class="admin-settings-picture"><img id="admin-settings-picture" src="{{ profile_image }}" alt="{{ admin }} profile picture"><label for="admin-picture-input" class="admin-picture-button"><i class="fa-solid fa-camera"></i> Change picture</label><input id="admin-picture-input" type="file" accept="image/*" hidden><span id="admin-picture-status" role="status"></span></div>
+        <h3>{{ admin }}</h3>
+        <p>Administrator account</p>
+        <form id="admin-name-form" class="admin-name-form"><label for="admin-name-input">Display name</label><div><input id="admin-name-input" name="name" type="text" value="{{ admin }}" required><button type="submit">Save name</button></div><span id="admin-name-status" role="status"></span></form>
+        <a href="/admin/logout" class="admin-settings-action"><i class="fa-solid fa-right-from-bracket"></i> Log out</a>
+      </section>
+    </div>
+  </aside>
+
+  <div id="student-editor-modal" class="student-editor-modal" hidden>
+    <div class="student-editor-dialog" role="dialog" aria-modal="true" aria-labelledby="student-editor-title">
+      <div class="student-editor-header"><div><span>Editable student record</span><h2 id="student-editor-title">Student details</h2></div><button id="close-student-editor" type="button" aria-label="Close"><i class="fa-solid fa-xmark"></i></button></div>
+      <form id="student-editor-form" class="student-editor-form">
+        <input name="id" type="hidden">
+        <label>Student number<input name="student_number" type="text"></label>
+        <label class="editor-wide">Student name<input name="student_name" type="text"></label>
+        <label>GWA<input name="gwa" type="text"></label>
+        <div class="editor-wide"><div class="editor-table-heading">Subjects and grades</div><table class="admin-editor-grade-table"><thead><tr><th>Subject</th><th>Grade</th><th>Action</th></tr></thead><tbody id="student-editor-grade-body"></tbody></table><input name="subjects" type="hidden"><input name="grades" type="hidden"></div>
+        <div class="editor-actions"><span id="student-editor-status" role="status"></span><div><button id="delete-student-profile" class="btn btn-danger" type="button">Remove profile</button><button id="edit-student-record" class="btn btn-secondary" type="button">Edit</button><button class="btn btn-primary" type="submit" disabled>Save changes</button></div></div>
+      </form>
+    </div>
+  </div>
+
+<script>
+const canManageStudents = document.body.dataset.canManageStudents === 'true';
+const adminSidebar = document.querySelector('.admin-plain-sidebar');
+const adminSidebarToggle = document.getElementById('admin-sidebar-toggle');
+
+adminSidebarToggle?.addEventListener('click', () => {
+  const open = adminSidebar.classList.toggle('admin-sidebar-open');
+  document.body.classList.toggle('admin-nav-open', open);
+  adminSidebarToggle.setAttribute('aria-expanded', String(open));
+  adminSidebarToggle.innerHTML = open ? '<i class="fa-solid fa-xmark"></i>' : '<i class="fa-solid fa-bars"></i>';
+});
+
+adminSidebar?.querySelectorAll('a').forEach(link => link.addEventListener('click', () => {
+  adminSidebar.classList.remove('admin-sidebar-open');
+  adminSidebar.classList.add('admin-menu-suppressed');
+  document.body.classList.remove('admin-nav-open');
+  adminSidebarToggle?.setAttribute('aria-expanded', 'false');
+  if(adminSidebarToggle) adminSidebarToggle.innerHTML = '<i class="fa-solid fa-bars"></i>';
+}));
+adminSidebar?.addEventListener('mouseleave', () => adminSidebar.classList.remove('admin-menu-suppressed'));
+
+async function fetchJsonOrThrow(url, options = {}){
+  const res = await fetch(url, options);
+  const contentType = res.headers.get('content-type') || '';
+
+  if (res.redirected && res.url.includes('/')) {
+    throw new Error('Admin session expired. Please sign in again.');
+  }
+
+  let data = null;
+  if (contentType.includes('application/json')) {
+    data = await res.json().catch(() => null);
+  } else {
+    const text = await res.text().catch(() => '');
+    if (text && text.trim().startsWith('{')) {
+      try { data = JSON.parse(text); } catch (e) { data = null; }
+    }
+  }
+
+  if (!res.ok) {
+    const message = data?.error || data?.message || `${res.status} ${res.statusText}`;
+    throw new Error(message || 'Unable to load dashboard data');
+  }
+
+  if (!data || typeof data !== 'object') {
+    throw new Error('Dashboard data is unavailable. Please refresh or sign in again.');
+  }
+
+  return data;
+}
+
+async function fetchStats(){
+  return fetchJsonOrThrow('/admin/stats');
+}
+
+async function fetchStudents(){
+  const data = await fetchJsonOrThrow('/admin/students/api');
+  return data?.students || [];
+}
+
+let chartProfiles = null;
+let chartRecs = null;
+let chartGwa = null;
+let chartMonthly = null;
+let chartStrand = null;
+
+function destroyIfExists(chart){
+  try{ if(chart && typeof chart.destroy === 'function') chart.destroy(); }catch(e){}
+}
+
+function renderProfileBar(ctxElem, labels, values){
+  destroyIfExists(chartProfiles);
+  chartProfiles = new Chart(ctxElem, {
+    type: 'bar',
+    data: { labels, datasets: [{ label: 'Profiles', data: values, backgroundColor: 'rgba(20,184,166,.85)', borderRadius: 7, barThickness: 18 }] },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      indexAxis: 'y',
+      plugins: { legend: { display: false } },
+      scales: { x: { beginAtZero: true, ticks: { precision:0 } }, y: { ticks: { autoSkip: false } } },
+      animation: { duration: 800, easing: 'easeOutCubic' }
+    }
+  });
+}
+
+function renderBar(ctxElem, labels, values){
+  destroyIfExists(chartRecs);
+  chartRecs = new Chart(ctxElem, {
+    type: 'bar',
+    data: { labels, datasets: [{ label: 'Count', data: values, backgroundColor: 'rgba(51,94,234,0.9)', borderRadius: 8 }] },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: { y: { beginAtZero: true, ticks: { precision:0 } } },
+      animation: { duration: 800, easing: 'easeOutCubic' }
+    }
+  });
+}
+
+function renderGwa(ctxElem, labels, values){
+  destroyIfExists(chartGwa);
+  chartGwa = new Chart(ctxElem, {
+    type: 'bar',
+    data: { labels, datasets: [{ label: 'Students', data: values, backgroundColor: 'rgba(99, 102, 241, 0.9)', borderRadius: 6 }] },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: { y: { beginAtZero: true, ticks: { precision:0 } } },
+      animation: { duration: 700, easing: 'easeOutCubic' }
+    }
+  });
+}
+
+function renderLineChart(ctxElem, labels, values){
+  destroyIfExists(chartMonthly);
+  chartMonthly = new Chart(ctxElem, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{
+        label: 'Uploads',
+        data: values,
+        borderColor: 'rgba(51,94,234,0.95)',
+        backgroundColor: 'rgba(51,94,234,0.18)',
+        fill: true,
+        tension: 0.35,
+        pointRadius: 4,
+        pointHoverRadius: 6
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        y: { beginAtZero: true, ticks: { precision: 0 } },
+        x: { grid: { display: false } }
+      },
+      animation: { duration: 700, easing: 'easeOutCubic' }
+    }
+  });
+}
+
+function renderStrandPie(ctxElem, labels, values){
+  destroyIfExists(chartStrand);
+  const colors = labels.map((_,i)=>`hsl(${(i*52)%360} 70% 52%)`);
+  const total = values.reduce((sum, value) => sum + Number(value || 0), 0);
+  chartStrand = new Chart(ctxElem, {
+    type: 'pie',
+    data: { labels, datasets: [{ data: values, backgroundColor: colors, borderColor: '#fff', borderWidth: 1 }] },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'bottom', labels: { usePointStyle: true, generateLabels: chart => chart.data.labels.map((label, index) => ({
+          text: `${label} ${Number(values[index] || 0)} (${total ? Math.round((Number(values[index] || 0) / total) * 100) : 0}%)`,
+          fillStyle: colors[index],
+          strokeStyle: colors[index],
+          pointStyle: 'circle',
+          hidden: false,
+          index
+        })) } },
+        tooltip: { callbacks: { label: context => {
+          const value = Number(context.raw || 0);
+          const percentage = total ? Math.round((value / total) * 100) : 0;
+          return `${context.label}: ${value} (${percentage}%)`;
+        } } }
+      },
+      animation: { duration: 700, easing: 'easeOutCubic' }
+    }
+  });
+}
+
+function renderTopRecommended(containerElem, list, allList = list){
+  if(!containerElem) return;
+  if(!list || list.length===0){ containerElem.innerHTML = '<div class="no-courses">No recommendations data</div>'; return; }
+  const total = allList.reduce((sum, item) => sum + Number(item.count || 0), 0);
+  let html = '<div class="admin-recommendation-bars">';
+  let rank = 1;
+  list.forEach(item => {
+    const percentage = total ? Math.round((Number(item.count || 0) / total) * 100) : 0;
+    html += `<div class="admin-bar-row"><div class="admin-bar-label"><span>${rank++}. <strong>${item.course}</strong></span><b>${percentage}%</b></div><div class="admin-bar-track"><i style="width:${percentage}%"></i></div></div>`;
+  });
+  html += '</div>';
+  containerElem.innerHTML = html;
+}
+
+function renderAllRecommended(containerElem, list){
+  if(!containerElem) return;
+  if(!list || list.length===0){ containerElem.innerHTML = '<div class="no-courses">No recommended courses yet</div>'; return; }
+  const maxCount = Math.max(...list.map(item => Number(item.count || 0)), 1);
+  let html = '<div class="admin-recommendation-bars">';
+  list.forEach(item => {
+    const width = Math.round((Number(item.count || 0) / maxCount) * 100);
+    html += `<div class="admin-bar-row"><div class="admin-bar-label"><span><strong>${item.course}</strong></span><b>${item.count}</b></div><div class="admin-bar-track admin-count-track"><i style="width:${width}%"></i></div></div>`;
+  });
+  html += '</div>';
+  containerElem.innerHTML = html;
+}
+
+const adminSettingsTriggers = document.querySelectorAll('[data-admin-settings]');
+const adminSettingsPanel = document.getElementById('admin-settings-panel');
+const closeAdminSettings = document.getElementById('close-admin-settings');
+const adminAccountTrigger = document.getElementById('admin-account-trigger');
+const adminProfileMenu = document.getElementById('admin-profile-menu');
+const adminPictureInput = document.getElementById('admin-picture-input');
+const adminPictureStatus = document.getElementById('admin-picture-status');
+const adminNameForm = document.getElementById('admin-name-form');
+const adminNameStatus = document.getElementById('admin-name-status');
+
+adminNameForm?.addEventListener('submit', async event => {
+  event.preventDefault();
+  adminNameStatus.textContent = 'Saving...';
+  try{
+    const response = await fetch('/update_account', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name: document.getElementById('admin-name-input').value})});
+    const result = await response.json();
+    if(!result.success) throw new Error(result.message || 'Could not update name.');
+    document.querySelector('.admin-account-trigger span').textContent = result.name;
+    document.querySelector('.admin-settings-card h3').textContent = result.name;
+    adminNameStatus.textContent = 'Name updated.';
+  }catch(error){
+    adminNameStatus.textContent = error.message || 'Could not update name.';
+  }
+});
+
+adminPictureInput?.addEventListener('change', async () => {
+  const file = adminPictureInput.files[0];
+  if(!file) return;
+  adminPictureStatus.textContent = 'Uploading...';
+  const formData = new FormData();
+  formData.append('profile_picture', file);
+  try{
+    const response = await fetch('/upload_profile_picture', {method:'POST', body:formData});
+    const result = await response.json();
+    if(!result.success) throw new Error(result.message || 'Upload failed.');
+    const imageUrl = `${result.profile_image}?t=${Date.now()}`;
+    document.querySelectorAll('.admin-account-trigger img, #admin-settings-picture').forEach(image => { image.src = imageUrl; });
+    adminPictureStatus.textContent = 'Picture updated.';
+  }catch(error){
+    adminPictureStatus.textContent = error.message || 'Upload failed.';
+  }
+});
+
+function setAdminSettings(open){
+  if(!adminSettingsPanel) return;
+  adminSettingsPanel.hidden = !open;
+  adminSettingsTriggers.forEach(trigger => trigger.setAttribute('aria-expanded', String(open)));
+}
+
+adminAccountTrigger?.addEventListener('click', event => {
+  event.stopPropagation();
+  const open = adminProfileMenu.hidden;
+  adminProfileMenu.hidden = !open;
+  adminAccountTrigger.setAttribute('aria-expanded', String(open));
+});
+
+adminSettingsTriggers.forEach(trigger => trigger.addEventListener('click', event => {
+  event.preventDefault();
+  event.stopPropagation();
+  if(adminProfileMenu) adminProfileMenu.hidden = true;
+  adminAccountTrigger?.setAttribute('aria-expanded', 'false');
+  setAdminSettings(true);
+}));
+adminSettingsTriggers.forEach(trigger => trigger.addEventListener('keydown', event => {
+  if(event.key === 'Enter' || event.key === ' '){
+    event.preventDefault();
+    setAdminSettings(true);
+  }
+}));
+closeAdminSettings?.addEventListener('click', () => setAdminSettings(false));
+adminSettingsPanel?.addEventListener('click', event => {
+  if(event.target === adminSettingsPanel) setAdminSettings(false);
+});
+document.addEventListener('click', event => {
+  if(adminProfileMenu && !adminProfileMenu.hidden && !adminProfileMenu.contains(event.target) && event.target !== adminAccountTrigger){
+    adminProfileMenu.hidden = true;
+    adminAccountTrigger?.setAttribute('aria-expanded', 'false');
+  }
+  if(adminSettingsPanel && !adminSettingsPanel.hidden && !adminSettingsPanel.contains(event.target) && !event.target.closest('[data-admin-settings]')){
+    setAdminSettings(false);
+  }
+});
+
+document.getElementById('add-subadmin-form')?.addEventListener('submit', async event => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const status = document.getElementById('add-subadmin-status');
+  const values = Object.fromEntries(new FormData(form).entries());
+  status.textContent = 'Creating view-only subadmin...';
+  try {
+    const result = await fetchJsonOrThrow('/admin/create_coordinator', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(values)
+    });
+    status.textContent = result.message || 'View-only subadmin created.';
+    form.reset();
+  } catch (error) {
+    status.textContent = error.message || 'Unable to create subadmin.';
+  }
+});
+
+let adminStudents = [];
+const escapeAdminHtml = value => String(value || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+function renderAdminStudents(){
+  const wrap = document.getElementById('studentsWrap');
+  if(!wrap) return;
+  const query = (document.getElementById('globalSearch')?.value || '').trim().toLowerCase();
+  const filtered = adminStudents.filter(student => {
+    const name = `${student.first_name || ''} ${student.middle_initial || ''} ${student.last_name || ''}`;
+    return `${name} ${student.student_number || ''}`.toLowerCase().includes(query);
+  });
+  if(!filtered.length){ wrap.innerHTML = '<div class="records-empty">No students found.</div>'; return; }
+  wrap.innerHTML = `<table class="table-fixed admin-students-table"><thead><tr><th>Student number</th><th>Name</th></tr></thead><tbody>${filtered.map(student => {
+    const name = `${student.first_name || ''} ${student.middle_initial || ''} ${student.last_name || ''}`.replace(/\s+/g, ' ').trim();
+    return `<tr><td>${escapeAdminHtml(student.student_number)}</td><td><button class="student-name-link" type="button" data-student-id="${student.id}">${escapeAdminHtml(name || 'Unnamed student')}</button></td></tr>`;
+  }).join('')}</tbody></table>`;
+  wrap.querySelectorAll('.student-name-link').forEach(button => button.addEventListener('click', () => openStudentEditor(button.dataset.studentId)));
+}
+
+function renderEditorGradeRows(subjects){
+  const body = document.getElementById('student-editor-grade-body');
+  if(!body) return;
+  const rows = String(subjects || '').split(/\r?\n/).map(line => line.trim()).filter(Boolean).map(line => {
+    const match = line.match(/^(.+?)\s+-\s+(\d+(?:\.\d+)?)$/);
+    return {subject: match ? match[1] : line, grade: match ? match[2] : ''};
+  });
+  body.innerHTML = (rows.length ? rows : [{subject:'', grade:''}]).map(row => `<tr><td><input data-editor-subject type="text" value="${escapeAdminHtml(row.subject)}" disabled></td><td><input data-editor-grade type="text" value="${escapeAdminHtml(row.grade)}" disabled></td><td><button type="button" class="editor-remove-row" data-remove-editor-row disabled>Remove</button></td></tr>`).join('');
+}
+
+async function openStudentEditor(studentId){
+  const modal = document.getElementById('student-editor-modal');
+  const form = document.getElementById('student-editor-form');
+  if(!modal || !form) return;
+  try{
+    const result = await fetchJsonOrThrow('/admin/student_profiles');
+    const student = (result.profiles || []).find(item => String(item.id) === String(studentId));
+    if(!student) throw new Error('Student record not found.');
+    Object.entries(student).forEach(([key, value]) => { if(form.elements[key]) form.elements[key].value = value || ''; });
+    form.elements.student_name.value = [student.first_name, student.middle_initial ? `${student.middle_initial}.` : '', student.last_name].filter(Boolean).join(' ');
+    renderEditorGradeRows(student.subjects);
+    form.querySelectorAll('input, textarea').forEach(field => { field.disabled = field.name !== 'id'; });
+    const saveButton = form.querySelector('button[type="submit"]');
+    if(saveButton) saveButton.disabled = true;
+    const editButton = document.getElementById('edit-student-record');
+    if(editButton) editButton.textContent = canManageStudents ? 'Edit' : 'View only';
+    if(editButton) editButton.disabled = !canManageStudents;
+    document.querySelectorAll('[data-remove-editor-row]').forEach(button => { button.disabled = true; });
+    document.getElementById('student-editor-status').textContent = canManageStudents ? '' : 'View-only access';
+    modal.hidden = false;
+  }catch(error){ alert(error.message || 'Unable to load student record.'); }
+}
+
+document.getElementById('globalSearch')?.addEventListener('input', renderAdminStudents);
+document.getElementById('close-student-editor')?.addEventListener('click', () => { document.getElementById('student-editor-modal').hidden = true; });
+document.getElementById('student-editor-form')?.addEventListener('submit', async event => {
+  event.preventDefault();
+  if(!canManageStudents) return;
+  const form = event.currentTarget;
+  const status = document.getElementById('student-editor-status');
+  status.textContent = 'Saving...';
+  try{
+    const data = Object.fromEntries(new FormData(form).entries());
+    const nameParts = String(data.student_name || '').trim().split(/\s+/).filter(Boolean);
+    data.first_name = nameParts.shift() || '';
+    data.last_name = nameParts.pop() || '';
+    data.middle_initial = nameParts.length === 1 && /^[A-Za-z]{1,2}\.$/.test(nameParts[0]) ? nameParts[0] : '';
+    if(data.middle_initial) nameParts.pop();
+    if(nameParts.length) data.first_name = [data.first_name, ...nameParts].join(' ');
+    const gradeRows = [...document.querySelectorAll('#student-editor-grade-body tr')].map(row => ({
+      subject: row.querySelector('[data-editor-subject]')?.value.trim() || '',
+      grade: row.querySelector('[data-editor-grade]')?.value.trim() || ''
+    })).filter(row => row.subject || row.grade);
+    data.subjects = gradeRows.filter(row => row.subject && row.grade).map(row => `${row.subject} - ${row.grade}`).join('\n');
+    data.grades = gradeRows.map(row => row.grade).filter(Boolean).join(', ');
+    const result = await fetchJsonOrThrow('/admin/update_student_profile', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)});
+    status.textContent = result.message || 'Saved.';
+    document.getElementById('student-editor-modal').hidden = true;
+    const refreshed = await fetchStudents();
+    adminStudents = refreshed;
+    renderAdminStudents();
+  }catch(error){ status.textContent = error.message || 'Unable to save changes.'; }
+});
+document.getElementById('edit-student-record')?.addEventListener('click', () => {
+  const form = document.getElementById('student-editor-form');
+  form.querySelectorAll('input:not([name="id"]), textarea, [data-remove-editor-row]').forEach(field => { field.disabled = false; });
+  form.querySelector('button[type="submit"]').disabled = false;
+  document.getElementById('edit-student-record').disabled = true;
+});
+document.getElementById('delete-student-profile')?.addEventListener('click', async () => {
+  const id = document.querySelector('#student-editor-form [name="id"]')?.value;
+  if(!id || !confirm('Remove this student profile and all saved grades?')) return;
+  try{
+    const response = await fetch('/admin/delete_student', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id})});
+    const result = await response.json();
+    if(!result.success) throw new Error(result.message || 'Could not remove profile.');
+    document.getElementById('student-editor-modal').hidden = true;
+    adminStudents = await fetchStudents();
+    renderAdminStudents();
+  }catch(error){ document.getElementById('student-editor-status').textContent = error.message || 'Could not remove profile.'; }
+});
+document.getElementById('student-editor-grade-body')?.addEventListener('click', event => {
+  const removeButton = event.target.closest('[data-remove-editor-row]');
+  if(removeButton && !removeButton.disabled) removeButton.closest('tr')?.remove();
+});
+
+function showAdminView(view){
+  document.querySelectorAll('.admin-dashboard-content').forEach(section => {
+    section.style.display = view === 'dashboard' ? '' : 'none';
+  });
+  document.querySelectorAll('.admin-section-card, .admin-students-section').forEach(section => {
+    section.style.display = section.id === view ? 'block' : 'none';
+  });
+  history.replaceState(null, '', view === 'dashboard' ? '#dashboard' : `#${view}`);
+  if(view !== 'dashboard') document.getElementById(view)?.scrollIntoView({block:'start'});
+}
+
+document.querySelectorAll('[data-admin-view]').forEach(link => {
+  link.addEventListener('click', event => {
+    event.preventDefault();
+    showAdminView(link.dataset.adminView);
+  });
+});
+
+const initialAdminView = window.location.hash.slice(1);
+if(['dashboard', 'add-users', 'view-students'].includes(initialAdminView)) showAdminView(initialAdminView);
+
+async function loadDashboard(){
+  try {
+    const stats = await fetchStats();
+    const allRecList = stats.all_recommended_courses || [];
+
+    const rLabels = allRecList.map(item => item.course);
+    const rValues = allRecList.map(item => item.count);
+
+    // clear previous canvases (Chart.js instances handled in functions)
+    renderBar(document.getElementById('chartRecs'), rLabels, rValues);
+
+    // stats tiles
+    document.getElementById('statTotalStudents').innerText = stats.total_profiles ?? '0';
+    document.getElementById('statTotalReportCards').innerText = stats.total_report_cards_uploaded ?? '0';
+    document.getElementById('statTotalRecommendations').innerText = stats.total_recommendations_generated ?? '0';
+    document.getElementById('statAvailableCourses').innerText = stats.total_available_courses ?? '0';
+    document.getElementById('statPendingEvaluations').innerText = stats.pending_evaluations ?? '0';
+
+    // GWA distribution
+    const gwaBuckets = stats.gwa_buckets || {};
+    const gLabels = Object.keys(gwaBuckets);
+    const gValues = gLabels.map(k => gwaBuckets[k] || 0);
+    renderGwa(document.getElementById('chartGwa'), gLabels, gValues);
+
+    // top recommended
+    renderTopRecommended(document.getElementById('topRecommended'), stats.top_recommended || [], stats.all_recommended_courses || []);
+    renderAllRecommended(document.getElementById('allRecommended'), stats.all_recommended_courses || []);
+
+    // monthly uploads
+    const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+    const uploads = months.map(m => stats.monthly_uploads?.[m] || 0);
+    renderLineChart(document.getElementById('chartMonthly'), months, uploads);
+
+    // students per strand
+    const strandCounts = stats.strand_counts || {};
+    const strandLabels = Object.keys(strandCounts);
+    const strandValues = strandLabels.map(k => strandCounts[k]);
+    renderStrandPie(document.getElementById('chartStrand'), strandLabels, strandValues);
+
+    adminStudents = await fetchStudents();
+    renderAdminStudents();
+
+    document.getElementById('dashboardError').style.display = 'none';
+  } catch (err) {
+    const errorNode = document.getElementById('dashboardError');
+    if (errorNode) {
+      errorNode.innerText = `Dashboard error: ${err.message}`;
+      errorNode.style.display = 'block';
+    }
+
+    const studentsWrap = document.getElementById('studentsWrap');
+    const topRecommended = document.getElementById('topRecommended');
+    if (studentsWrap) {
+      studentsWrap.innerHTML = '<div style="color:#b91c1c;text-align:center;background:aliceblue;">Unable to load student dashboard data.</div>';
+    }
+    if (topRecommended) {
+      topRecommended.innerHTML = '<div style="color:#b91c1c;text-align:center;background:aliceblue;">Unable to load recommendations.</div>';
+    }
+  }
+}
+
+loadDashboard();
+</script>
+</body>
+</html>

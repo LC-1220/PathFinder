@@ -1,0 +1,376 @@
+*{
+    margin:0;
+    padding:0;
+    box-sizing:border-box;
+    font-family:'Montserrat', sans-serif;
+}
+
+body{
+    background: linear-gradient(135deg, #190069 0%, #0e37bd 35%, #5d3fe8 68%, #1d8fd1 100%);
+    background-size: 320% 320%;
+    animation: pf-flow-bg 18s ease-in-out infinite;
+    display:flex;
+    justify-content:center;
+    align-items:center;
+    height:auto;
+    min-height:100vh;
+    opacity: 1;
+    transition: opacity 0.5s ease-in-out;
+    position: relative;
+    overflow-x:hidden;
+    overflow-y:auto;
+}
+
+.bg-bubbles{
+    position:fixed;
+    inset:0;
+    z-index:0;
+    pointer-events:none;
+    overflow:hidden;
+}
+
+.bg-bubbles .bubble{
+    position:absolute;
+    border-radius:50%;
+    filter:blur(50px);
+    will-change:transform;
+    mix-blend-mode:screen;
+}
+
+.bubble-1{
+    width:420px;
+    height:420px;
+    top:-8%;
+    left:-10%;
+    background:radial-gradient(circle at 35% 30%, rgba(255,255,255,.55) 0%, rgba(137,108,255,.4) 40%, rgba(25,0,105,0) 75%);
+    animation:bubble-drift-a 16s cubic-bezier(.45,0,.55,1) infinite;
+}
+
+.bubble-2{
+    width:560px;
+    height:560px;
+    right:-14%;
+    bottom:-10%;
+    background:radial-gradient(circle at 60% 38%, rgba(255,255,255,.4) 0%, rgba(45,214,196,.42) 42%, rgba(45,214,196,0) 75%);
+    animation:bubble-drift-b 18s cubic-bezier(.45,0,.55,1) infinite;
+}
+
+.bubble-3{
+    width:380px;
+    height:380px;
+    top:18%;
+    right:8%;
+    background:radial-gradient(circle at 45% 45%, rgba(255,255,255,.35) 0%, rgba(255,92,183,.4) 45%, rgba(255,92,183,0) 75%);
+    animation:bubble-drift-c 13s cubic-bezier(.45,0,.55,1) infinite;
+}
+
+.bubble-4{
+    width:340px;
+    height:340px;
+    bottom:14%;
+    left:6%;
+    background:radial-gradient(circle at 50% 50%, rgba(255,255,255,.32) 0%, rgba(255,181,71,.4) 45%, rgba(255,181,71,0) 75%);
+    animation:bubble-drift-d 15s cubic-bezier(.45,0,.55,1) infinite;
+}
+
+.container{
+    background: linear-gradient(145deg, #ffffff 0%, #f6f8ff 100%);
+    border-radius:38px;
+    box-shadow:0 20px 40px rgba(17,24,39,.18);
+    position:relative;
+    overflow:visible;
+    z-index:1;
+    width:420px;
+    max-width:90%;
+    min-height:560px;
+    height:auto;
+    transition:min-height .35s ease, transform .35s ease;
+}
+
+.container p{
+    font-size:14px;
+    line-height:20px;
+    margin:20px 0;
+}
+
+.container span{
+    font-size:12px;
+}
+
+.container a{
+    color:#333;
+    font-size:13px;
+    text-decoration:none;
+    margin:15px 0 10px;
+}
+
+.container button{
+    background: linear-gradient(120deg, #1f4ad4, #5c3ee8, #7a5cff, #1f4ad4);
+    background-size: 220% 220%;
+    animation: pf-flow-bg 7s ease-in-out infinite;
+    color:#fff;
+    font-size:12px;
+    padding:10px 45px;
+    border:1px solid transparent;
+    border-radius:8px;
+    font-weight:600;
+    letter-spacing:.5px;
+    text-transform:uppercase;
+    margin-top:10px;
+    cursor:pointer;
+}
+
+
+.container form{
+    background:#fff;
+    display:flex;
+    justify-content:center;
+    align-items:center;
+    flex-direction:column;
+    padding:0 40px;
+    height:auto;
+    min-height:560px;
+    border-radius:38px;
+}
+
+.container input{
+    background:#eee;
+    border:none;
+    margin:8px 0;
+    padding:10px 15px;
+    font-size:13px;
+    border-radius:8px;
+    width:100%;
+    outline:none;
+}
+
+.form-container{
+    position:relative;
+    top:0;
+    height:auto;
+    min-height:560px;
+    width:100%;
+    transition:all .6s ease-in-out;
+}
+
+.sign-in{
+    left:0;
+    width:100%;
+    z-index:2;
+}
+
+.social-icons{
+    margin:20px 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+
+.social-icons a{
+    border:1px solid #ccc;
+    border-radius:20%;
+    display:inline-flex;
+    justify-content:center;
+    align-items:center;
+    margin:0;
+    width:40px;
+    height:40px;
+}
+
+.login-intro{
+    max-width:310px;
+    color:#64677a;
+    text-align:center;
+}
+
+.sign-in h1{
+    width:100%;
+    text-align:center;
+}
+
+.brand-gradient-text{
+    display:inline-block;
+    font-size:inherit;
+    background:linear-gradient(120deg,#1f4ad4,#5c3ee8,#7a5cff,#1d8fd1,#1f4ad4);
+    background-size:260% 260%;
+    -webkit-background-clip:text;
+    background-clip:text;
+    -webkit-text-fill-color:transparent;
+    color:transparent;
+    will-change:background-position;
+    animation:pf-flow-bg 10s linear infinite;
+}
+.container h1 .brand-gradient-text{font-size:inherit;}
+
+.entry-actions{
+    display:grid;
+    width:100%;
+    gap:12px;
+    margin:26px 0 20px;
+}
+
+.container .entry-button{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    gap:12px;
+    width:100%;
+    min-height:48px;
+    margin:0;
+    border:1px solid #d9dce8;
+    border-radius:8px;
+    background:#fff;
+    color:#202334;
+    font-size:14px;
+    font-weight:600;
+}
+
+.container .entry-button span{font-size:14px;}
+.container .google-entry{background:#fff;color:#5576c8;border-color:#cbd7ee;box-shadow:0 2px 5px rgba(48,79,150,.14);}
+.container .google-entry i{
+    background:conic-gradient(from 210deg,#4285f4 0 25%,#34a853 25% 45%,#fbbc05 45% 62%,#ea4335 62% 82%,#4285f4 82% 100%);
+    -webkit-background-clip:text;
+    background-clip:text;
+    -webkit-text-fill-color:transparent;
+    color:transparent;
+}
+.container .entry-button:hover{transform:translateY(-1px);box-shadow:0 8px 20px rgba(20,30,70,.12);}
+
+.admin-login{
+    width:100%;
+    padding-top:14px;
+    border-top:1px solid #eceef5;
+}
+
+.admin-login summary{
+    cursor:pointer;
+    color:#6d7080;
+    font-size:12px;
+    text-align:center;
+}
+
+.admin-login[open] summary{margin-bottom:10px;}
+.admin-login button{width:100%;}
+
+.admin-fields{
+    display:grid;
+    grid-template-rows:0fr;
+    width:100%;
+    transition:grid-template-rows .38s cubic-bezier(.2,.8,.2,1), opacity .25s ease;
+    opacity:0;
+}
+
+.admin-login[open] .admin-fields{
+    grid-template-rows:1fr;
+    opacity:1;
+}
+
+.admin-fields-content{
+    min-height:0;
+    overflow:hidden;
+}
+
+.password-field{position:relative;width:100%;}
+.password-field input{padding-right:44px;}
+.password-field button#toggle-password{
+    position:absolute;
+    top:50%;
+    right:8px;
+    width:32px;
+    height:32px;
+    margin:0;
+    padding:0;
+    border:0;
+    border-radius:50%;
+    background:transparent;
+    color:#697491;
+    box-shadow:none;
+    transform:translateY(-50%);
+    animation:none;
+}
+.password-field button#toggle-password:hover{background:#e7ecfa;color:#3f58c4;}
+
+@keyframes pf-flow-bg{
+    0%{ background-position: 0% 50%; }
+    50%{ background-position: 100% 50%; }
+    100%{ background-position: 0% 50%; }
+}
+
+@media (max-width: 900px){
+    body{min-height:100svh;height:auto;padding:24px 16px;align-items:flex-start;overflow-y:auto;animation:login-mobile-flow 14s ease-in-out infinite;}
+    .bubble-1{width:260px;height:260px;}
+    .bubble-2{width:360px;height:360px;}
+    .bubble-3{width:240px;height:240px;}
+    .bubble-4{width:220px;height:220px;}
+    .container{position:relative;z-index:1;width:min(420px,100%);min-height:0;margin:86px auto 32px;border-radius:38px;overflow:hidden;background:transparent;box-shadow:0 20px 40px rgba(17,24,39,.18);}
+    .container::before{display:none;}
+    .form-container{position:relative;top:auto;left:auto;width:100%;height:auto;min-height:0;z-index:2;}
+    .form-container form{min-height:0;border-radius:38px;padding:34px 24px 64px;box-shadow:0 14px 32px rgba(46,51,145,.16);display:flex;justify-content:flex-start;}
+    .sign-in{display:flex !important;left:0;width:100%;z-index:3;}
+    .sign-in form{width:100%;height:auto;}
+    .container form h1{order:1;font-size:28px;line-height:1.16;color:#25234c;margin:0 0 8px;}
+    .container form::before{display:none;}
+    .container form .login-intro{order:2;margin:0 0 20px;color:#77758c;}
+    .container form .entry-actions{order:3;gap:12px;margin:0 0 18px;}
+    .container form .admin-login{order:4;}
+    .container form span{color:#77758c;}
+    .container form input{height:44px;background:#fafaff;border:1px solid #e3e3ef;}
+    .container form a{margin:0;}
+    .container form button{width:100%;padding:12px 18px;border-radius:9px;}
+    .admin-login[open] summary{margin-bottom:12px;}
+    .admin-login input{margin:10px 0;}
+    .admin-login button{margin-top:16px;}
+    .container:has(.admin-login[open]){transform:translateY(-72px);}
+    .container a{font-size:12px;}
+}
+
+@media (max-width: 900px) and (orientation: landscape){
+    body{overflow-y:auto;align-items:flex-start;}
+    .container{overflow:visible;min-height:100svh;}
+    .container::before{height:118px;padding-top:24px;font-size:22px;}
+    .form-container{top:82px;min-height:0;}
+    .form-container form{min-height:0;padding:14px 24px 18px;border-radius:18px 18px 0 0;}
+    .container form h1{font-size:22px;}
+    .container form input{height:34px;margin:4px 0;}
+    .container form a{margin:8px 0 4px;}
+    .container form button{margin-top:6px;padding:9px 18px;}
+    .container form .social-icons{margin-top:8px;padding-top:7px;}
+    .container form .social-icons a{margin:0;width:34px;height:34px;}
+}
+
+@keyframes login-mobile-flow{
+    0%{background-position:0% 50%;}
+    50%{background-position:100% 50%;}
+    100%{background-position:0% 50%;}
+}
+
+@keyframes bubble-drift-a{
+    0%{transform:translate3d(0,0,0) scale(1);}
+    25%{transform:translate3d(60px,40px,0) scale(1.08);}
+    50%{transform:translate3d(30px,90px,0) scale(.94);}
+    75%{transform:translate3d(-40px,30px,0) scale(1.05);}
+    100%{transform:translate3d(0,0,0) scale(1);}
+}
+
+@keyframes bubble-drift-b{
+    0%{transform:translate3d(0,0,0) scale(1);}
+    25%{transform:translate3d(-50px,-60px,0) scale(1.1);}
+    50%{transform:translate3d(-90px,20px,0) scale(.9);}
+    75%{transform:translate3d(-20px,60px,0) scale(1.04);}
+    100%{transform:translate3d(0,0,0) scale(1);}
+}
+
+@keyframes bubble-drift-c{
+    0%{transform:translate3d(0,0,0) scale(1);}
+    33%{transform:translate3d(-35px,45px,0) scale(1.12);}
+    66%{transform:translate3d(25px,20px,0) scale(.92);}
+    100%{transform:translate3d(0,0,0) scale(1);}
+}
+
+@keyframes bubble-drift-d{
+    0%{transform:translate3d(0,0,0) scale(1);}
+    33%{transform:translate3d(40px,-35px,0) scale(.9);}
+    66%{transform:translate3d(-20px,-15px,0) scale(1.1);}
+    100%{transform:translate3d(0,0,0) scale(1);}
+}

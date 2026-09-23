@@ -1,0 +1,11 @@
+python-fasthtml
+authlib
+httpx
+bcrypt
+psycopg[binary]
+python-dotenv
+jinja2
+scikit-learn
+opencv-python-headless
+docling
+pytest

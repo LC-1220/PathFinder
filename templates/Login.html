@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PathFinder Login</title>
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='images/PathFinder2.png') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@100;200;300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+
+    <link rel="stylesheet" href="{{ url_for('static', filename='Login.css') }}">
+</head>
+<body>
+
+    <div class="bg-bubbles" aria-hidden="true">
+        <span class="bubble bubble-1"></span>
+        <span class="bubble bubble-2"></span>
+        <span class="bubble bubble-3"></span>
+        <span class="bubble bubble-4"></span>
+    </div>
+
+    <div class="container" id="container">
+
+        <div class="form-container sign-in">
+            <form id="loginForm">
+                <h1>Welcome to <span class="brand-gradient-text">PathFinder</span></h1>
+                <p class="login-intro">Upload your report card and discover courses that match your grades.</p>
+
+                <div class="entry-actions">
+                    <a href="/google-login" class="entry-button google-entry" rel="noopener noreferrer"><i class="fa-brands fa-google"></i><span>Continue with Google</span></a>
+                    <a href="/guest-login" class="entry-button guest-entry"><span>Continue as guest</span></a>
+                </div>
+
+                <details class="admin-login">
+                    <summary>Administrator sign in</summary>
+                    <div class="admin-fields">
+                        <div class="admin-fields-content">
+                            <input id="login-email" type="text" placeholder="Admin username" autocomplete="username">
+                            <div class="password-field">
+                                <input id="login-password" type="password" placeholder="Password" autocomplete="current-password">
+                                <button id="toggle-password" type="button" aria-label="Show password" aria-pressed="false"><i class="fa-solid fa-eye"></i></button>
+                            </div>
+                            <button type="submit">Login</button>
+                        </div>
+                    </div>
+                </details>
+            </form>
+        </div>
+
+    </div>
+
+    <script src="{{ url_for('static', filename='Login.js') }}"></script>
+
+</body>
+</html>
