@@ -1902,10 +1902,12 @@ function clearInputs() {
             return files.filter(file => file && file.name).slice(0, 10);
         }
 
-        function isSupportedReportCardImage(file){
+        function isSupportedReportCardFile(file){
             const name = String(file?.name || '').toLowerCase();
-            return /\.(jpg|jpeg|png|webp)$/.test(name)
-                && (!file.type || ['image/jpeg', 'image/png', 'image/webp'].includes(file.type.toLowerCase()));
+            const extensionSupported = /\.(jpg|jpeg|png|webp|pdf|docx)$/.test(name);
+            const type = String(file?.type || '').toLowerCase();
+            const typeSupported = !type || type.startsWith('image/') || type === 'application/pdf' || type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+            return extensionSupported && typeSupported;
         }
 
         function setUploadMessage(message, type = 'status'){
@@ -2275,9 +2277,9 @@ function clearInputs() {
         input.addEventListener('change', (e)=>{
             setUploadMessage('');
             const selectedInputFiles = parseFilesFromInput(e.target.files);
-            const unsupportedFiles = selectedInputFiles.filter(file => !isSupportedReportCardImage(file));
+            const unsupportedFiles = selectedInputFiles.filter(file => !isSupportedReportCardFile(file));
             if(unsupportedFiles.length){
-                setUploadMessage('Use JPG, JPEG, PNG, or WEBP report-card images. HEIC, PDF, and Word files are not supported.', 'error');
+                setUploadMessage('Use JPG, JPEG, PNG, WEBP, PDF, or DOCX report-card files.', 'error');
                 input.value = '';
                 return;
             }
@@ -2571,12 +2573,20 @@ function clearInputs() {
 
                 for (let i = 0; i < files.length; i++) {
                     const file = files[i];
-                    if(!isSupportedReportCardImage(file)){
-                        throw new Error('Use a JPG, JPEG, PNG, or WEBP report-card image. HEIC, PDF, and Word files are not supported.');
+                    if(!isSupportedReportCardFile(file)){
+                        throw new Error('Use a JPG, JPEG, PNG, WEBP, PDF, or DOCX report-card file.');
                     }
                     setProgress(Math.round((i / total) * 100), `Processing file ${i + 1}/${total}: ${file.name}`);
 
-                    const rawText = await imageBlobToText(file);
+                    const fileName = String(file.name || '').toLowerCase();
+                    const rawText = fileName.endsWith('.pdf')
+                        ? await extractTextFromPDF(file)
+                        : fileName.endsWith('.docx')
+                            ? await extractTextFromDocx(file)
+                            : await imageBlobToText(file);
+                    if(!rawText || !rawText.trim()){
+                        throw new Error(`No readable text was found in ${file.name}.`);
+                    }
                     if(i === 0 && !savedIdentity.studentNumber && !savedIdentity.firstName && !savedIdentity.lastName){
                         combinedIdentity = {...(window.latestStudentMetadata || {})};
                         updateOcrIdentityPreview(combinedIdentity);
