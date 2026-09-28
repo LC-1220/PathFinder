@@ -2161,6 +2161,7 @@ async def ocr_report_card(req):
             "image_width": 0,
             "image_height": 0,
         }
+        parse_started = time.perf_counter()
         parsed = parse_report_card_structure(raw_ocr)
         if ocr_payload.get("subjects"):
             parsed["subjects"] = ocr_payload["subjects"]
@@ -2174,6 +2175,7 @@ async def ocr_report_card(req):
             for item in parsed.get("subjects", [])
             if item.get("subject_name") and item.get("grade") is not None
         )
+        app_parse_seconds = round(time.perf_counter() - parse_started, 3)
         return JSONResponse({
             "success": True,
             "message": "Report card extraction completed using Docling.",
@@ -2187,6 +2189,10 @@ async def ocr_report_card(req):
                 "parsed_subjects": len(parsed.get("subjects", [])),
                 "raw_text_characters": len(raw_ocr.get("raw_text", "")),
                 "table_preview": dumps(raw_ocr.get("table", [])[1:3], default=str)[:500],
+                "timings_seconds": {
+                    **ocr_payload.get("timings_seconds", {}),
+                    "app_parse_seconds": app_parse_seconds,
+                },
             },
             "review_required": parsed.get("needs_review", False),
         })

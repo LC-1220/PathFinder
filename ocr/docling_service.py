@@ -1,6 +1,7 @@
 import os
 import re
 import tempfile
+import time
 
 
 def _markdown_table_rows(markdown):
@@ -251,7 +252,7 @@ def _get_docling_converter():
     pipeline_options = PdfPipelineOptions(
         do_ocr=True,
         do_table_structure=True,
-        images_scale=1.5,
+        images_scale=float(os.getenv("DOCLING_IMAGES_SCALE", "0.5")),
     )
     # FAST mode trades some table-structure accuracy for much lower CPU inference time,
     # needed to stay under the hosting platform's request timeout.
@@ -271,12 +272,16 @@ def _get_docling_converter():
 
 def scan_report_card_docling(file_bytes, filename="report_card.pdf"):
     """Convert one report card with Docling and return the app's OCR payload shape."""
+    total_started = time.perf_counter()
+    timings = {}
+    converter_started = time.perf_counter()
     try:
         converter = _get_docling_converter()
     except ImportError as exc:
         raise RuntimeError(
             "Docling is not installed. Run 'python -m pip install -r requirements.txt' first."
         ) from exc
+    timings["converter_setup_seconds"] = round(time.perf_counter() - converter_started, 3)
 
     suffix = os.path.splitext(filename or "report_card.pdf")[1].lower()
     if suffix not in {".pdf", ".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".webp"}:
@@ -287,7 +292,10 @@ def scan_report_card_docling(file_bytes, filename="report_card.pdf"):
         temp_path = temp_file.name
 
     try:
+        conversion_started = time.perf_counter()
         result = converter.convert(temp_path)
+        timings["conversion_seconds"] = round(time.perf_counter() - conversion_started, 3)
+        export_started = time.perf_counter()
         markdown = result.document.export_to_markdown()
         table_rows = _markdown_table_rows(markdown)
         native_table_rows = _document_table_rows(result.document)
@@ -295,6 +303,7 @@ def scan_report_card_docling(file_bytes, filename="report_card.pdf"):
             not _table_rows_have_text(table_rows) or len(native_table_rows) > len(table_rows)
         ):
             table_rows = native_table_rows
+        timings["export_seconds"] = round(time.perf_counter() - export_started, 3)
     except Exception as exc:
         raise RuntimeError(f"Docling conversion failed: {exc}") from exc
     finally:
@@ -304,6 +313,7 @@ def scan_report_card_docling(file_bytes, filename="report_card.pdf"):
             pass
 
 
+    postprocess_started = time.perf_counter()
     normalized_table = _normalize_report_card_table(table_rows)
     original_subjects = _subjects_from_table(table_rows)
     normalized_subjects = _subjects_from_table(normalized_table)
@@ -314,6 +324,8 @@ def scan_report_card_docling(file_bytes, filename="report_card.pdf"):
         output_table = normalized_table
         output_subjects = normalized_subjects
     lines = [line.strip() for line in str(markdown or "").splitlines() if line.strip()]
+    timings["postprocess_seconds"] = round(time.perf_counter() - postprocess_started, 3)
+    timings["ocr_total_seconds"] = round(time.perf_counter() - total_started, 3)
     return {
         "result": [],
         "raw_text": "\n".join(lines),
@@ -321,4 +333,5 @@ def scan_report_card_docling(file_bytes, filename="report_card.pdf"):
         "table": output_table,
         "subjects": output_subjects,
         "provider": "docling",
+        "timings_seconds": timings,
     }

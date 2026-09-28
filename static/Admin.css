@@ -372,3 +372,10 @@ body{background:linear-gradient(120deg,#eef4ff 0%, #e7edff 45%, #f6f9ff 100%);ba
   .admin-settings-content{padding:22px 18px;}
 }
 
+.admin-dashboard-page.wrap{width:100%;box-sizing:border-box;margin:0 auto !important;padding:106px 44px 34px;}
+.admin-page.admin-nav-open .admin-dashboard-page.wrap{margin:0 auto !important;padding-left:44px;}
+@media (max-width:700px){
+  .admin-dashboard-page.wrap{padding:84px 16px 20px;}
+  .admin-page.admin-nav-open .admin-dashboard-page.wrap{margin:0 auto !important;padding-left:16px;}
+}
+
