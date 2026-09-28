@@ -37,8 +37,6 @@ def test_group_ocr_boxes_into_table_rows_reconstructs_rows_and_columns():
 
 
 def test_report_card_with_remarks_column_no_longer_drops_subjects():
-    # Reproduces a real report card row shape ("Subject | Grade | Remarks") that the
-    # line-based fallback silently drops because each line no longer ends in a bare number.
     boxes = [
         _box("Subject", 0, 0),
         _box("Grade", 200, 0),
@@ -67,7 +65,6 @@ def test_report_card_with_remarks_column_no_longer_drops_subjects():
 
 
 def test_report_card_with_code_instructor_and_remarks_columns_extracts_all_subjects():
-    # Reproduces a real prelim grade sheet: Subject Code | Subject Name | Instructor | Grade | Remarks.
     rows_data = [
         ("11101 ENG1", "Oral Communication in Context", "GAUDITE, VICTORLYN D.", "93.0"),
         ("11102 FIL1", "Komunikasyon at Pananaliksik sa Wika at Kulturang Pilipino", "CABANAG, CHEVIE MAY M.", "93.0"),
@@ -115,8 +112,6 @@ def test_report_card_with_code_instructor_and_remarks_columns_extracts_all_subje
 
 
 def test_report_card_with_each_row_merged_into_one_ocr_line_extracts_all_subjects():
-    # Reproduces PaddleOCR merging a whole visual table row (code, name, instructor,
-    # grade, remarks) into a single detected text line instead of separate cell boxes.
     rows_data = [
         ("11101 ENG1", "Oral Communication in Context", "GAUDITE, VICTORLYN D.", "93.0"),
         ("11102 FIL1", "Komunikasyon at Pananaliksik sa Wika at Kulturang Pilipino", "CABANAG, CHEVIE MAY M.", "93.0"),
@@ -147,8 +142,6 @@ def test_report_card_with_each_row_merged_into_one_ocr_line_extracts_all_subject
 
 
 def test_report_card_with_each_cell_on_its_own_line_extracts_all_subjects():
-    # Reproduces PaddleOCR detecting each table cell (code/name/instructor/grade/remarks)
-    # as its own separate text line rather than merging a row into one line.
     rows_data = [
         ("11103 MAT1", "General Mathematics", "QUIOCHO, ROWIE A.", "87.0"),
         ("11107 ET", "Empowerment Technologies", "PIMENTEL, NICOLE G.", "91.0"),

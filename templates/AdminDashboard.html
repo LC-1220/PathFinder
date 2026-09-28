@@ -574,32 +574,26 @@ async function loadDashboard(){
     const rLabels = allRecList.map(item => item.course);
     const rValues = allRecList.map(item => item.count);
 
-    // clear previous canvases (Chart.js instances handled in functions)
     renderBar(document.getElementById('chartRecs'), rLabels, rValues);
 
-    // stats tiles
     document.getElementById('statTotalStudents').innerText = stats.total_profiles ?? '0';
     document.getElementById('statTotalReportCards').innerText = stats.total_report_cards_uploaded ?? '0';
     document.getElementById('statTotalRecommendations').innerText = stats.total_recommendations_generated ?? '0';
     document.getElementById('statAvailableCourses').innerText = stats.total_available_courses ?? '0';
     document.getElementById('statPendingEvaluations').innerText = stats.pending_evaluations ?? '0';
 
-    // GWA distribution
     const gwaBuckets = stats.gwa_buckets || {};
     const gLabels = Object.keys(gwaBuckets);
     const gValues = gLabels.map(k => gwaBuckets[k] || 0);
     renderGwa(document.getElementById('chartGwa'), gLabels, gValues);
 
-    // top recommended
     renderTopRecommended(document.getElementById('topRecommended'), stats.top_recommended || [], stats.all_recommended_courses || []);
     renderAllRecommended(document.getElementById('allRecommended'), stats.all_recommended_courses || []);
 
-    // monthly uploads
     const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
     const uploads = months.map(m => stats.monthly_uploads?.[m] || 0);
     renderLineChart(document.getElementById('chartMonthly'), months, uploads);
 
-    // students per strand
     const strandCounts = stats.strand_counts || {};
     const strandLabels = Object.keys(strandCounts);
     const strandValues = strandLabels.map(k => strandCounts[k]);

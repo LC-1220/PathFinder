@@ -214,7 +214,6 @@ def _classify_row_cells(cells):
         if not _cell_looks_like_remarks(t) and not _cell_looks_like_instructor(t) and not _cell_looks_like_subject_code(t)
     ]
     if not name_parts:
-        # Don't drop the row entirely if every remaining cell looked like code/instructor/remarks.
         name_parts = [t for t in remaining if not _cell_looks_like_remarks(t)]
 
     subject_name = " ".join(name_parts).strip()
@@ -242,9 +241,7 @@ def _extract_row_from_single_line(line):
 
     text = re.sub(r"^#?\d{3,6}\s*[A-Za-z]{1,6}\d{0,3}\s*", "", text).strip()
     text = re.sub(r"^#?\d{1,6}\s+", "", text).strip()
-    # Drop a trailing "LASTNAME, First M." style instructor name.
     text = re.sub(r"\s*\b[A-Z]{2,}(?:\s+[A-Z]{2,})*\s*,\s*[A-Za-z.\s]+$", "", text).strip()
-    # Some document exports remove the comma and punctuation from instructor names.
     text = re.sub(r"\s+\b[A-Z]{2,}(?:\s+[A-Z]{2,})*\s+[A-Z]\.?$", "", text).strip()
     if not text:
         return None, None
@@ -296,8 +293,6 @@ def _parse_subject_rows_from_lines(lines):
             i += 1
             if i < n and _cell_looks_like_remarks(normalized[i]):
                 i += 1
-            # Absorb a leftover wrapped continuation line (e.g. a subject name that
-            # printed onto a second line with no instructor/grade of its own).
             if i < n and subjects:
                 cont = normalized[i]
                 cont_name, cont_grade = _extract_row_from_single_line(cont)
@@ -313,7 +308,6 @@ def _parse_subject_rows_from_lines(lines):
                     i += 1
             continue
 
-        # No grade found on this line alone; accumulate subsequent lines until one appears.
         name_parts = []
         code_stripped = re.sub(r"^\d{3,6}\s*[A-Za-z]{1,6}\d{0,3}\s*", "", line).strip()
         if not _cell_looks_like_subject_code(line):
@@ -367,7 +361,6 @@ def parse_report_card_rows(table_rows, subject_column=0, grade_column=1):
 
         subject_text, grade_text = _classify_row_cells(cells)
         if not subject_text or not grade_text:
-            # Fall back to the header-driven column hint for row shapes content rules can't classify.
             subject_cell = cells[subject_column] if subject_column < len(cells) else {"text": ""}
             grade_cell = cells[grade_column] if grade_column < len(cells) else {"text": ""}
             subject_text = subject_text or normalize_ocr_text(subject_cell.get("text", ""))
@@ -437,7 +430,6 @@ def parse_report_card_structure(raw_ocr):
                 i += 1
                 continue
 
-            # Some OCR output puts a label on its own line with the value on the next line.
             label_lower = line.lower()
             has_next = i + 1 < len(lines)
             if has_next and any(token in label_lower for token in ["student id", "student no", "student number", "id number"]):

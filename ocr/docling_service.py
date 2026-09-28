@@ -254,8 +254,6 @@ def _get_docling_converter():
         do_table_structure=True,
         images_scale=float(os.getenv("DOCLING_IMAGES_SCALE", "0.5")),
     )
-    # FAST mode trades some table-structure accuracy for much lower CPU inference time,
-    # needed to stay under the hosting platform's request timeout.
     pipeline_options.table_structure_options.mode = TableFormerMode.FAST
     pipeline_options.table_structure_options.do_cell_matching = True
     _DOCLING_CONVERTER = DocumentConverter(

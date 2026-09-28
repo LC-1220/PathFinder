@@ -731,8 +731,6 @@ def recommend_course(subjects_text, current_course="", strand=""):
     if recommendations and strand:
         recommendations[0]["strand_grade_based"] = True
         recommendations[0]["reason"] += f" This top match combines your {strand.upper()} strand with your Math, Science, and English grade profile."
-    # Confidence remains an internal ranking signal; every usable profile gets
-    # the five strongest available course matches without a visible cutoff.
     return recommendations[:5]
 
 
@@ -2058,7 +2056,6 @@ async def github_authorize(req):
     avatar_url = (user.get("avatar_url") or "").strip()
 
     if not email:
-        # GitHub may hide primary email; fetch via /user/emails
         emails_resp = await github.get("user/emails", token=token)
         emails = emails_resp.json() if emails_resp is not None else []
         for e in emails:
@@ -2129,9 +2126,6 @@ async def github_authorize(req):
 
 
 def _group_ocr_boxes_into_table_rows(boxes):
-    # Reconstructs table rows/columns from the OCR engine's per-box coordinates so the
-    # structured parser can ignore extra columns (units, remarks) instead of the
-    # line-based fallback, which breaks on any row with trailing non-numeric text.
     items = [box for box in (boxes or []) if str(box.get("text", "")).strip()]
     if len(items) < 4:
         return []
@@ -2162,7 +2156,6 @@ def _group_ocr_boxes_into_table_rows(boxes):
         cells = [{"column": col_index, "text": box.get("text", "")} for col_index, box in enumerate(row)]
         table_rows.append({"row": row_index, "cells": cells})
 
-    # Need at least a header row plus one data row with more than one column to be useful.
     if len(table_rows) < 2 or all(len(row["cells"]) < 2 for row in table_rows):
         return []
     return table_rows
@@ -2236,14 +2229,11 @@ def main():
     os.makedirs(UPLOAD_FOLDER, exist_ok=True)
     init_database()
     try:
-        # Load Docling/RapidOCR models now so the first upload doesn't pay this cost and risk a proxy timeout.
         from ocr.docling_service import _get_docling_converter
         _get_docling_converter()
     except Exception as exc:
         print(f"Docling warm-up skipped: {exc}")
     port = int(os.getenv("PORT", "5000"))
-    # reload=False: file-watching restarts (e.g. from uploads) would kill in-flight requests in production.
-    # forwarded_allow_ips/proxy_headers: trust Railway's proxy so url_for reports https, not http (fixes OAuth redirect_uri_mismatch).
     serve(port=port, reload=False, proxy_headers=True, forwarded_allow_ips="*")
 
 

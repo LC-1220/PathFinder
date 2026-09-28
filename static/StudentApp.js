@@ -1,4 +1,4 @@
-/* Source: SM.js */
+/* ocr */
 let students = [];
 let selectedStudent = null;
  
@@ -836,7 +836,6 @@ function parseStudent(text){
             }
         }
 
-        // If most grades are in 50-100 scale, recover likely dropped leading 8 for single-digit OCR misses (e.g. 5.0 -> 85.0).
         const numericEntries = subjectEntries.filter(e => Number.isFinite(e.grade));
         const percentLikeCount = numericEntries.filter(e => e.grade >= 50 && e.grade <= 100).length;
         const singleDigitCount = numericEntries.filter(e => e.grade >= 0 && e.grade < 10).length;
@@ -1179,8 +1178,6 @@ function parseAcademicRecord(text){
         cleanSubjectRows.push({ label, grade });
     };
 
-    // SHS cards commonly place all five columns on one OCR line. Use the
-    // subject code and numeric grade as anchors, then discard the instructor column.
     for(const rawLine of String(text || '').split(/\r?\n/)){
         const line = rawLine.replace(/\s+/g, ' ').trim();
         const codeMatch = line.match(/^\s*\d{4,6}\s+[A-Z0-9]{2,8}\s+/i);
@@ -1234,7 +1231,6 @@ function parseAcademicRecord(text){
             .replace(/\s*\([^)]*\)\s*$/, '')
             .trim();
 
-        // Instructor columns are commonly comma-separated or OCR'd as a trailing name.
         label = label.split(/\s*,\s*/)[0].trim();
         label = label.replace(/\s+(?:instructor|teacher|professor)\s*[:\-].*$/i, '').trim();
         label = label.replace(/\s{2,}/g, ' ').replace(/^[-:|]+|[-:|]+$/g, '').trim();
@@ -1243,7 +1239,6 @@ function parseAcademicRecord(text){
         }
     }
 
-    // Fallback for clean OCR lines that the broad student parser cannot classify.
     if(cleanSubjectRows.length === 0){
         for(const rawLine of String(text || '').split(/\r?\n/)){
             let line = rawLine.replace(/\s+/g, ' ').trim();
@@ -1588,7 +1583,6 @@ function clearInputs() {
         }
     }
 
-    // Runs server-side Docling via /ocr_report_card.
     async function imageBlobToText(blob){
         try{
             setProgress(null, 'Running Docling OCR and TableFormer...');
@@ -1600,7 +1594,6 @@ function clearInputs() {
             try{
                 data = await response.json();
             }catch(parseError){
-                // Server likely crashed/timed out (e.g. free-tier memory limit) and returned a non-JSON response.
                 throw new Error(`Server did not return a valid response (status ${response.status}). It may have run out of memory or timed out processing this file. Please try again in a moment.`);
             }
 
@@ -2641,7 +2634,6 @@ function clearInputs() {
     });
 })();
 
-// Recommendation rendering removed from Student Management page
 
 function loadSavedProfile() {
     return fetch('/get_profile')
@@ -2669,8 +2661,6 @@ function loadSavedProfile() {
             const studentProfile = document.getElementById('studentProfile');
             if(!studentProfile) return data;
 
-            // Input fields stay empty (showing their guide placeholders) so a new
-            // upload always starts from a blank form instead of old saved values.
             studentProfile.innerHTML = `
             <div class="student-card">
 
@@ -2727,7 +2717,6 @@ function loadSavedProfile() {
                 };
             }
 
-            // Do not render recommendations on the Student Management page
             return data;
         })
         .catch(error => {
@@ -2787,7 +2776,6 @@ function openLogout() {
 function closeLogout() {
     document.getElementById("logoutPopup").style.display = "none";
 }
-/* Source: AccountSettings.js */
 document.addEventListener('DOMContentLoaded', () => {
     const modal = document.getElementById('settings-modal');
     if (!modal) return;
@@ -2881,7 +2869,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 });
 
-/* Source: Mobile-nav.js */
 document.addEventListener('DOMContentLoaded', () => {
     const toggle = document.querySelector('.mobile-menu-toggle');
     const sidebar = document.querySelector('.sidebar');
