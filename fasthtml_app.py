@@ -870,7 +870,13 @@ def _get_user_latest_profile(user_id):
     }
 
 
-def _build_chat_response(message, recommendations, profile):
+def _chat_value(value, fallback):
+    cleaned = re.sub(r"[|]+", " ", str(value or "")).strip()
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    return cleaned if re.search(r"[A-Za-z0-9]", cleaned) else fallback
+
+
+def _build_chat_response(message, recommendations, profile, selected_course=""):
     message = (message or "").strip()
     if not message:
         return "Ask me about your recommended courses, why they were suggested, or mention a course you want so I can compare it with your current profile."
@@ -878,8 +884,21 @@ def _build_chat_response(message, recommendations, profile):
         return "No recommendations are saved yet. Upload or update your student profile first, then ask again and I can explain the course matches."
 
     profile = profile or {}
-    gwa = profile.get("gwa") or "not available"
-    strand = profile.get("strand") or "not specified"
+    gwa = _chat_value(profile.get("gwa"), "not available")
+    strand = _chat_value(profile.get("strand"), "not specified")
+    safe_recommendations = [
+        {
+            **item,
+            "course": _chat_value(item.get("course"), "Unnamed course"),
+            "description": _chat_value(item.get("description"), "No course description is available."),
+            "reason": _chat_value(item.get("reason"), ""),
+        }
+        for item in recommendations
+        if isinstance(item, dict) and _chat_value(item.get("course"), "")
+    ]
+    if not safe_recommendations:
+        return "I could not find usable course recommendations yet. Upload or update your student profile and ask again."
+    recommendations = safe_recommendations
     scores = _extract_subject_scores(profile.get("subjects", ""))
     strengths = _infer_strengths_from_features(_build_feature_vector(profile.get("subjects", "")))
     asked = next(
@@ -890,6 +909,8 @@ def _build_chat_response(message, recommendations, profile):
         ),
         _extract_requested_course(message),
     )
+    if not asked and selected_course and re.search(r"\b(this|selected|it|course|career|about)\b", message.lower()):
+        asked = selected_course
     if asked:
         asked_slug = _course_alias_slug(asked)
         matching = next((item for item in recommendations if _course_alias_slug(item.get("course", "")) == asked_slug), None)
@@ -914,6 +935,10 @@ def _build_chat_response(message, recommendations, profile):
         return f"{asked.title()} is not in your current top recommendations. Your closest matches are: {', '.join(item.get('course', '') for item in recommendations[:3])}."
 
     lowered = message.lower()
+    if any(token in lowered for token in ("top course", "top match", "which course", "what should i choose", "list my")):
+        top_names = ", ".join(item["course"] for item in recommendations[:5])
+        return f"Your current top matches are: {top_names}. The strongest match is {recommendations[0]['course']}."
+
     if any(token in lowered for token in ("improve", "weak", "better", "prepare")):
         weakest = sorted(
             ((name, _average(values)) for name, values in scores.items() if values),
@@ -924,7 +949,9 @@ def _build_chat_response(message, recommendations, profile):
 
     if any(token in lowered for token in ("why", "recommend", "fit", "match")):
         best = recommendations[0]
-        return f"{best.get('course')} is currently your strongest match. It fits your {strand} strand, GWA of {gwa}, and strengths in {', '.join(strengths) or 'your overall grade profile'}."
+        profile_fit = f"your {strand} strand and GWA of {gwa}" if strand != "not specified" else f"your GWA of {gwa}"
+        reason = best["reason"] or f"It aligns with {', '.join(strengths) or 'your overall grade profile'}."
+        return f"{best['course']} is currently your strongest match because it fits {profile_fit}. {reason}".strip()
 
     top_names = ", ".join([r.get('course', '') for r in recommendations[:5] if r.get("course")])
     return f"Based on your {strand} strand, GWA {gwa}, and strongest areas in {', '.join(strengths) or 'your overall profile'}, your current top matches are: {top_names}."
@@ -1884,6 +1911,7 @@ def get_profile(req):
 async def course_chat(req):
     data = await req.json()
     message = (data.get("message") or "").strip()
+    selected_course = (data.get("selected_course") or "").strip()
 
     user_id = req.session.get("user_id")
     profile = _get_user_latest_profile(user_id) if user_id else None
@@ -1915,7 +1943,7 @@ async def course_chat(req):
     if not isinstance(recommendations, list):
         recommendations = []
 
-    reply = _build_chat_response(message, recommendations, profile)
+    reply = _build_chat_response(message, recommendations, profile, selected_course)
     return JSONResponse({"success": True, "reply": reply})
 
 

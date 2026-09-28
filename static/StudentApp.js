@@ -1704,6 +1704,7 @@ function clearInputs() {
         const isGuest = document.body.dataset.guest === 'true';
         const isHomeMode = document.body.dataset.homeMode === 'true';
         let currentInlineRecommendations = [];
+        let selectedInlineCourse = '';
 
         const preview = document.getElementById('preview');
         const previewContainer = preview ? preview.parentElement : null;
@@ -1825,7 +1826,7 @@ function clearInputs() {
                 const response = await fetch('/course_chat', {
                     method: 'POST',
                     headers: {'Content-Type':'application/json'},
-                    body: JSON.stringify({message, recommendations: currentInlineRecommendations})
+                    body: JSON.stringify({message, recommendations: currentInlineRecommendations, selected_course: selectedInlineCourse})
                 });
                 const data = await response.json();
                 appendChatMessage('assistant', data?.reply || 'I could not answer that right now.');
@@ -1991,6 +1992,7 @@ function clearInputs() {
                 .sort((left, right) => Number(right.confidence || 0) - Number(left.confidence || 0))
                 .slice(0, 3);
             currentInlineRecommendations = items;
+            selectedInlineCourse = items[0]?.course || '';
             const bestCourse = items[0]?.course;
             const whyButton = chatQuick?.querySelector('[data-question="Why is my best course recommended?"]');
             if(whyButton && bestCourse){
@@ -2022,6 +2024,7 @@ function clearInputs() {
             function renderSelectedCourse(index){
                 const item = items[index];
                 if(!item) return;
+                selectedInlineCourse = item.course || '';
                 const comparison = comparisons[item.course] || {};
                 const rows = Array.isArray(comparison.comparison) ? comparison.comparison : [];
                 const studentAverage = Number(comparison.student_overall);
