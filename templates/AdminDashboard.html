@@ -100,6 +100,7 @@
         <h3>{{ admin }}</h3>
         <p>Administrator account</p>
         <form id="admin-name-form" class="admin-name-form"><label for="admin-name-input">Display name</label><div><input id="admin-name-input" name="name" type="text" value="{{ admin }}" required><button type="submit">Save name</button></div><span id="admin-name-status" role="status"></span></form>
+        <form id="admin-password-form" class="admin-password-form"><label for="admin-current-password">Change password</label><input id="admin-current-password" name="current_password" type="password" placeholder="Current password" autocomplete="current-password" required><input id="admin-new-password" name="new_password" type="password" placeholder="New password" minlength="6" autocomplete="new-password" required><input name="confirm_password" type="password" placeholder="Confirm new password" minlength="6" autocomplete="new-password" required><button type="submit">Update password</button><span id="admin-password-status" role="status"></span></form>
         <a href="/admin/logout" class="admin-settings-action"><i class="fa-solid fa-right-from-bracket"></i> Log out</a>
       </section>
     </div>
@@ -331,6 +332,8 @@ const adminPictureInput = document.getElementById('admin-picture-input');
 const adminPictureStatus = document.getElementById('admin-picture-status');
 const adminNameForm = document.getElementById('admin-name-form');
 const adminNameStatus = document.getElementById('admin-name-status');
+const adminPasswordForm = document.getElementById('admin-password-form');
+const adminPasswordStatus = document.getElementById('admin-password-status');
 
 adminNameForm?.addEventListener('submit', async event => {
   event.preventDefault();
@@ -344,6 +347,19 @@ adminNameForm?.addEventListener('submit', async event => {
     adminNameStatus.textContent = 'Name updated.';
   }catch(error){
     adminNameStatus.textContent = error.message || 'Could not update name.';
+  }
+});
+
+adminPasswordForm?.addEventListener('submit', async event => {
+  event.preventDefault();
+  adminPasswordStatus.textContent = 'Updating...';
+  const values = Object.fromEntries(new FormData(adminPasswordForm).entries());
+  try{
+    const result = await fetchJsonOrThrow('/admin/change_password', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(values)});
+    adminPasswordForm.reset();
+    adminPasswordStatus.textContent = result.message || 'Password updated.';
+  }catch(error){
+    adminPasswordStatus.textContent = error.message || 'Could not update password.';
   }
 });
 

@@ -1766,6 +1766,38 @@ async def update_account(req):
     return JSONResponse({"success": True, "name": name})
 
 
+@rt("/admin/change_password", methods=["POST"])
+async def admin_change_password(req):
+    sess = req.session
+    if not _is_admin_session(sess) or not sess.get("user_id"):
+        return JSONResponse({"success": False, "message": "Admin session required."}, status_code=401)
+
+    data = await req.json()
+    current_password = data.get("current_password") or ""
+    new_password = data.get("new_password") or ""
+    confirm_password = data.get("confirm_password") or ""
+
+    if not current_password or not new_password or not confirm_password:
+        return JSONResponse({"success": False, "message": "Complete all password fields."}, status_code=400)
+    if len(new_password) < 6:
+        return JSONResponse({"success": False, "message": "Password must be at least 6 characters."}, status_code=400)
+    if new_password != confirm_password:
+        return JSONResponse({"success": False, "message": "New passwords do not match."}, status_code=400)
+
+    conn = _db_conn()
+    cursor = conn.cursor()
+    cursor.execute("SELECT password_hash FROM users WHERE id = ?", (sess["user_id"],))
+    row = cursor.fetchone()
+    if not row or not _check_password(row[0], current_password):
+        conn.close()
+        return JSONResponse({"success": False, "message": "Current password is incorrect."}, status_code=400)
+
+    cursor.execute("UPDATE users SET password_hash = ? WHERE id = ?", (_hash_password(new_password), sess["user_id"]))
+    conn.commit()
+    conn.close()
+    return JSONResponse({"success": True, "message": "Password updated."})
+
+
 @rt("/recommend_anonymous", methods=["POST"])
 async def recommend_anonymous(req):
     if not req.session.get("is_guest"):
@@ -2215,6 +2247,6 @@ def main():
     serve(port=port, reload=False, proxy_headers=True, forwarded_allow_ips="*")
 
 
-
 if __name__ == "__main__":
     main()
+
