@@ -26,23 +26,28 @@ from ocr import scan_report_card_docling
 from ocr.docling_service import _subjects_from_table
 from ocr.parser import normalize_ocr_text, parse_report_card_structure
 
+
+#Optional Nearest Neighbor Model for Course Recommendations
 try:
     from sklearn.neighbors import NearestNeighbors
 except Exception:
     NearestNeighbors = None
 
+#Admin Configuration
 UPLOAD_FOLDER = "static/profile_pictures"
 ADMIN_USERNAME = "UPHSDAdmin2026"
 ADMIN_PASSWORD = "UPHSD2026"
 ROLE_ADMIN = "admin"
 ROLE_SEMI_ADMIN = "semi_admin"
 
+
+#Subject Required Categories
 CATEGORY_NAMES = ["math", "science", "english", "technology", "business", "social"]
 
 _NEAREST_NEIGHBOR_MODEL = None
 _COURSE_TRAINING_DATA_CACHE = None
 
-
+#Template Environment Setup
 def _template_env():
     env = Environment(
         loader=FileSystemLoader("templates"),
@@ -63,14 +68,14 @@ def _template_env():
     env.globals["url_for"] = _url_for
     return env
 
-
+#Default Profile Image Handling
 TEMPLATES = _template_env()
 
 
 def _default_profile_image_url():
     return "/static/profile_pictures/default.svg"
 
-
+#Profile Image Handling
 def _profile_image_from_value(value):
     text = (value or "").strip()
     if not text:
@@ -85,12 +90,12 @@ def _profile_image_from_value(value):
 
     return f"/static/profile_pictures/{text}"
 
-
+#Session Profile Image Handling
 def _set_session_profile_image(sess, profile_picture_value):
     sess["profile_picture"] = (profile_picture_value or "").strip()
     sess["profile_image"] = _profile_image_from_value(profile_picture_value)
 
-
+#Postgres Database Connection Handling (SUPABASE)
 class _PostgresCursor:
     def __init__(self, cursor):
         self._cursor = cursor
@@ -105,7 +110,7 @@ class _PostgresCursor:
     def fetchall(self):
         return self._cursor.fetchall()
 
-
+#Course Training Data Handling
 class _PostgresConnection:
     def __init__(self, connection):
         self._connection = connection
@@ -122,7 +127,7 @@ class _PostgresConnection:
     def close(self):
         self._connection.close()
 
-
+#Database Connection Helper Function
 def _db_conn():
     database_url = os.getenv("DATABASE_URL")
     if not database_url:
@@ -145,6 +150,7 @@ def _db_conn():
     ) from last_error
 
 
+#Course Training Data Retrieval (from the database)
 def _course_training_data():
     global _COURSE_TRAINING_DATA_CACHE
     if _COURSE_TRAINING_DATA_CACHE is not None:
@@ -161,11 +167,11 @@ def _course_training_data():
     ]
     return _COURSE_TRAINING_DATA_CACHE
 
-
+#Password Hashing and Verification
 def _hash_password(password):
     return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
-
+#Password Verification
 def _check_password(stored_hash, password):
     try:
         return bcrypt.checkpw(password.encode("utf-8"), stored_hash.encode("utf-8"))
@@ -173,17 +179,18 @@ def _check_password(stored_hash, password):
         return False
 
 
+#Grade Normalization
 def _normalize_grade(value):
     try:
         return max(0.0, min(100.0, float(value)))
     except (TypeError, ValueError):
         return 0.0
 
-
+#Average Calculation
 def _average(values):
     return sum(values) / len(values) if values else 0.0
 
-
+#Subject Scores Extraction from Text(using docling OCR)
 def _extract_subject_scores(subjects_text):
     score_map = {name: [] for name in CATEGORY_NAMES}
     if not subjects_text:
@@ -248,7 +255,7 @@ def _extract_subject_scores(subjects_text):
 
     return score_map
 
-
+#Feature Vector Construction from Extracted Subject Scores(from OCR text). Helps with Course Recommendation
 def _build_feature_vector(subjects_text):
     scores = _extract_subject_scores(subjects_text)
     return [
@@ -260,14 +267,14 @@ def _build_feature_vector(subjects_text):
         _average(scores["social"]),
     ]
 
-
+#Cleaning Subjects for Recommendation (removes instructor names and irrelevant text)
 def _clean_subjects_for_recommendation(subjects_text):
     subject_terms = {
         "math", "mathematics", "science", "communication", "education", "technology",
         "health", "english", "filipino", "literature", "person", "research", "entrepreneur",
         "services", "programming", "computer", "physical", "statistics", "biology",
     }
-
+    # Helper function to determine if a value looks like an instructor's name
     def looks_like_instructor(value):
         words = re.findall(r"[A-Za-z]+", value)
         lowered = {word.lower() for word in words}
@@ -277,7 +284,7 @@ def _clean_subjects_for_recommendation(subjects_text):
             and not lowered.intersection(subject_terms)
             and all(len(word) >= 1 for word in words)
         )
-
+    # Process each line of the subjects text
     cleaned_rows = []
     pending_subject = ""
     for line in str(subjects_text or "").splitlines():
@@ -326,9 +333,10 @@ def _clean_subjects_for_recommendation(subjects_text):
             continue
         if subject and subject.lower() not in {"subject", "subject name", "grade", "remarks"}:
             cleaned_rows.append(f"{subject} - {grade:g}")
+    # Return the cleaned rows as a single string, removing duplicates
     return "\n".join(dict.fromkeys(cleaned_rows))
 
-
+#Prepare Subject Rows for Display (for the frontend) 
 def _subject_rows_for_display(subjects_text):
     rows = []
     cleaned = _clean_subjects_for_recommendation(subjects_text)
@@ -345,7 +353,7 @@ def _subject_rows_for_display(subjects_text):
         })
     return rows
 
-
+#Extract Numeric Grades from Text
 def _extract_numeric_from_grades_text(grades_text):
     values = []
     if not grades_text:
@@ -357,12 +365,13 @@ def _extract_numeric_from_grades_text(grades_text):
             continue
     return values
 
-
+#Compute General Weighted Average (GWA) from Subject Grades
 def _compute_gwa(subjects_text, incoming_gwa="", incoming_grades=""):
     text_val = (incoming_gwa or "").strip()
     if text_val:
         return text_val
-
+    
+    # If incoming GWA is provided, use it directly
     grades = _extract_numeric_from_grades_text(subjects_text)
     if not grades:
         grades = _extract_numeric_from_grades_text(incoming_grades)
@@ -370,31 +379,33 @@ def _compute_gwa(subjects_text, incoming_gwa="", incoming_grades=""):
         return ""
     return f"{(sum(grades) / len(grades)):.2f}"
 
-
+#Coalesce Grades Text (combine subject grades and incoming grades into a single string)
 def _coalesce_grades_text(subjects_text, incoming_grades=""):
     text_val = (incoming_grades or "").strip()
     if text_val:
         return text_val
-
+    
+    # If incoming grades text is provided, use it directly
     grades = _extract_numeric_from_grades_text(subjects_text)
     if not grades:
         return ""
     return ", ".join(str(g).rstrip("0").rstrip(".") for g in grades)
 
-
+#Normalize Student Number (removes non-alphanumeric characters and converts to uppercase)
 def _normalize_student_number(value):
     if value is None:
         return ""
     return re.sub(r"[^A-Za-z0-9]", "", str(value).upper()).strip()
 
 
+#Normalize Full Name (removes non-alphabetic characters and converts to uppercase)
 def _normalize_full_name(value):
     if value is None:
         return ""
     tokens = re.findall(r"[A-Za-z]+", str(value))
     return "".join(tokens).upper()
 
-
+#Validate Uploaded Image File
 async def validate_upload(file_obj):
     if file_obj is None:
         return False, "No file selected."
@@ -459,11 +470,12 @@ def _student_record_matches(existing_record, incoming_record):
 
     return False
 
-
+#Merge Subject Entries (combine existing and incoming subjects, removing duplicates and cleaning text)
 def _merge_subject_entries(existing_subjects, incoming_subjects):
     combined = []
     seen = {}
 
+    # Iterate over both existing and incoming subjects, line by line
     for text in [existing_subjects or "", incoming_subjects or ""]:
         for raw_line in str(text).splitlines():
             line = raw_line.strip()
@@ -495,24 +507,25 @@ def _merge_subject_entries(existing_subjects, incoming_subjects):
 
     return "\n".join(combined)
 
-
+#Vector Distance Calculation (Euclidean distance between two vectors)
 def _vector_distance(a, b):
     return math.sqrt(sum((x - y) ** 2 for x, y in zip(a, b)))
 
 
 CORE_FEATURE_WEIGHTS = (3.0, 3.0, 3.0, 1.0, 1.0, 1.0)
 
-
+#Core Feature Weights for Weighted Calculations
 def _weighted_features(features):
     return [value * math.sqrt(weight) for value, weight in zip(features, CORE_FEATURE_WEIGHTS)]
 
-
+#Weighted Vector Distance Calculation (applies core feature weights to the distance computation)
 def _weighted_vector_distance(a, b):
     return math.sqrt(
         sum(weight * (x - y) ** 2 for weight, x, y in zip(CORE_FEATURE_WEIGHTS, a, b))
     )
 
 
+#Core Grade Fit Calculation (compares student's core feature grades with course core features)
 def _core_grade_fit(student_features, course_features):
     observed = [value for value in student_features[:3] if value > 0]
     if not observed:
@@ -521,7 +534,8 @@ def _core_grade_fit(student_features, course_features):
     course_core = _average(course_features[:3])
     return max(0.0, 100.0 - abs(student_core - course_core))
 
-
+#Course Categorization Based on Name and Description (assigns a course to a predefined category)
+#TODO:try to move this area to SupaBase to Reduce hardcoded course categorization   
 def categorize_course(course_name, description=""):
     name = (course_name or "").lower()
     desc = (description or "").lower()
@@ -546,10 +560,11 @@ def categorize_course(course_name, description=""):
         return "Arts & Design"
     return "Other"
 
-
+#  Infer Academic Strand Based on Course Name (assigns a strand like STEM, ABM, HUMSS, TVL, GAS, or Other) 
+# help in recommending suitable courses for students based on their academic track
 def _infer_strand(course_name=""):
     course_name = (course_name or "").lower()
-    if any(tok in course_name for tok in ("computer", "information", "technology", "it", "engineering", "science", "math")):
+    if any(tok in course_name for tok in ("engineering", "science", "math")):
         return "STEM"
     if any(tok in course_name for tok in ("business", "accounting", "management", "marketing", "economics")):
         return "ABM"
@@ -559,14 +574,17 @@ def _infer_strand(course_name=""):
         return "TVL"
     if any(tok in course_name for tok in ("gas", "general", "service", "tourism", "hospitality", "arts")):
         return "GAS"
+    if any(tok in course_name for tok in ("computer", "information", "technology", "it")):
+        return "ICT"
     return "Other"
 
-
+# Infer Student's Strengths from Feature Scores (returns top 3 strengths with scores >= 75)
 def _infer_strengths_from_features(features):
     ranked = sorted(zip(CATEGORY_NAMES, features), key=lambda t: t[1], reverse=True)
-    return [name for name, value in ranked if value >= 70][:3]
+    return [name for name, value in ranked if value >= 75][:3]
 
-
+# Generate Reason for Course Match (explains why a course is suitable based on category, student's strengths, and academic strand)
+#TODO:Enhance the reasoning by incorporating more nuanced analysis of student's strengths and course requirements
 def _course_match_reason(course_name, category, strongest, strand):
     focus = {
         "Allied Health": "science, biology, and patient-focused learning",
@@ -583,7 +601,7 @@ def _course_match_reason(course_name, category, strongest, strand):
     strand_text = f" It is also compatible with your {strand} strand." if strand else ""
     return f"{course_name} draws on {focus}. Your strongest areas are {strength_text}.{strand_text}"
 
-
+# Validate Recommendation Course Name (checks if the course name is suitable for recommendation)
 def _valid_recommendation_course_name(course_name):
     if not course_name or not isinstance(course_name, str):
         return False
@@ -595,6 +613,7 @@ def _valid_recommendation_course_name(course_name):
     return True
 
 
+# Sanitize Recommendations (filters out invalid or unsuitable course recommendations)
 def _sanitize_recommendations(payload):
     if not payload:
         return []
@@ -624,7 +643,7 @@ def _sanitize_recommendations(payload):
         })
     return valid
 
-
+# Build Course Recommendation Model (constructs a nearest neighbor model based on course features) Machine Learning Approach
 def _build_course_model():
     global _NEAREST_NEIGHBOR_MODEL
     if NearestNeighbors is None:
@@ -639,7 +658,7 @@ def _build_course_model():
     _NEAREST_NEIGHBOR_MODEL = model
     return model
 
-
+# Recommend Courses Based on Student's Academic Profile (uses the nearest neighbor model and feature analysis to suggest suitable courses)
 def recommend_course(subjects_text, current_course="", strand=""):
     training_data = _course_training_data()
     features = _build_feature_vector(subjects_text)
@@ -648,7 +667,8 @@ def recommend_course(subjects_text, current_course="", strand=""):
 
     strongest = _infer_strengths_from_features(features)
     reason = "Your grades show a balanced academic profile, which fits the most similar historical pattern." if not strongest else f"Your strongest areas are {', '.join(strongest)}."
-
+    
+    # Build the course recommendation model and generate recommendations based on the student's features
     model = _build_course_model()
     recommendations = []
     if model is not None:
@@ -668,13 +688,13 @@ def recommend_course(subjects_text, current_course="", strand=""):
                 })
         except Exception:
             pass
-
+    # If an exception occurs during model-based recommendation, it is silently ignored.
     if not recommendations:
         distances = []
         for sample in training_data:
             distance = _weighted_vector_distance(features, sample["features"])
             distances.append((distance, sample["course"], sample.get("description", ""), sample["features"]))
-
+        # Sort the distances to find the nearest courses
         nearest = sorted(distances, key=lambda item: item[0])[:8]
         for distance, course_name, description, course_features in nearest:
             category = categorize_course(course_name, description)
@@ -687,9 +707,10 @@ def recommend_course(subjects_text, current_course="", strand=""):
                 "confidence": round(confidence, 2),
                 "core_grade_fit": round(_core_grade_fit(features, course_features), 2),
             })
-
+    # Group the recommended courses by strand and adjust confidence based on strand fit
     strand_groups = {
-        "stem": {"Computer Studies", "Engineering", "Allied Health", "Agriculture"},
+        "stem": { "Engineering", "Allied Health",},
+        "ict": {"Computer Studies", "Information Technology"},
         "abm": {"Business & Management", "Hospitality & Tourism"},
         "humss": {"Social Sciences & Education", "Public Service & Governance", "Arts & Design"},
         "tvl": {"Computer Studies", "Allied Health", "Hospitality & Tourism", "Agriculture"},
@@ -698,7 +719,8 @@ def recommend_course(subjects_text, current_course="", strand=""):
     strand_key = (strand or "").strip().lower()
     preferred_groups = strand_groups.get(strand_key, set())
     strand_course_terms = {
-        "stem": ("computer", "information", "data", "software", "engineering", "science", "biology", "medical", "pharmacy", "technology"),
+        "stem": ("engineering", "science", "biology", "medical", "pharmacy", "technology"),
+        "ict": ("computer", "information", "technology", "it"),
         "abm": ("business", "account", "marketing", "management", "finance", "economics", "entrepreneur", "hospitality", "tourism"),
         "humss": ("psychology", "education", "communication", "political", "criminology", "public administration", "social", "legal", "tourism"),
         "tvl": ("technology", "computer", "nursing", "medical", "pharmacy", "hospitality", "tourism", "agriculture", "fisheries"),
@@ -733,7 +755,7 @@ def recommend_course(subjects_text, current_course="", strand=""):
         recommendations[0]["reason"] += f" This top match combines your {strand.upper()} strand with your Math, Science, and English grade profile."
     return recommendations[:5]
 
-
+# Calculate the average profile for a given course based on historical training data
 def _course_average_profile(course_name):
     training_data = _course_training_data()
     course_name = (course_name or "").strip()
@@ -742,7 +764,7 @@ def _course_average_profile(course_name):
         if candidate["course"].lower() == course_name.lower():
             course_data = candidate
             break
-
+    # If no exact match is found, default to the first course in the training data
     if course_data is None:
         course_data = training_data[0]
 
@@ -758,7 +780,7 @@ def _course_average_profile(course_name):
         "description": course_data.get("description", ""),
     }
 
-
+# Build a detailed analytics report comparing a student's performance against the average course profile
 def _build_student_performance_analytics(course_name, subjects_text):
     training_data = _course_training_data()
     requested_course = (course_name or "").strip()
@@ -819,11 +841,11 @@ def _build_student_performance_analytics(course_name, subjects_text):
         "subject_breakdown": subject_breakdown,
     }
 
-
+# Generate a slug for course aliases to standardize course identifiers
 def _course_alias_slug(value):
     return re.sub(r"[^a-z0-9]+", "", (value or "").lower())
 
-
+# Extract the requested course from a user's message
 def _extract_requested_course(message):
     text = (message or "").strip()
     if not text:
@@ -834,7 +856,7 @@ def _extract_requested_course(message):
     m = re.search(r"(?:what\s+about|recommend|for)\s+([A-Za-z][A-Za-z\s&\-/]{2,})", text, re.IGNORECASE)
     return (m.group(1).strip(" .?!,") if m else "")
 
-
+# Retrieve the latest profile of a user from the database
 def _get_user_latest_profile(user_id):
     try:
         conn = _db_conn()
@@ -853,7 +875,7 @@ def _get_user_latest_profile(user_id):
         conn.close()
     except psycopg.Error:
         return None
-
+    # If no profile is found or an error occurs, return None
     if not row:
         return None
     return {
@@ -869,13 +891,14 @@ def _get_user_latest_profile(user_id):
         "strand": row[9],
     }
 
-
+# Clean and standardize chat input values, providing a fallback if necessary
 def _chat_value(value, fallback):
     cleaned = re.sub(r"[|]+", " ", str(value or "")).strip()
     cleaned = re.sub(r"\s+", " ", cleaned)
     return cleaned if re.search(r"[A-Za-z0-9]", cleaned) else fallback
 
-
+# Build a chat response based on the user's message, available recommendations, and profile information
+#TODO:Remove AI chat
 def _build_chat_response(message, recommendations, profile, selected_course=""):
     message = (message or "").strip()
     if not message:
@@ -956,7 +979,7 @@ def _build_chat_response(message, recommendations, profile, selected_course=""):
     top_names = ", ".join([r.get('course', '') for r in recommendations[:5] if r.get("course")])
     return f"Based on your {strand} strand, GWA {gwa}, and strongest areas in {', '.join(strengths) or 'your overall profile'}, your current top matches are: {top_names}."
 
-
+# Initialize the database and create necessary tables if they do not exist
 def init_database():
     conn = _db_conn()
     cursor = conn.cursor()
@@ -973,7 +996,7 @@ def init_database():
         )
         """
     )
-
+    # Create the student_profiles table if it does not exist
     cursor.execute(
         """
         CREATE TABLE IF NOT EXISTS student_profiles (
@@ -994,7 +1017,7 @@ def init_database():
         )
         """
     )
-
+    # Remove orphaned student profiles that do not have a corresponding user
     cursor.execute(
         """
                 DELETE FROM student_profiles profile
@@ -1002,7 +1025,7 @@ def init_database():
                     AND NOT EXISTS (SELECT 1 FROM users WHERE users.id = profile.user_id)
         """
     )
-
+    # Commit the changes and close the connection
     conn.commit()
     try:
         cursor.execute("SELECT id FROM users WHERE email = ?", (ADMIN_USERNAME,))
@@ -1021,17 +1044,16 @@ def init_database():
         pass
 
     conn.close()
-
-
+# Check if the current session belongs to an admin user
 def _is_admin_session(sess):
     role = sess.get("role")
     return bool(sess.get("is_admin")) and role in (ROLE_ADMIN, ROLE_SEMI_ADMIN)
 
-
+# Check if the current session belongs to a full admin user
 def _is_full_admin_session(sess):
     return sess.get("role") == ROLE_ADMIN
 
-
+# Render a template with the current session context and additional context variables
 def _render(req, template_name, **ctx):
     sess = req.session
     if "user_id" in sess:
@@ -1042,7 +1064,7 @@ def _render(req, template_name, **ctx):
         conn.close()
         if row:
             _set_session_profile_image(sess, row[0])
-
+    # Render the template with the session and additional context
     body = TEMPLATES.get_template(template_name).render(
         name=sess.get("name", "User"),
         email=sess.get("email", "User"),
@@ -1052,15 +1074,15 @@ def _render(req, template_name, **ctx):
     )
     return HTMLResponse(body)
 
-
+# Initialize the FastHTML application and configure OAuth providers
 app, rt = fast_app(
     secret_key=os.getenv("APP_SECRET_KEY", "your_secret_key"),
     static_path=".",
     default_hdrs=False,
 )
-
+# Configure OAuth providers for the application
 oauth = OAuth()
-
+# Register the Google OAuth provider
 google = oauth.register(
     name="google",
     client_id=os.getenv("GOOGLE_CLIENT_ID"),
@@ -1068,28 +1090,18 @@ google = oauth.register(
     server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
     client_kwargs={"scope": "openid email profile"},
 )
-
-github = oauth.register(
-    name="github",
-    client_id=os.getenv("GITHUB_CLIENT_ID"),
-    client_secret=os.getenv("GITHUB_CLIENT_SECRET"),
-    access_token_url="https://github.com/login/oauth/access_token",
-    authorize_url="https://github.com/login/oauth/authorize",
-    api_base_url="https://api.github.com/",
-    client_kwargs={"scope": "user:email"},
-)
-
-
+# Define the route for the login page
 @rt("/", methods=["GET"])
 def login_page(req):
     return _render(req, "Login.html")
 
-
+# Define the route for the login page alias
 @rt("/login", methods=["GET"])
 def login_page_alias(req):
     return _render(req, "Login.html")
 
 
+# Define the route for the home page
 @rt("/home", methods=["GET"])
 def home(req):
     sess = req.session
@@ -1101,6 +1113,7 @@ def home(req):
     )
 
 
+# Define the route for guest login
 @rt("/guest-login", methods=["GET"])
 def guest_login(req):
     req.session.clear()
@@ -1110,6 +1123,7 @@ def guest_login(req):
     return RedirectResponse("/home", status_code=302)
 
 
+# Define the route for generating course recommendations
 @rt("/generate_recommendations", methods=["POST"])
 async def generate_recommendations(req):
     sess = req.session
@@ -1142,6 +1156,7 @@ async def generate_recommendations(req):
     return JSONResponse({"success": True, "count": len(recommendations)})
 
 
+# Define the route for user registration
 @rt("/register", methods=["POST"])
 async def register(req):
     data = await req.json()
@@ -1169,6 +1184,7 @@ async def register(req):
         return JSONResponse({"success": False, "message": "Email already exists"})
 
 
+# Define the route for user login
 @rt("/login", methods=["POST"])
 async def login(req):
     data = await req.json()
@@ -1224,18 +1240,19 @@ def logout(req):
     req.session.clear()
     return RedirectResponse("/", status_code=302)
 
-
+# Define the route for admin login
 @rt("/admin/login", methods=["GET", "POST"])
 def admin_login(req):
     return RedirectResponse("/", status_code=302)
 
-
+# Define the route for admin logout
 @rt("/admin/logout", methods=["GET"])
 def admin_logout(req):
     req.session.clear()
     return RedirectResponse("/", status_code=302)
 
 
+# Define the route for the admin home page
 @rt("/admin", methods=["GET"])
 def admin_home(req):
     if not _is_admin_session(req.session):
@@ -1243,6 +1260,7 @@ def admin_home(req):
     return _render(req, "AdminDashboard.html", can_manage_students=(_is_full_admin_session(req.session)))
 
 
+# Define the route for the admin dashboard
 @rt("/admin/dashboard", methods=["GET"])
 def admin_dashboard(req):
     if not _is_admin_session(req.session):
@@ -1250,6 +1268,7 @@ def admin_dashboard(req):
     return _render(req, "AdminDashboard.html", can_manage_students=(_is_full_admin_session(req.session)))
 
 
+# Define the route for fetching all users (admin only)
 @rt("/admin/users", methods=["GET"])
 def admin_get_users(req):
     if not _is_full_admin_session(req.session):
@@ -1264,6 +1283,7 @@ def admin_get_users(req):
     return JSONResponse({"users": users})
 
 
+# Define the route for updating a user (admin only)
 @rt("/admin/update_user", methods=["POST"])
 async def admin_update_user(req):
     if not _is_full_admin_session(req.session):
@@ -1293,6 +1313,7 @@ async def admin_update_user(req):
     return JSONResponse({"success": True})
 
 
+# Define the route for deleting a user (admin only)
 @rt("/admin/delete_user", methods=["POST"])
 async def admin_delete_user(req):
     if not _is_full_admin_session(req.session):
@@ -1340,6 +1361,7 @@ async def admin_delete_user(req):
     return JSONResponse({"success": True})
 
 
+# Define the route for creating a coordinator (admin only)
 @rt("/admin/create_coordinator", methods=["POST"])
 async def admin_create_coordinator(req):
     if not _is_full_admin_session(req.session):
@@ -1375,7 +1397,7 @@ async def admin_create_coordinator(req):
     conn.close()
     return JSONResponse({"success": True, "message": "Level coordinator account created"})
 
-
+# Define the route for fetching all student profiles (admin only)
 @rt("/admin/student_profiles", methods=["GET"])
 def admin_get_student_profiles(req):
     if not _is_full_admin_session(req.session):
@@ -1412,7 +1434,7 @@ def admin_get_student_profiles(req):
 
     return JSONResponse({"success": True, "profiles": profiles})
 
-
+# Define the route for updating a student profile (admin only)
 @rt("/admin/update_student_profile", methods=["POST"])
 async def admin_update_student_profile(req):
     if not _is_full_admin_session(req.session):
@@ -1448,7 +1470,7 @@ async def admin_update_student_profile(req):
     conn.close()
     return JSONResponse({"success": True, "message": "Student profile updated"})
 
-
+# Define the route for the admin students page (admin only)
 @rt("/admin/students", methods=["GET"])
 def admin_get_students(req):
     if not _is_admin_session(req.session):
@@ -1474,6 +1496,7 @@ def admin_get_students(req):
     return _render(req, "AdminDashboard.html", can_manage_students=(_is_full_admin_session(req.session)))
 
 
+# Define the route for fetching all students via API (admin only)
 @rt("/admin/students/api", methods=["GET"])
 def admin_get_students_api(req):
     if not _is_admin_session(req.session):
@@ -1497,6 +1520,7 @@ def admin_get_students_api(req):
     ]})
 
 
+# Define the route for deleting a student (admin only)
 @rt("/admin/delete_student", methods=["POST"])
 async def admin_delete_student(req):
     if not _is_full_admin_session(req.session):
@@ -1515,6 +1539,7 @@ async def admin_delete_student(req):
     return JSONResponse({"success": True})
 
 
+# Define the route for fetching admin statistics (admin only)
 @rt("/admin/stats", methods=["GET"])
 def admin_stats(req):
     if not _is_admin_session(req.session):
@@ -1574,7 +1599,7 @@ def admin_stats(req):
                 continue
 
     avg_gwa = round(sum(gwa_nums) / len(gwa_nums), 2) if gwa_nums else None
-
+    # Calculate the average GWA and distribution buckets for admin statistics
     buckets = {"0-59": 0, "60-69": 0, "70-79": 0, "80-89": 0, "90-100": 0}
     for v in gwa_nums:
         if v < 60:
@@ -1590,7 +1615,7 @@ def admin_stats(req):
 
     cursor.execute("SELECT strand, COUNT(*) FROM student_profiles GROUP BY strand")
     strand_counts = {row[0] or "Other": row[1] for row in cursor.fetchall()}
-
+    # Define the route for fetching admin statistics (admin only)
     cursor.execute("SELECT TO_CHAR(NULLIF(upload_date, '')::timestamp, 'MM'), COUNT(*) FROM student_profiles WHERE upload_date IS NOT NULL AND upload_date != '' GROUP BY TO_CHAR(NULLIF(upload_date, '')::timestamp, 'MM') ORDER BY TO_CHAR(NULLIF(upload_date, '')::timestamp, 'MM')")
     month_rows = cursor.fetchall()
     month_map = {
@@ -1618,7 +1643,7 @@ def admin_stats(req):
     all_recommended = [{"course": k, "count": v} for k, v in sorted(rec_all_counts.items(), key=lambda x: (-x[1], x[0]))]
 
     conn.close()
-
+    # Return the compiled admin statistics as a JSON response
     return JSONResponse(
         {
             "by_profile_course": course_counts,
@@ -1639,7 +1664,7 @@ def admin_stats(req):
         }
     )
 
-
+# Define the route for saving a student profile
 @rt("/save_profile", methods=["POST"])
 async def save_profile(req):
     sess = req.session
@@ -1693,7 +1718,7 @@ async def save_profile(req):
             "subjects": existing_profile[8],
             "strand": existing_profile[9],
         }
-
+    # Merge the existing student profile with the new data and prepare it for saving
     merged_student = data.copy()
     if target_student:
         merged_subjects = _merge_subject_entries(target_student.get("subjects", ""), data.get("subjects", ""))
@@ -1710,7 +1735,7 @@ async def save_profile(req):
             "grades": merged_grades,
             "subjects": merged_subjects,
         }
-
+    # If a target student exists, update their profile in the database; otherwise, insert a new profile
     if target_student:
         cursor.execute(
             """
@@ -1756,10 +1781,10 @@ async def save_profile(req):
                 datetime.utcnow().isoformat(),
             ),
         )
-
+    # Commit the changes to the database and close the connection
     conn.commit()
     conn.close()
-
+    # Build the comparisons for the top 3 recommended courses based on student performance analytics
     comparisons = {
         item["course"]: _build_student_performance_analytics(item["course"], subjects_text)
         for item in recommendation[:3]
@@ -1771,7 +1796,7 @@ async def save_profile(req):
         "comparisons": comparisons,
     })
 
-
+# Define the route for updating the user account
 @rt("/update_account", methods=["POST"])
 async def update_account(req):
     sess = req.session
@@ -1790,7 +1815,7 @@ async def update_account(req):
     sess["name"] = name
     return JSONResponse({"success": True, "name": name})
 
-
+# Define the route for changing the admin password
 @rt("/admin/change_password", methods=["POST"])
 async def admin_change_password(req):
     sess = req.session
@@ -1822,7 +1847,7 @@ async def admin_change_password(req):
     conn.close()
     return JSONResponse({"success": True, "message": "Password updated."})
 
-
+# Define the route for recommending courses to anonymous users
 @rt("/recommend_anonymous", methods=["POST"])
 async def recommend_anonymous(req):
     if not req.session.get("is_guest"):
@@ -1852,7 +1877,7 @@ async def recommend_anonymous(req):
     }
     return JSONResponse({"success": True, "recommendation": recommendations, "comparisons": comparisons})
 
-
+# Define the route for fetching the user's profile
 @rt("/get_profile", methods=["GET"])
 def get_profile(req):
     sess = req.session
@@ -1906,7 +1931,7 @@ def get_profile(req):
         }
     )
 
-
+# Define the route for handling course chat interactions
 @rt("/course_chat", methods=["POST"])
 async def course_chat(req):
     data = await req.json()
@@ -1946,7 +1971,7 @@ async def course_chat(req):
     reply = _build_chat_response(message, recommendations, profile, selected_course)
     return JSONResponse({"success": True, "reply": reply})
 
-
+# Define the route for uploading a profile picture
 @rt("/upload_profile_picture", methods=["POST"])
 async def upload_profile_picture(req):
     sess = req.session
@@ -1980,6 +2005,7 @@ async def upload_profile_picture(req):
     return JSONResponse({"success": True, "picture": filename, "profile_image": _profile_image_from_value(filename)})
 
 
+# Define the route for fetching the profile picture 
 @rt("/get_profile_picture", methods=["GET"])
 def get_profile_picture(req):
     sess = req.session
@@ -1998,7 +2024,7 @@ def get_profile_picture(req):
 
     return JSONResponse({"success": False})
 
-
+# Define the route for Google login and authorization
 @rt("/google-login", methods=["GET"])
 async def google_login(req):
     redirect_uri = str(req.url_for("google_authorize"))
@@ -2051,7 +2077,7 @@ async def google_authorize(req):
         role = inserted[2] or "student"
 
     conn.close()
-
+    # Set the session variables for the logged-in user
     sess = req.session
     sess["user_id"] = user_id
     sess["name"] = name
@@ -2064,95 +2090,7 @@ async def google_authorize(req):
 
     return RedirectResponse("/home", status_code=302)
 
-
-@rt("/github-login", methods=["GET"])
-async def github_login(req):
-    redirect_uri = str(req.url_for("github_authorize"))
-    return await github.authorize_redirect(req, redirect_uri)
-
-
-@rt("/github-authorize", methods=["GET"])
-async def github_authorize(req):
-    token = await github.authorize_access_token(req)
-    resp = await github.get("user", token=token)
-    user = resp.json() if resp is not None else {}
-
-    username = user.get("login", "")
-    name = user.get("name") or username or "User"
-    github_id = user.get("id")
-    email = (user.get("email") or "").strip()
-    avatar_url = (user.get("avatar_url") or "").strip()
-
-    if not email:
-        emails_resp = await github.get("user/emails", token=token)
-        emails = emails_resp.json() if emails_resp is not None else []
-        for e in emails:
-            if isinstance(e, dict) and e.get("primary") and e.get("verified"):
-                email = (e.get("email") or "").strip()
-                break
-        if not email:
-            for e in emails:
-                if isinstance(e, dict) and e.get("verified"):
-                    email = (e.get("email") or "").strip()
-                    if email:
-                        break
-
-    if not email:
-        return RedirectResponse("/", status_code=302)
-
-    conn = _db_conn()
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT id, COALESCE(profile_picture, ''), COALESCE(role, 'student') FROM users WHERE email = ?",
-        (email,),
-    )
-    existing_user = cursor.fetchone()
-
-    if existing_user:
-        user_id = existing_user[0]
-        current_picture = (existing_user[1] or "").strip()
-        role = existing_user[2] or "student"
-        if avatar_url and (not current_picture or current_picture.lower() in ("default.jpg", "default.png", "default.svg")):
-            cursor.execute("UPDATE users SET profile_picture = ? WHERE id = ?", (avatar_url, user_id))
-            conn.commit()
-            current_picture = avatar_url
-    else:
-        cursor.execute(
-            """
-            INSERT INTO users (name, email, password_hash, profile_picture, role)
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            (name, email, "GITHUB_ACCOUNT", avatar_url or "default.svg", "student"),
-        )
-        conn.commit()
-        cursor.execute(
-            "SELECT id, COALESCE(profile_picture, ''), COALESCE(role, 'student') FROM users WHERE email = ?",
-            (email,),
-        )
-        inserted = cursor.fetchone()
-        user_id = inserted[0]
-        current_picture = inserted[1] or ""
-        role = inserted[2] or "student"
-
-    conn.close()
-
-    sess = req.session
-    sess["user_id"] = user_id
-    sess["name"] = name
-    sess["email"] = email
-    sess["role"] = role
-    if github_id is not None:
-        sess["github_id"] = github_id
-    if username:
-        sess["username"] = username
-    if role in (ROLE_ADMIN, ROLE_SEMI_ADMIN):
-        sess["is_admin"] = True
-        sess["admin_user"] = name or email
-    _set_session_profile_image(sess, current_picture)
-
-    return RedirectResponse("/home", status_code=302)
-
-
+# Group OCR boxes into table rows for report card processing
 def _group_ocr_boxes_into_table_rows(boxes):
     items = [box for box in (boxes or []) if str(box.get("text", "")).strip()]
     if len(items) < 4:
@@ -2188,7 +2126,7 @@ def _group_ocr_boxes_into_table_rows(boxes):
         return []
     return table_rows
 
-
+# OCR endpoint for processing report cards
 @rt("/ocr_report_card", methods=["POST"])
 async def ocr_report_card(req):
     form = await req.form()
@@ -2252,7 +2190,7 @@ async def ocr_report_card(req):
     except Exception as exc:
         return JSONResponse({"success": False, "message": f"Report card OCR failed: {exc}"})
 
-
+# Main entry point for the FastHTML application
 def main():
     os.makedirs(UPLOAD_FOLDER, exist_ok=True)
     init_database()
