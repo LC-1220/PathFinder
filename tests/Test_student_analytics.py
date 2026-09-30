@@ -1,4 +1,7 @@
 import pytest
+from types import SimpleNamespace
+
+import fasthtml_app as app
 
 from fasthtml_app import (
     _build_student_performance_analytics,
@@ -166,9 +169,9 @@ def test_report_card_with_each_cell_on_its_own_line_extracts_all_subjects():
 
 
 def test_course_average_profile_returns_subject_averages():
-    course_data = _course_average_profile("Computer Science")
+    course_data = _course_average_profile("BS in Computer Science with Specialization in Data Science")
 
-    assert course_data["course"] == "Computer Science"
+    assert course_data["course"] == "BS in Computer Science with Specialization in Data Science"
     assert course_data["overall_average"] > 70
     assert "math" in course_data["by_subject"]
     assert course_data["by_subject"]["technology"] >= 80
@@ -176,12 +179,12 @@ def test_course_average_profile_returns_subject_averages():
 
 def test_student_performance_analytics_computes_comparison():
     analytics = _build_student_performance_analytics(
-        "Computer Science",
+        "BS in Computer Science with Specialization in Data Science",
         "math - 95\nscience - 88\nenglish - 78\ntechnology - 92\nbusiness - 80\nsocial - 75",
     )
 
     assert analytics["student_overall"] > 80
-    assert analytics["selected_course"] == "Computer Science"
+    assert analytics["selected_course"] == "BS in Computer Science with Specialization in Data Science"
     assert "comparison" in analytics
     assert "subject_breakdown" in analytics
     assert len(analytics["subject_breakdown"]) == 6
@@ -239,7 +242,7 @@ def test_recommend_course_returns_real_courses_for_broader_subject_patterns():
 
     assert isinstance(recommendations, list)
     assert len(recommendations) > 0
-    assert any(item["course"] in {"Data Science", "Computer Science", "Information Technology", "Software Engineering"} for item in recommendations)
+    assert all(item["course"] in {name for name, _ in app.UNIVERSITY_COURSES} for item in recommendations)
 
 
 def test_build_student_performance_analytics_rejects_placeholder_course_names():
@@ -249,7 +252,29 @@ def test_build_student_performance_analytics_rejects_placeholder_course_names():
     )
 
     assert analytics["selected_course"] not in {"General Education", "Other", "Recommended Course"}
-    assert analytics["selected_course"] == "Computer Science" or "Recommended Course" in analytics["selected_course"]
+    assert analytics["selected_course"] in {name for name, _ in app.UNIVERSITY_COURSES}
+
+
+def test_university_catalog_uses_legacy_profiles_and_migrated_rows(monkeypatch):
+    source_rows = [(source, [80, 80, 80, 80, 80, 80], "Source description")
+                   for source in {source for _, source in app.UNIVERSITY_COURSES}]
+
+    def load(rows):
+        cursor = SimpleNamespace(execute=lambda *args: None, fetchall=lambda: rows)
+        monkeypatch.setattr(app, "_db_conn", lambda: SimpleNamespace(cursor=lambda: cursor, close=lambda: None))
+        monkeypatch.setattr(app, "_COURSE_TRAINING_DATA_CACHE", None)
+        return app._course_training_data()
+
+    expected = [name for name, _ in app.UNIVERSITY_COURSES]
+    assert [item["course"] for item in load(source_rows)] == expected
+    migrated = [(name, [80, 80, 80, 80, 80, 80], "Migrated description") for name in expected]
+    catalog = load(migrated)
+    assert [item["course"] for item in catalog] == expected
+    assert next(item for item in catalog if item["course"] == "Aircraft Maintenance Technology")["description"] == app.COURSE_DESCRIPTION_OVERRIDES["Aircraft Maintenance Technology"]
+    assert app._sanitize_recommendations([{"course": "Software Engineering"}, {"course": expected[0]}]) == [
+        {"course": expected[0], "description": "", "reason": "", "category": app.categorize_course(expected[0]),
+         "confidence": 0, "core_grade_fit": 0, "strand_grade_based": False}
+    ]
 
 
 def test_parse_report_card_handles_dynamic_student_data_and_variable_subject_count():

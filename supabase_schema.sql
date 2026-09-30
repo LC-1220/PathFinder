@@ -179,16 +179,9 @@ insert into public.course_training_data (course, features, description) values
 ('Political Economy', '[69, 76, 87, 61, 69, 87]', 'Study the relationship between politics and economic systems to prepare for community-focused and academic careers.'),
 ('Community Development', '[77, 69, 86, 63, 71, 93]', 'Study grassroots organizing and community empowerment to prepare for community-focused and academic careers.'),
 ('Chemistry', '[87, 91, 71, 68, 61, 70]', 'Explore chemical reactions and molecular science through rigorous scientific inquiry and research.'),
-('Physics', '[89, 92, 76, 63, 57, 66]', 'Explore the fundamental laws of matter and energy through rigorous scientific inquiry and research.'),
-('Marine Biology', '[88, 93, 77, 66, 56, 64]', 'Explore ocean life and marine ecosystem research through rigorous scientific inquiry and research.'),
-('Zoology', '[84, 99, 73, 62, 65, 70]', 'Explore animal biology and behavior studies through rigorous scientific inquiry and research.'),
-('Botany', '[83, 99, 76, 61, 60, 62]', 'Explore plant biology and classification through rigorous scientific inquiry and research.'),
-('Microbiology', '[88, 94, 70, 62, 59, 68]', 'Explore microorganisms and their biological impact through rigorous scientific inquiry and research.'),
 ('Biochemistry', '[86, 98, 73, 71, 61, 62]', 'Explore chemical processes within living organisms through rigorous scientific inquiry and research.'),
-('Geology', '[88, 98, 75, 68, 58, 70]', 'Explore earth''s structure, materials, and processes through rigorous scientific inquiry and research.'),
 ('Meteorology', '[88, 99, 70, 70, 56, 65]', 'Explore weather systems and atmospheric science through rigorous scientific inquiry and research.'),
 ('Astronomy', '[82, 95, 73, 70, 65, 69]', 'Explore celestial bodies and the physics of the universe through rigorous scientific inquiry and research.'),
-('Statistics', '[82, 99, 74, 66, 65, 62]', 'Explore data analysis and statistical modeling through rigorous scientific inquiry and research.'),
 ('Mathematics', '[88, 99, 79, 69, 62, 62]', 'Explore abstract reasoning and mathematical theory through rigorous scientific inquiry and research.'),
 ('Applied Physics', '[84, 98, 76, 62, 58, 63]', 'Explore practical applications of physical science through rigorous scientific inquiry and research.'),
 ('Molecular Biology', '[89, 99, 71, 62, 61, 69]', 'Explore molecular mechanisms of biological systems through rigorous scientific inquiry and research.'),
@@ -230,12 +223,83 @@ insert into public.course_training_data (course, features, description) values
 ('Airline Operations', '[67, 72, 89, 60, 91, 76]', 'Train for airline ground and passenger service operations within the hospitality and travel industry.'),
 ('Aviation Management', '[68, 75, 83, 63, 93, 81]', 'Train for airport and aviation business operations within the hospitality and travel industry.'),
 ('Air Traffic Management', '[69, 69, 81, 59, 91, 75]', 'Train for coordinating safe and efficient air traffic within the hospitality and travel industry.'),
-('Esports Management', '[72, 73, 91, 67, 94, 80]', 'Train for competitive gaming events and team operations within the hospitality and travel industry.'),
 ('Forensic Science', '[66, 74, 84, 65, 91, 79]', 'Prepare for scientific analysis for criminal justice investigations careers serving communities and institutions.'),
 ('Criminal Justice', '[65, 71, 93, 66, 92, 82]', 'Prepare for law enforcement and justice system administration careers serving communities and institutions.'),
 ('Disaster Risk Management', '[75, 71, 85, 61, 84, 84]', 'Prepare for emergency preparedness and disaster response planning careers serving communities and institutions.'),
 ('Renewable Energy Management', '[67, 78, 85, 57, 89, 84]', 'Prepare for sustainable energy policy and project management careers serving communities and institutions.'),
-('Urban and Regional Planning', '[75, 75, 92, 61, 86, 83]', 'Prepare for city and regional development planning careers serving communities and institutions.'),
 ('Marine Transportation', '[69, 80, 84, 57, 90, 84]', 'Prepare for maritime navigation and ship operations careers serving communities and institutions.'),
 ('Physical Fitness and Recreation Management', '[74, 73, 89, 62, 86, 85]', 'Prepare for recreation programs and fitness facility management careers serving communities and institutions.')
 on conflict (course) do update set features = excluded.features, description = excluded.description;
+
+-- Reuse the existing academic feature profiles, then retain only university programs.
+create temporary table if not exists university_course_catalog (
+    course text primary key,
+    source text not null
+);
+truncate university_course_catalog;
+insert into university_course_catalog (course, source) values
+('BS in Medical Technology', 'Medical Technology'),
+('BS in Nursing', 'Nursing'),
+('BS in Occupational Therapy', 'Occupational Therapy'),
+('BS in Pharmacy', 'Pharmacy'),
+('BS in Physical Therapy', 'Physical Therapy'),
+('BS in Radiologic Technology', 'Radiologic Technology'),
+('BS in Respiratory Therapy', 'Respiratory Therapy'),
+('BS in Architecture', 'Architecture'),
+('Bachelor of Arts in Communication', 'Communication'),
+('Bachelor of Arts major in Political Science', 'Political Science'),
+('Bachelor of Arts in Psychology', 'Psychology'),
+('Bachelor of Arts in Multimedia Arts', 'Multimedia Arts'),
+('Bachelor of Science in Psychology', 'Psychology'),
+('BS in Aircraft Maintenance and Technology', 'Mechanical Engineering'),
+('BS in Aviation Electronics Technology', 'Electrical Engineering'),
+('Aircraft Maintenance Technology', 'Mechanical Engineering'),
+('Aviation Electronics Technology', 'Electrical Engineering'),
+('BS in Accountancy', 'Accountancy'),
+('BS in Business Administration', 'Business Administration'),
+('BS in Business Administration major in Human Resource Management', 'Human Resource Management'),
+('BS in Business Administration major in Marketing Management', 'Marketing Management'),
+('BS in Entrepreneurship', 'Entrepreneurship'),
+('BS in Criminology', 'Criminology'),
+('BS in Aeronautical Engineering', 'Aerospace Engineering'),
+('BS in Civil Engineering', 'Civil Engineering'),
+('BS in Mechanical Engineering', 'Mechanical Engineering'),
+('BS in Computer Engineering', 'Computer Engineering'),
+('BS in Digital Engineering', 'Data Engineering'),
+('BS in Electrical Engineering', 'Electrical Engineering'),
+('BS in Electronics Engineering major in Biomedical Engineering', 'Biomedical Engineering'),
+('BS in Industrial Engineering', 'Industrial Engineering'),
+('BS in Information Technology with Specialization in Game Development', 'Game Development'),
+('BS in Computer Science with Specialization in Data Science', 'Data Science'),
+('Bachelor of Library and Information Science', 'Library and Information Science'),
+('BS in Tourism Management', 'Tourism Management'),
+('BS in Hospitality Management', 'Hospitality Management'),
+('BS in Marine Transportation', 'Marine Transportation'),
+('BS in Marine Engineering', 'Marine Engineering'),
+('BS in Naval Architecture and Marine Engineering', 'Naval Architecture'),
+('Bachelor of Early Childhood Education', 'Early Childhood Education'),
+('Bachelor of Elementary Education', 'Early Childhood Education'),
+('Bachelor of Physical Education', 'Physical Education'),
+('Bachelor of Secondary Education', 'Secondary Education - Mathematics'),
+('Bachelor of Special Needs Education', 'Special Needs Education');
+
+insert into public.course_training_data (course, features, description)
+select catalog.course, source.features,
+    case catalog.course
+        when 'BS in Aircraft Maintenance and Technology' then 'Study aircraft inspection, maintenance, and repair for safe aviation operations.'
+        when 'Aircraft Maintenance Technology' then 'Study aircraft inspection, maintenance, and repair for safe aviation operations.'
+        when 'BS in Aviation Electronics Technology' then 'Study aircraft electrical systems, avionics, and aviation electronics maintenance.'
+        when 'Aviation Electronics Technology' then 'Study aircraft electrical systems, avionics, and aviation electronics maintenance.'
+        when 'Bachelor of Elementary Education' then 'Prepare to teach and support learners across elementary school subjects.'
+        when 'Bachelor of Secondary Education' then 'Prepare to teach and support learners at the secondary school level.'
+        when 'BS in Digital Engineering' then 'Apply digital tools, data, and engineering methods to design technical systems.'
+        when 'BS in Naval Architecture and Marine Engineering' then 'Study ship design, vessel structures, and marine engineering systems.'
+        else source.description
+    end
+from university_course_catalog catalog
+join public.course_training_data source on source.course = catalog.source
+on conflict (course) do update set features = excluded.features, description = excluded.description;
+
+delete from public.course_training_data
+where course not in (select course from university_course_catalog);
+drop table university_course_catalog;

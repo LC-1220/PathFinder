@@ -19,6 +19,9 @@ This project now runs on FastHTML.
       postgresql://postgres.[project-ref]:[password]@[pooler-host]:6543/postgres
 
    Apply `supabase_schema.sql` in the Supabase SQL Editor before the first run.
+   For an existing database, reapply the schema to replace the old 200-course
+   catalog with the 44 university programs. Existing student grades and profiles
+   remain in place; legacy course matches are refreshed from saved grades.
 
    python fasthtml_app.py
 
