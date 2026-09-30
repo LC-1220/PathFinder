@@ -252,7 +252,7 @@ def _get_docling_converter():
     pipeline_options = PdfPipelineOptions(
         do_ocr=True,
         do_table_structure=True,
-        images_scale=float(os.getenv("DOCLING_IMAGES_SCALE", "0.5")),
+        images_scale=float(os.getenv("DOCLING_IMAGES_SCALE", "1.5")),
     )
     pipeline_options.table_structure_options.mode = TableFormerMode.FAST
     pipeline_options.table_structure_options.do_cell_matching = True
