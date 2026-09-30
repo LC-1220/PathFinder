@@ -354,6 +354,14 @@ body[data-home-mode="true"] .DMT{background:transparent;padding-top:34px;height:
 .match-meter-track span,.comparison-track i{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,#273bc5,#6854e8);}
 .recommendation-open{display:flex;align-items:center;justify-content:space-between;margin-top:14px;color:#3548d4;font-size:11px;font-weight:900;}
 
+.recommendation-dialog{position:fixed;inset:0;z-index:1100;display:grid;place-items:center;padding:20px;background:rgba(14,21,45,.52);backdrop-filter:blur(8px);}
+.recommendation-dialog[hidden]{display:none;}
+.recommendation-dialog-content{position:relative;width:min(860px,100%);max-height:min(90vh,900px);overflow-y:auto;border-radius:8px;background:#fff;box-shadow:0 28px 80px rgba(10,18,50,.28);padding:20px;}
+.recommendation-dialog-close{position:sticky;top:0;z-index:1;display:grid;place-items:center;margin:0 0 -36px auto;width:36px;height:36px;border:1px solid #dfe4f7;border-radius:6px;background:#fff;color:#25345d;cursor:pointer;}
+.recommendation-dialog-close:focus-visible{outline:3px solid #4c5bdf;outline-offset:2px;}
+.recommendation-dialog .inline-course-analysis{margin-top:0;padding-right:48px;border:0;box-shadow:none;}
+.recommendation-dialog .recommendation-analytics{margin:0;border:0;border-top:1px solid #d9def3;}
+
 .inline-course-analysis{margin-top:22px;padding:26px;border:1px solid #ced5fa;border-radius:8px;background:#fff;box-shadow:0 12px 32px rgba(31,43,110,.08);}
 .course-analysis-header{display:flex;align-items:center;justify-content:space-between;gap:20px;}
 .course-analysis-header span{color:#4c5bdf;font-size:11px;font-weight:900;text-transform:uppercase;}
@@ -862,6 +870,10 @@ button:hover{
     .inline-recommendation-card{grid-template-columns:36px minmax(0,1fr);padding:16px;}
     .inline-recommendations{padding:22px 12px 30px;}
     .inline-course-analysis{padding:19px 14px;}
+    .recommendation-dialog{padding:10px;}
+    .recommendation-dialog-content{padding:10px;max-height:calc(100dvh - 20px);}
+    .recommendation-dialog .inline-course-analysis{padding:16px 10px;}
+    .recommendation-dialog .recommendation-analytics{padding:16px 10px;}
     .course-analysis-header{align-items:flex-start;flex-direction:column;gap:10px;}
     .course-analysis-summary{grid-template-columns:1fr;}
     .analysis-series{grid-template-columns:70px 1fr 32px;}

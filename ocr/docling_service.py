@@ -282,7 +282,7 @@ def scan_report_card_docling(file_bytes, filename="report_card.pdf"):
     timings["converter_setup_seconds"] = round(time.perf_counter() - converter_started, 3)
 
     suffix = os.path.splitext(filename or "report_card.pdf")[1].lower()
-    if suffix not in {".pdf", ".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".webp"}:
+    if suffix not in {".pdf", ".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".webp", ".heic"}:
         suffix = ".pdf"
 
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as temp_file:

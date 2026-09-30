@@ -1982,7 +1982,30 @@ function clearInputs() {
             const list = document.getElementById('inline-recommendation-list');
             const courseAnalysis = document.getElementById('inline-course-analysis');
             const analytics = document.getElementById('recommendation-analytics');
-            if(!section || !list || !courseAnalysis || !analytics) return;
+            const dialog = document.getElementById('recommendation-dialog');
+            const closeButton = document.getElementById('recommendation-dialog-close');
+            if(!section || !list || !courseAnalysis || !analytics || !dialog || !closeButton) return;
+
+            if(!dialog.hidden) document.body.style.overflow = dialog.dataset.previousOverflow || '';
+            dialog.hidden = true;
+            let activeCard = null;
+            function closeDialog(){
+                dialog.hidden = true;
+                document.body.style.overflow = dialog.dataset.previousOverflow || '';
+                activeCard?.focus();
+            }
+            closeButton.onclick = closeDialog;
+            dialog.onclick = event => { if(event.target === dialog) closeDialog(); };
+            dialog.onkeydown = event => {
+                if(event.key === 'Escape') closeDialog();
+                if(event.key === 'Tab'){
+                    const focusable = [...dialog.querySelectorAll('button, [href], [tabindex]:not([tabindex="-1"])')];
+                    const first = focusable[0];
+                    const last = focusable[focusable.length - 1];
+                    if(event.shiftKey && document.activeElement === first){ event.preventDefault(); last.focus(); }
+                    else if(!event.shiftKey && document.activeElement === last){ event.preventDefault(); first.focus(); }
+                }
+            };
 
             const escapeHtml = value => String(value || '')
                 .replace(/&/g, '&amp;')
@@ -2003,7 +2026,7 @@ function clearInputs() {
             const subjectEvidence = extractSubjectEvidence(academicRecord);
             list.innerHTML = items.length
                 ? items.map((item, index) => `
-                    <article class="inline-recommendation-card${index === 0 ? ' best-match selected' : ''}" data-recommendation-index="${index}" role="button" tabindex="0" aria-pressed="${index === 0}">
+                    <article class="inline-recommendation-card${index === 0 ? ' best-match' : ''}" data-recommendation-index="${index}" role="button" tabindex="0" aria-haspopup="dialog">
                         <div class="recommendation-rank">${String(index + 1).padStart(2, '0')}</div>
                         <div class="recommendation-detail">
                             <div class="recommendation-title-row">
@@ -2017,7 +2040,7 @@ function clearInputs() {
                                 <div class="match-meter-label"><span>Academic match</span><strong>${Math.round(Number(item.confidence || 0))}%</strong></div>
                                 <div class="match-meter-track"><span style="width:${Math.max(0, Math.min(100, Number(item.confidence || 0)))}%"></span></div>
                             </div>
-                            <span class="recommendation-open">View analysis <i class="fa-solid fa-arrow-right"></i></span>
+                            <span class="recommendation-open">Why this course? <i class="fa-solid fa-arrow-right"></i></span>
                         </div>
                     </article>
                 `).join('')
@@ -2034,11 +2057,11 @@ function clearInputs() {
                 const difference = Number(comparison.overall_gap);
                 courseAnalysis.innerHTML = `
                     <div class="course-analysis-header">
-                        <div><span>Selected course analysis</span><h3>${escapeHtml(item.course)}</h3></div>
+                        <div><span>${index === 0 ? 'Your best match' : 'Recommended course'}</span><h3>${escapeHtml(item.course)}</h3></div>
                         <strong>${Math.round(Number(item.confidence || 0))}% match</strong>
                     </div>
+                    <p class="course-analysis-reason"><i class="fa-solid fa-lightbulb"></i>${escapeHtml(item.reason || 'This program matches your academic profile and subject strengths.')}</p>
                     <p class="course-analysis-description">${escapeHtml(item.description || 'Course description is not available.')}</p>
-                    <p class="course-analysis-reason"><i class="fa-solid fa-lightbulb"></i>${escapeHtml(item.reason || '')}</p>
                     <div class="course-analysis-summary">
                         <div><span>Your academic average</span><strong>${Number.isFinite(studentAverage) ? studentAverage.toFixed(2) : 'N/A'}</strong></div>
                         <div><span>Course benchmark</span><strong>${Number.isFinite(courseAverage) ? courseAverage.toFixed(2) : 'N/A'}</strong></div>
@@ -2055,11 +2078,11 @@ function clearInputs() {
                     </div>
                     <p class="course-analysis-note">${escapeHtml(comparison.narrative || 'Compare your subject strengths with this course benchmark.')}</p>
                 `;
-                list.querySelectorAll('.inline-recommendation-card').forEach((card, cardIndex) => {
-                    const selected = cardIndex === index;
-                    card.classList.toggle('selected', selected);
-                    card.setAttribute('aria-pressed', String(selected));
-                });
+                activeCard = list.querySelectorAll('.inline-recommendation-card')[index];
+                dialog.dataset.previousOverflow = document.body.style.overflow;
+                dialog.hidden = false;
+                document.body.style.overflow = 'hidden';
+                closeButton.focus();
             }
 
             list.querySelectorAll('.inline-recommendation-card').forEach((card, index) => {
@@ -2071,8 +2094,6 @@ function clearInputs() {
                     }
                 });
             });
-            renderSelectedCourse(0);
-
             const gradeValues = String(academicRecord?.grades || '')
                 .split(/[\s,;|]+/)
                 .map(value => Number.parseFloat(value))

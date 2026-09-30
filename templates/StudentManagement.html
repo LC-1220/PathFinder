@@ -221,8 +221,13 @@
                             <h2>Your top 3 course matches</h2>
                         </div>
                         <div id="inline-recommendation-list" class="inline-recommendation-list"></div>
-                        <div id="inline-course-analysis" class="inline-course-analysis"></div>
-                        <div id="recommendation-analytics" class="recommendation-analytics"></div>
+                        <div id="recommendation-dialog" class="recommendation-dialog" role="dialog" aria-modal="true" aria-label="Course recommendation details" hidden>
+                            <div class="recommendation-dialog-content">
+                                <button id="recommendation-dialog-close" class="recommendation-dialog-close" type="button" aria-label="Close course details" title="Close course details"><i class="fa-solid fa-xmark"></i></button>
+                                <div id="inline-course-analysis" class="inline-course-analysis"></div>
+                                <div id="recommendation-analytics" class="recommendation-analytics"></div>
+                            </div>
+                        </div>
                         <div class="recommendation-disclaimer"><i class="fa-solid fa-circle-info"></i><p>Course matches are academic guidance based on the grades provided. They do not guarantee admission, eligibility, or career outcomes. Consider your interests and speak with a guidance counselor before deciding.</p></div>
                         <div class="result-actions">
                             <button id="upload-another" type="button"><i class="fa-solid fa-arrow-rotate-left"></i> Upload another report card</button>

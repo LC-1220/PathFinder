@@ -47,6 +47,64 @@ CATEGORY_NAMES = ["math", "science", "english", "technology", "business", "socia
 _NEAREST_NEIGHBOR_MODEL = None
 _COURSE_TRAINING_DATA_CACHE = None
 
+UNIVERSITY_COURSES = (
+    ("BS in Medical Technology", "Medical Technology"),
+    ("BS in Nursing", "Nursing"),
+    ("BS in Occupational Therapy", "Occupational Therapy"),
+    ("BS in Pharmacy", "Pharmacy"),
+    ("BS in Physical Therapy", "Physical Therapy"),
+    ("BS in Radiologic Technology", "Radiologic Technology"),
+    ("BS in Respiratory Therapy", "Respiratory Therapy"),
+    ("BS in Architecture", "Architecture"),
+    ("Bachelor of Arts in Communication", "Communication"),
+    ("Bachelor of Arts major in Political Science", "Political Science"),
+    ("Bachelor of Arts in Psychology", "Psychology"),
+    ("Bachelor of Arts in Multimedia Arts", "Multimedia Arts"),
+    ("Bachelor of Science in Psychology", "Psychology"),
+    ("BS in Aircraft Maintenance and Technology", "Mechanical Engineering"),
+    ("BS in Aviation Electronics Technology", "Electrical Engineering"),
+    ("Aircraft Maintenance Technology", "Mechanical Engineering"),
+    ("Aviation Electronics Technology", "Electrical Engineering"),
+    ("BS in Accountancy", "Accountancy"),
+    ("BS in Business Administration", "Business Administration"),
+    ("BS in Business Administration major in Human Resource Management", "Human Resource Management"),
+    ("BS in Business Administration major in Marketing Management", "Marketing Management"),
+    ("BS in Entrepreneurship", "Entrepreneurship"),
+    ("BS in Criminology", "Criminology"),
+    ("BS in Aeronautical Engineering", "Aerospace Engineering"),
+    ("BS in Civil Engineering", "Civil Engineering"),
+    ("BS in Mechanical Engineering", "Mechanical Engineering"),
+    ("BS in Computer Engineering", "Computer Engineering"),
+    ("BS in Digital Engineering", "Data Engineering"),
+    ("BS in Electrical Engineering", "Electrical Engineering"),
+    ("BS in Electronics Engineering major in Biomedical Engineering", "Biomedical Engineering"),
+    ("BS in Industrial Engineering", "Industrial Engineering"),
+    ("BS in Information Technology with Specialization in Game Development", "Game Development"),
+    ("BS in Computer Science with Specialization in Data Science", "Data Science"),
+    ("Bachelor of Library and Information Science", "Library and Information Science"),
+    ("BS in Tourism Management", "Tourism Management"),
+    ("BS in Hospitality Management", "Hospitality Management"),
+    ("BS in Marine Transportation", "Marine Transportation"),
+    ("BS in Marine Engineering", "Marine Engineering"),
+    ("BS in Naval Architecture and Marine Engineering", "Naval Architecture"),
+    ("Bachelor of Early Childhood Education", "Early Childhood Education"),
+    ("Bachelor of Elementary Education", "Early Childhood Education"),
+    ("Bachelor of Physical Education", "Physical Education"),
+    ("Bachelor of Secondary Education", "Secondary Education - Mathematics"),
+    ("Bachelor of Special Needs Education", "Special Needs Education"),
+)
+
+COURSE_DESCRIPTION_OVERRIDES = {
+    "BS in Aircraft Maintenance and Technology": "Study aircraft inspection, maintenance, and repair for safe aviation operations.",
+    "Aircraft Maintenance Technology": "Study aircraft inspection, maintenance, and repair for safe aviation operations.",
+    "BS in Aviation Electronics Technology": "Study aircraft electrical systems, avionics, and aviation electronics maintenance.",
+    "Aviation Electronics Technology": "Study aircraft electrical systems, avionics, and aviation electronics maintenance.",
+    "Bachelor of Elementary Education": "Prepare to teach and support learners across elementary school subjects.",
+    "Bachelor of Secondary Education": "Prepare to teach and support learners at the secondary school level.",
+    "BS in Digital Engineering": "Apply digital tools, data, and engineering methods to design technical systems.",
+    "BS in Naval Architecture and Marine Engineering": "Study ship design, vessel structures, and marine engineering systems.",
+}
+
 #Template Environment Setup
 def _template_env():
     env = Environment(
@@ -161,10 +219,14 @@ def _course_training_data():
     cursor.execute("SELECT course, features, description FROM course_training_data ORDER BY id")
     rows = cursor.fetchall()
     conn.close()
-    _COURSE_TRAINING_DATA_CACHE = [
-        {"course": row[0], "features": row[1], "description": row[2]}
-        for row in rows
-    ]
+    profiles = {row[0]: {"features": row[1], "description": row[2]} for row in rows}
+    catalog = []
+    for name, source in UNIVERSITY_COURSES:
+        profile = profiles.get(name) or profiles.get(source)
+        if profile:
+            catalog.append({"course": name, "features": profile["features"],
+                            "description": COURSE_DESCRIPTION_OVERRIDES.get(name, profile["description"])})
+    _COURSE_TRAINING_DATA_CACHE = catalog
     return _COURSE_TRAINING_DATA_CACHE
 
 #Password Hashing and Verification
@@ -630,7 +692,7 @@ def _sanitize_recommendations(payload):
         if not isinstance(item, dict):
             continue
         course_name = item.get("course")
-        if not _valid_recommendation_course_name(course_name):
+        if not _valid_recommendation_course_name(course_name) or course_name not in {name for name, _ in UNIVERSITY_COURSES}:
             continue
         valid.append({
             "course": course_name,
@@ -1908,6 +1970,9 @@ def get_profile(req):
     except (TypeError, ValueError):
         recommendation_data = recommendation_value
     saved_recommendations = _sanitize_recommendations(recommendation_data)
+    if not saved_recommendations and profile[7]:
+        subjects = _clean_subjects_for_recommendation(profile[7]) or profile[7]
+        saved_recommendations = _sanitize_recommendations(recommend_course(subjects, profile[4] or "", profile[9] or ""))
     saved_comparisons = {
         item["course"]: _build_student_performance_analytics(item["course"], profile[7] or "")
         for item in saved_recommendations[:3]
