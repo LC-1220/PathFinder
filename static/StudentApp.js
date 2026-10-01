@@ -33,6 +33,8 @@ function addStudent() {
         subjects: ''
     };
  
+                list.querySelectorAll('.inline-recommendation-card').forEach(card => card.classList.remove('selected'));
+                activeCard?.classList.add('selected');
     students.push(student);
  
     renderStudents();
@@ -1204,6 +1206,25 @@ function parseAcademicRecord(text){
         const codeMatch = line.match(/^\s*\d{4,6}\s+[A-Z0-9]{2,8}\s+/i);
         if(!codeMatch) continue;
 
+        const codeMatches = [...line.matchAll(/\b(\d{4,6})\s+([A-Z0-9]{2,8})\b/gi)];
+        if(codeMatches.length > 1){
+            for(let index = 0; index < codeMatches.length; index++){
+                const codeEntry = codeMatches[index];
+                const nextEntry = codeMatches[index + 1];
+                const segmentEnd = nextEntry ? nextEntry.index : line.length;
+                const segment = line.slice(codeEntry.index, segmentEnd);
+                const segmentGrades = [...segment.matchAll(/\b(\d{1,3}(?:\.\d{1,2})?)\b/g)]
+                    .map(match => Number.parseFloat(match[1]))
+                    .filter(value => Number.isFinite(value) && value >= 0 && value <= 100);
+                const codeKey = `${codeEntry[1]} ${codeEntry[2]}`.toUpperCase();
+                const subjectLabel = subjectCatalog[codeKey] || subjectCatalog[codeEntry[1]] || subjectCatalog[codeEntry[2].toUpperCase()];
+                if(subjectLabel && segmentGrades.length){
+                    addSubjectRow(subjectLabel, segmentGrades[segmentGrades.length - 1]);
+                }
+            }
+            continue;
+        }
+
         const numericMatches = [...line.matchAll(/\b\d{1,3}(?:\.\d{1,2})?\b/g)];
         if(numericMatches.length < 3) continue;
         const finalTerms = numericMatches.slice(-3);
@@ -1215,6 +1236,7 @@ function parseAcademicRecord(text){
 
     for(const rawLine of String(text || '').split(/\r?\n/)){
         const line = rawLine.replace(/\s+/g, ' ').trim();
+        if([...line.matchAll(/\b\d{4,6}\s+[A-Z0-9]{2,8}\b/gi)].length > 1) continue;
         const gradeMatch = line.match(/\b(\d{1,3}(?:\.\d{1,2})?)\s*(?:Passed|Failed|Incomplete|Conditional|Approved|Remarks)?\s*$/i);
         if(!gradeMatch) continue;
         const grade = Number.parseFloat(gradeMatch[1]);
@@ -1723,9 +1745,6 @@ function clearInputs() {
         if(!input) return;
 
         const isGuest = document.body.dataset.guest === 'true';
-        const isHomeMode = document.body.dataset.homeMode === 'true';
-        let currentInlineRecommendations = [];
-        let selectedInlineCourse = '';
 
         const preview = document.getElementById('preview');
         const previewContainer = preview ? preview.parentElement : null;
@@ -1738,14 +1757,6 @@ function clearInputs() {
         const clearFilesBtn = document.getElementById('clear-files');
         const uploadStatus = document.getElementById('upload-status');
         const uploadError = document.getElementById('upload-error');
-        const chatToggle = document.getElementById('pathfinder-chat-toggle');
-        const chatPanel = document.getElementById('pathfinder-chat-panel');
-        const chatClose = document.getElementById('pathfinder-chat-close');
-        const chatMessages = document.getElementById('pathfinder-chat-messages');
-        const chatQuick = document.getElementById('pathfinder-chat-quick');
-        const chatStatus = document.getElementById('pathfinder-chat-status');
-        const chatInput = document.getElementById('pathfinder-chat-input');
-        const chatSend = document.getElementById('pathfinder-chat-send');
 
         const termsOverlay = document.getElementById('terms-modal-overlay');
         const termsBody = document.getElementById('terms-modal-body');
@@ -1819,63 +1830,6 @@ function clearInputs() {
                 }
             });
         }
-
-        function setChatOpen(open){
-            if(!chatPanel || !chatToggle) return;
-            chatPanel.hidden = !open;
-            chatToggle.setAttribute('aria-expanded', String(open));
-            if(open) chatInput?.focus();
-        }
-
-        function appendChatMessage(role, text){
-            if(!chatMessages) return;
-            const message = document.createElement('div');
-            message.className = `pathfinder-chat-message ${role}`;
-            message.textContent = text;
-            chatMessages.appendChild(message);
-            chatMessages.scrollTop = chatMessages.scrollHeight;
-        }
-
-        async function askPathFinder(){
-            const message = chatInput?.value.trim() || '';
-            if(!message || !chatSend) return;
-            appendChatMessage('user', message);
-            chatInput.value = '';
-            chatSend.disabled = true;
-            if(chatStatus) chatStatus.hidden = false;
-            try{
-                const response = await fetch('/course_chat', {
-                    method: 'POST',
-                    headers: {'Content-Type':'application/json'},
-                    body: JSON.stringify({message, recommendations: currentInlineRecommendations, selected_course: selectedInlineCourse})
-                });
-                const data = await response.json();
-                appendChatMessage('assistant', data?.reply || 'I could not answer that right now.');
-            }catch(_){
-                appendChatMessage('assistant', 'PathFinder AI is unavailable right now. Please try again.');
-            }finally{
-                chatSend.disabled = false;
-                if(chatStatus) chatStatus.hidden = true;
-                chatInput?.focus();
-            }
-        }
-
-        chatToggle?.addEventListener('click', () => setChatOpen(chatPanel?.hidden));
-        chatClose?.addEventListener('click', () => setChatOpen(false));
-        chatSend?.addEventListener('click', askPathFinder);
-        chatInput?.addEventListener('keydown', event => {
-            if(event.key === 'Enter'){
-                event.preventDefault();
-                askPathFinder();
-            }
-            if(event.key === 'Escape') setChatOpen(false);
-        });
-        chatQuick?.querySelectorAll('button').forEach(button => {
-            button.addEventListener('click', () => {
-                if(chatInput) chatInput.value = button.dataset.question || '';
-                askPathFinder();
-            });
-        });
 
         if(termsBody){
             termsBody.addEventListener('scroll', checkTermsScrollProgress);
@@ -2037,13 +1991,6 @@ function clearInputs() {
                 .slice()
                 .sort((left, right) => Number(right.confidence || 0) - Number(left.confidence || 0))
                 .slice(0, 3);
-            currentInlineRecommendations = items;
-            selectedInlineCourse = items[0]?.course || '';
-            const bestCourse = items[0]?.course;
-            const whyButton = chatQuick?.querySelector('[data-question="Why is my best course recommended?"]');
-            if(whyButton && bestCourse){
-                whyButton.dataset.question = `Why is ${bestCourse} recommended for me?`;
-            }
             const subjectEvidence = extractSubjectEvidence(academicRecord)
                 .map(entry => ({...entry, subject: majorSubjectCategory(entry.subject) || entry.subject}))
                 .filter((entry, index, entries) => entries.findIndex(candidate => candidate.subject === entry.subject) === index)
@@ -2073,7 +2020,6 @@ function clearInputs() {
             function renderSelectedCourse(index){
                 const item = items[index];
                 if(!item) return;
-                selectedInlineCourse = item.course || '';
                 const comparison = comparisons[item.course] || {};
                 const rows = (Array.isArray(comparison.comparison) ? comparison.comparison : [])
                     .filter(row => /math|science|english/i.test(String(row.subject || '')) && Number(row.student || 0) > 0)
@@ -2135,9 +2081,6 @@ function clearInputs() {
             const spread = gradeValues.length > 1
                 ? Math.max(...gradeValues) - Math.min(...gradeValues)
                 : null;
-            const lead = items.length > 1
-                ? Math.max(0, Number(items[0].confidence || 0) - Number(items[1].confidence || 0))
-                : 0;
             const evidenceCount = Math.max(gradeValues.length, subjectLines.length);
             const topConfidence = Number(items[0]?.confidence || 0);
             const evidenceQuality = evidenceCount >= 6 && topConfidence >= 60
@@ -2156,17 +2099,6 @@ function clearInputs() {
                     <div class="analytics-stat"><i class="fa-solid fa-book-open"></i><strong>${evidenceCount}</strong><span>subjects analyzed</span></div>
                     <div class="analytics-stat"><i class="fa-solid fa-chart-line"></i><strong>${Number.isFinite(average) ? average.toFixed(1) : 'N/A'}</strong><span>average grade</span></div>
                     <div class="analytics-stat"><i class="fa-solid fa-arrows-left-right"></i><strong>${spread === null ? 'N/A' : spread.toFixed(1)}</strong><span>grade-point spread</span></div>
-                    <div class="analytics-stat"><i class="fa-solid fa-arrow-trend-up"></i><strong>${lead.toFixed(1)}%</strong><span>best-match lead</span></div>
-                </div>
-                <div class="comparison-chart" role="img" aria-label="Bar graph comparing the top three course match scores">
-                    <h4>Top course comparison</h4>
-                    ${items.map((item, index) => `
-                        <div class="comparison-row">
-                            <span>${escapeHtml(item.course)}</span>
-                            <div class="comparison-track"><i style="width:${Math.max(0, Math.min(100, Number(item.confidence || 0)))}%"></i></div>
-                            <strong>${Math.round(Number(item.confidence || 0))}%</strong>
-                        </div>
-                    `).join('')}
                 </div>
             ` : '';
             section.style.display = 'block';

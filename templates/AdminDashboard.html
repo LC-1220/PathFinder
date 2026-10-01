@@ -59,10 +59,6 @@
 
     <div class="cards admin-dashboard-content">
         <div class="card">
-          <h4>Recommended Courses</h4>
-          <div class="chart-wrap"><canvas id="chartRecs"></canvas></div>
-        </div>
-        <div class="card">
           <h4>Monthly Uploads</h4>
           <div class="chart-wrap"><canvas id="chartMonthly"></canvas></div>
         </div>
@@ -182,7 +178,6 @@ async function fetchStudents(){
 }
 
 let chartProfiles = null;
-let chartRecs = null;
 let chartGwa = null;
 let chartMonthly = null;
 let chartStrand = null;
@@ -202,21 +197,6 @@ function renderProfileBar(ctxElem, labels, values){
       indexAxis: 'y',
       plugins: { legend: { display: false } },
       scales: { x: { beginAtZero: true, ticks: { precision:0 } }, y: { ticks: { autoSkip: false } } },
-      animation: { duration: 800, easing: 'easeOutCubic' }
-    }
-  });
-}
-
-function renderBar(ctxElem, labels, values){
-  destroyIfExists(chartRecs);
-  chartRecs = new Chart(ctxElem, {
-    type: 'bar',
-    data: { labels, datasets: [{ label: 'Count', data: values, backgroundColor: 'rgba(51,94,234,0.9)', borderRadius: 8 }] },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: { legend: { display: false } },
-      scales: { y: { beginAtZero: true, ticks: { precision:0 } } },
       animation: { duration: 800, easing: 'easeOutCubic' }
     }
   });
@@ -571,11 +551,6 @@ async function loadDashboard(){
   try {
     const stats = await fetchStats();
     const allRecList = stats.all_recommended_courses || [];
-
-    const rLabels = allRecList.map(item => item.course);
-    const rValues = allRecList.map(item => item.count);
-
-    renderBar(document.getElementById('chartRecs'), rLabels, rValues);
 
     document.getElementById('statTotalStudents').innerText = stats.total_profiles ?? '0';
     document.getElementById('statTotalReportCards').innerText = stats.total_report_cards_uploaded ?? '0';

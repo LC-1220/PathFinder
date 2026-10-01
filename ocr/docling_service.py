@@ -231,6 +231,39 @@ def _subjects_from_table(rows):
     return subjects
 
 
+_MERGED_SUBJECT_CODE_NAMES = {
+    "12266": "Entrepreneurship",
+    "ENT": "Entrepreneurship",
+    "12289": "Food and Beverage Services 1",
+    "FBS": "Food and Beverage Services 1",
+}
+
+
+def _split_merged_subjects(subjects):
+    """Split adjacent subject-code rows that Docling places in one table cell."""
+    split_subjects = []
+    code_pattern = re.compile(r"\b(\d{4,6})\s+([A-Z0-9]{2,8})\b", re.IGNORECASE)
+    for subject in subjects or []:
+        name = str(subject.get("subject_name", "")).strip()
+        matches = list(code_pattern.finditer(name))
+        labels = []
+        for match in matches:
+            for code in (f"{match.group(1)} {match.group(2)}", match.group(1), match.group(2)):
+                label = _MERGED_SUBJECT_CODE_NAMES.get(code.upper())
+                if label and label not in labels:
+                    labels.append(label)
+                    break
+        for label in dict.fromkeys(_MERGED_SUBJECT_CODE_NAMES.values()):
+            if label.lower() in name.lower() and label not in labels:
+                labels.append(label)
+        if len(labels) < 2:
+            split_subjects.append(subject)
+            continue
+        for label in labels:
+            split_subjects.append({**subject, "subject_name": label})
+    return split_subjects
+
+
 _DOCLING_CONVERTER = None
 
 
@@ -321,6 +354,7 @@ def scan_report_card_docling(file_bytes, filename="report_card.pdf"):
     else:
         output_table = normalized_table
         output_subjects = normalized_subjects
+    output_subjects = _split_merged_subjects(output_subjects)
     lines = [line.strip() for line in str(markdown or "").splitlines() if line.strip()]
     timings["postprocess_seconds"] = round(time.perf_counter() - postprocess_started, 3)
     timings["ocr_total_seconds"] = round(time.perf_counter() - total_started, 3)

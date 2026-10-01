@@ -72,13 +72,6 @@
                 </a>
             </li>
 
-            <li>
-                <a href="#pathfinder-chat-panel" class="logo">
-                    <span class="icon" ><i class="fa-solid fa-book-open"></i></span>
-                    <span class="text">PathFinder AI</span>
-                </a>
-            </li>
- 
              <li>
                 <a href="#settings" class="logo" data-open-settings>
                     <span class="icon" ><i class="fa-solid fa-gear"></i></span>
@@ -237,33 +230,6 @@
                 </section>
             </div>
         </div>
-
-        {% if home_mode|default(false) %}
-        <button id="pathfinder-chat-toggle" class="pathfinder-chat-toggle" type="button" aria-label="Open PathFinder AI" aria-controls="pathfinder-chat-panel" aria-expanded="false" title="PathFinder AI">
-            <i class="fa-solid fa-robot"></i>
-            <span>AI</span>
-        </button>
-        <aside id="pathfinder-chat-panel" class="pathfinder-chat-panel" hidden aria-label="PathFinder AI assistant">
-            <header class="pathfinder-chat-header">
-                <div class="pathfinder-chat-avatar"><i class="fa-solid fa-robot"></i></div>
-                <div><strong>PathFinder AI</strong><span>Course assistant</span></div>
-                <button id="pathfinder-chat-close" type="button" aria-label="Close PathFinder AI"><i class="fa-solid fa-xmark"></i></button>
-            </header>
-            <div id="pathfinder-chat-messages" class="pathfinder-chat-messages" aria-live="polite">
-                <div class="pathfinder-chat-message assistant">Ask me about your recommended courses, course fit, or ways to strengthen your profile.</div>
-            </div>
-            <div id="pathfinder-chat-quick" class="pathfinder-chat-quick">
-                <button type="button" data-question="List my top courses">Top courses</button>
-                <button type="button" data-question="Why is my best course recommended?">Why this match?</button>
-                <button type="button" data-question="How can I improve my academic profile?">How to improve</button>
-            </div>
-            <div id="pathfinder-chat-status" class="pathfinder-chat-status" hidden>PathFinder AI is thinking...</div>
-            <div class="pathfinder-chat-input-row">
-                <input id="pathfinder-chat-input" type="text" placeholder="Ask about a course..." autocomplete="off">
-                <button id="pathfinder-chat-send" type="button" aria-label="Send question" title="Send"><i class="fa-solid fa-paper-plane"></i></button>
-            </div>
-        </aside>
-        {% endif %}
 
         <div id="settings-modal" class="settings-modal" hidden>
             <div class="settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title">

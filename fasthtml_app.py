@@ -610,7 +610,7 @@ def categorize_course(course_name, description=""):
         return "Engineering"
     if any(tok in name for tok in ("agriculture", "fisheries", "farm", "crop", "soil", "environmental science", "ecosystem", "sustainability", "forest")) or any(tok in desc for tok in ("agriculture", "fisheries", "farm", "crop", "soil", "environmental science", "ecosystem", "sustainability", "forest")):
         return "Agriculture"
-    if any(tok in name for tok in ("business", "management", "accounting", "marketing", "finance", "administration", "economics", "entrepreneur")) or any(tok in desc for tok in ("business", "management", "accounting", "marketing", "finance", "operations")):
+    if any(tok in name for tok in ("business", "management", "account", "accounting", "marketing", "finance", "administration", "economics", "entrepreneur")) or any(tok in desc for tok in ("business", "management", "accounting", "finance", "marketing", "operations")):
         return "Business & Management"
     if any(tok in name for tok in ("education", "teacher", "teaching", "psychology", "social", "humanities", "communication")) or any(tok in desc for tok in ("education", "teaching", "psychology", "social", "communication", "humanities")):
         return "Social Sciences & Education"
@@ -771,12 +771,12 @@ def recommend_course(subjects_text, current_course="", strand=""):
             })
     # Group the recommended courses by strand and adjust confidence based on strand fit
     strand_groups = {
-        "stem": { "Engineering", "Allied Health",},
-        "ict": {"Computer Studies", "Information Technology"},
+        "stem": {"Engineering", "Allied Health"},
+        "ict": {"Computer Studies"},
         "abm": {"Business & Management", "Hospitality & Tourism"},
         "humss": {"Social Sciences & Education", "Public Service & Governance", "Arts & Design"},
         "tvl": {"Computer Studies", "Allied Health", "Hospitality & Tourism", "Agriculture"},
-        "gas": set(),
+        "gas": {"Social Sciences & Education", "Business & Management", "Hospitality & Tourism", "Arts & Design"},
     }
     strand_key = (strand or "").strip().lower()
     preferred_groups = strand_groups.get(strand_key, set())
@@ -786,9 +786,38 @@ def recommend_course(subjects_text, current_course="", strand=""):
         "abm": ("business", "account", "marketing", "management", "finance", "economics", "entrepreneur", "hospitality", "tourism"),
         "humss": ("psychology", "education", "communication", "political", "criminology", "public administration", "social", "legal", "tourism"),
         "tvl": ("technology", "computer", "nursing", "medical", "pharmacy", "hospitality", "tourism", "agriculture", "fisheries"),
-        "gas": (),
+        "gas": ("communication", "business", "education", "hospitality", "tourism", "arts", "psychology"),
     }
     preferred_terms = strand_course_terms.get(strand_key, ())
+
+    def matches_strand(item):
+        course_text = f"{item['course']} {item.get('description', '')}".lower()
+        return (
+            (preferred_groups and item["category"] in preferred_groups)
+            or (preferred_terms and any(term in course_text for term in preferred_terms))
+        )
+
+    # Ensure the final results contain a strand-aligned course even when it is
+    # outside the nearest-neighbor sample selected by the grade profile.
+    if strand_key and preferred_groups and not any(matches_strand(item) for item in recommendations):
+        strand_candidates = [sample for sample in training_data if matches_strand({
+            "course": sample["course"],
+            "description": sample.get("description", ""),
+            "category": categorize_course(sample["course"], sample.get("description", "")),
+        })]
+        if strand_candidates:
+            sample = min(strand_candidates, key=lambda item: _weighted_vector_distance(features, item["features"]))
+            category = categorize_course(sample["course"], sample.get("description", ""))
+            distance = _weighted_vector_distance(features, sample["features"])
+            recommendations.append({
+                "course": sample["course"],
+                "description": sample.get("description", ""),
+                "reason": _course_match_reason(sample["course"], category, strongest, strand),
+                "category": category,
+                "confidence": round(max(1.0, 100.0 - distance), 2),
+                "core_grade_fit": round(_core_grade_fit(features, sample["features"]), 2),
+            })
+
     for item in recommendations:
         course_text = f"{item['course']} {item.get('description', '')}".lower()
         strand_fit = 0
@@ -812,6 +841,12 @@ def recommend_course(subjects_text, current_course="", strand=""):
         key=lambda item: (item.get("strand_grade_score", 0), item["confidence"]),
         reverse=True,
     )
+    if strand_key and preferred_groups:
+        strand_match = next((item for item in recommendations if matches_strand(item)), None)
+        if strand_match and not any(matches_strand(item) for item in recommendations[:5]):
+            recommendations = recommendations[:4] + [strand_match]
+            strand_match["strand_grade_based"] = True
+
     if recommendations and strand:
         recommendations[0]["strand_grade_based"] = True
         recommendations[0]["reason"] += f" This top match combines your {strand.upper()} strand with your Math, Science, and English grade profile."
@@ -903,21 +938,6 @@ def _build_student_performance_analytics(course_name, subjects_text):
         "subject_breakdown": subject_breakdown,
     }
 
-# Generate a slug for course aliases to standardize course identifiers
-def _course_alias_slug(value):
-    return re.sub(r"[^a-z0-9]+", "", (value or "").lower())
-
-# Extract the requested course from a user's message
-def _extract_requested_course(message):
-    text = (message or "").strip()
-    if not text:
-        return ""
-    quoted = re.findall(r'"([^"]{3,})"', text)
-    if quoted:
-        return quoted[0].strip()
-    m = re.search(r"(?:what\s+about|recommend|for)\s+([A-Za-z][A-Za-z\s&\-/]{2,})", text, re.IGNORECASE)
-    return (m.group(1).strip(" .?!,") if m else "")
-
 # Retrieve the latest profile of a user from the database
 def _get_user_latest_profile(user_id):
     try:
@@ -952,94 +972,6 @@ def _get_user_latest_profile(user_id):
         "recommendation": row[8],
         "strand": row[9],
     }
-
-# Clean and standardize chat input values, providing a fallback if necessary
-def _chat_value(value, fallback):
-    cleaned = re.sub(r"[|]+", " ", str(value or "")).strip()
-    cleaned = re.sub(r"\s+", " ", cleaned)
-    return cleaned if re.search(r"[A-Za-z0-9]", cleaned) else fallback
-
-# Build a chat response based on the user's message, available recommendations, and profile information
-#TODO:Remove AI chat
-def _build_chat_response(message, recommendations, profile, selected_course=""):
-    message = (message or "").strip()
-    if not message:
-        return "Ask me about your recommended courses, why they were suggested, or mention a course you want so I can compare it with your current profile."
-    if not recommendations:
-        return "No recommendations are saved yet. Upload or update your student profile first, then ask again and I can explain the course matches."
-
-    profile = profile or {}
-    gwa = _chat_value(profile.get("gwa"), "not available")
-    strand = _chat_value(profile.get("strand"), "not specified")
-    safe_recommendations = [
-        {
-            **item,
-            "course": _chat_value(item.get("course"), "Unnamed course"),
-            "description": _chat_value(item.get("description"), "No course description is available."),
-            "reason": _chat_value(item.get("reason"), ""),
-        }
-        for item in recommendations
-        if isinstance(item, dict) and _chat_value(item.get("course"), "")
-    ]
-    if not safe_recommendations:
-        return "I could not find usable course recommendations yet. Upload or update your student profile and ask again."
-    recommendations = safe_recommendations
-    scores = _extract_subject_scores(profile.get("subjects", ""))
-    strengths = _infer_strengths_from_features(_build_feature_vector(profile.get("subjects", "")))
-    asked = next(
-        (
-            item.get("course", "")
-            for item in recommendations
-            if item.get("course") and item.get("course", "").lower() in message.lower()
-        ),
-        _extract_requested_course(message),
-    )
-    if not asked and selected_course and re.search(r"\b(this|selected|it|course|career|about)\b", message.lower()):
-        asked = selected_course
-    if asked:
-        asked_slug = _course_alias_slug(asked)
-        matching = next((item for item in recommendations if _course_alias_slug(item.get("course", "")) == asked_slug), None)
-        if not matching:
-            catalog_course = next(
-                (item for item in _course_training_data() if _course_alias_slug(item.get("course", "")) == asked_slug),
-                None,
-            )
-            if catalog_course:
-                features = _build_feature_vector(profile.get("subjects", ""))
-                distance = _vector_distance(features, catalog_course["features"])
-                confidence = round(max(1.0, min(100.0, 100.0 - distance * 10.0)), 2)
-                category = categorize_course(catalog_course["course"], catalog_course.get("description", ""))
-                strand_note = f" It aligns with your {strand} strand." if category in {"Computer Studies", "Engineering", "Allied Health"} and strand.lower() == "stem" else ""
-                return f"{catalog_course['course']} fits your current profile. {catalog_course.get('description', '')}{strand_note}"
-        if matching:
-            return (
-                f"{matching.get('course')} is one of the strongest matches for your profile. "
-                f"Your GWA is {gwa}, your strand is {strand}, and your strongest areas are {', '.join(strengths) or 'still developing'}. "
-                f"{matching.get('description', '')} {matching.get('reason', '')}"
-            ).strip()
-        return f"{asked.title()} is not in your current top recommendations. Your closest matches are: {', '.join(item.get('course', '') for item in recommendations[:3])}."
-
-    lowered = message.lower()
-    if any(token in lowered for token in ("top course", "top match", "which course", "what should i choose", "list my")):
-        top_names = ", ".join(item["course"] for item in recommendations[:5])
-        return f"Your current top matches are: {top_names}. The strongest match is {recommendations[0]['course']}."
-
-    if any(token in lowered for token in ("improve", "weak", "better", "prepare")):
-        weakest = sorted(
-            ((name, _average(values)) for name, values in scores.items() if values),
-            key=lambda item: item[1],
-        )[:2]
-        focus = ", ".join(f"{name} ({score:.1f})" for name, score in weakest) or "your subject scores"
-        return f"To strengthen your options, focus first on {focus}. Your current strand is {strand} and your GWA is {gwa}."
-
-    if any(token in lowered for token in ("why", "recommend", "fit", "match")):
-        best = recommendations[0]
-        profile_fit = f"your {strand} strand and GWA of {gwa}" if strand != "not specified" else f"your GWA of {gwa}"
-        reason = best["reason"] or f"It aligns with {', '.join(strengths) or 'your overall grade profile'}."
-        return f"{best['course']} is currently your strongest match because it fits {profile_fit}. {reason}".strip()
-
-    top_names = ", ".join([r.get('course', '') for r in recommendations[:5] if r.get("course")])
-    return f"Based on your {strand} strand, GWA {gwa}, and strongest areas in {', '.join(strengths) or 'your overall profile'}, your current top matches are: {top_names}."
 
 # Initialize the database and create necessary tables if they do not exist
 def init_database():
@@ -1995,46 +1927,6 @@ def get_profile(req):
             "strand": profile[9],
         }
     )
-
-# Define the route for handling course chat interactions
-@rt("/course_chat", methods=["POST"])
-async def course_chat(req):
-    data = await req.json()
-    message = (data.get("message") or "").strip()
-    selected_course = (data.get("selected_course") or "").strip()
-
-    user_id = req.session.get("user_id")
-    profile = _get_user_latest_profile(user_id) if user_id else None
-    if not profile and req.session.get("is_guest"):
-        guest_subjects = req.session.get("latest_subjects", "")
-        profile = {
-            "subjects": guest_subjects,
-            "gwa": _compute_gwa(guest_subjects),
-            "strand": req.session.get("latest_strand") or "current academic",
-            "recommendation": req.session.get("latest_recommendations", ""),
-        }
-
-    recommendations = data.get("recommendations") if isinstance(data.get("recommendations"), list) else None
-
-    if not recommendations:
-        rec_payload = req.session.get("latest_recommendations")
-        if rec_payload:
-            try:
-                recommendations = json.loads(rec_payload)
-            except (TypeError, ValueError):
-                recommendations = []
-
-    if not recommendations and profile and profile.get("recommendation"):
-        try:
-            recommendations = json.loads(profile.get("recommendation"))
-        except (TypeError, ValueError):
-            recommendations = []
-
-    if not isinstance(recommendations, list):
-        recommendations = []
-
-    reply = _build_chat_response(message, recommendations, profile, selected_course)
-    return JSONResponse({"success": True, "reply": reply})
 
 # Define the route for uploading a profile picture
 @rt("/upload_profile_picture", methods=["POST"])
