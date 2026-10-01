@@ -1,6 +1,6 @@
-# PathFinder (FastHTML)
+# PathFinder (FastHTML + FastAPI)
 
-This project now runs on FastHTML.
+FastHTML serves the website pages and templates. FastAPI provides the versioned backend API mounted at `/api/v1`.
 
 ## Run
 
@@ -26,11 +26,17 @@ This project now runs on FastHTML.
    catalog with the 44 university programs. Existing student grades and profiles
    remain in place; legacy course matches are refreshed from saved grades.
 
-   python fasthtml_app.py
+   python fastapi_app.py
 
 4. Open:
 
    http://127.0.0.1:5000
+
+## API
+
+- FastHTML serves website pages; FastAPI serves backend API routes at `/api/v1`.
+- Interactive API documentation is available at `/api/v1/docs`; the OpenAPI schema is at `/api/v1/openapi.json`.
+- Browser API calls use the versioned FastAPI routes under `/api/v1`.
 
 ## OCR provider
 
@@ -40,14 +46,14 @@ Install the Docling provider in the same virtual environment:
 
 Docling is used for every report-card upload:
 
-      python fasthtml_app.py
+      python fastapi_app.py
 
 The first upload initializes Docling and may download its model files. Report cards
 use Docling OCR plus the accurate TableFormer table-structure model.
 
 ## Notes
 
-- Main app entrypoint: fasthtml_app.py
+- Main app entrypoint: fastapi_app.py
 - Static assets: static/
 - HTML templates: templates/
 - Database: Supabase Postgres, configured through `DATABASE_URL`
@@ -58,6 +64,7 @@ use Docling OCR plus the accurate TableFormer table-structure model.
 - Super Admins can manage admin accounts and roles, student records, reports, recommendations, and audit activity.
 - Semi Admins can view student, report, recommendation, and analytics pages, but cannot edit records, recalculate recommendations, manage admin accounts, or view the admin audit log.
 - Newly created Semi Admins must change their temporary password before accessing the dashboard for the first time.
+- New or changed passwords require at least 8 characters, an uppercase letter, and a symbol; the maximum is 72 UTF-8 bytes.
 - Admin activity logs record sign-ins and administrative changes, including the session source IP. Logs are retained in `admin_activity_logs`.
 
 ## OAuth Redirect URIs

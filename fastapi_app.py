@@ -1,6 +1,7 @@
-# FastHTML Application Configuration and Imports
+# FastAPI application configuration and imports
 import json
 import html
+import inspect
 import math
 import os
 import re
@@ -19,10 +20,11 @@ import bcrypt
 import psycopg
 from psycopg.errors import UniqueViolation
 from dotenv import load_dotenv
-from fasthtml.common import *
+from fastapi import FastAPI, Request as FastAPIRequest
+from fasthtml.common import fast_app, serve
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from starlette.middleware import Middleware
-from starlette.responses import Response
+from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
 load_dotenv()
 
@@ -45,7 +47,10 @@ BOOTSTRAP_ADMIN_NAME = (os.getenv("BOOTSTRAP_ADMIN_NAME") or "Administrator").st
 ROLE_ADMIN = "admin"
 ROLE_SEMI_ADMIN = "semi_admin"
 ROLE_SUPER_ADMIN = ROLE_ADMIN
-SYSTEM_SETTING_STRANDS = ("STEM", "ABM", "HUMSS", "GAS", "TVL", "SPORTS", "ARTS_DESIGN")
+PASSWORD_MIN_LENGTH = 8
+PASSWORD_MAX_BYTES = 72
+PASSWORD_POLICY_MESSAGE = "Use at least 8 characters with an uppercase letter and a symbol. Passwords must be no more than 72 UTF-8 bytes."
+SYSTEM_SETTING_STRANDS = ("STEM", "ABM", "HUMSS", "GAS", "TVL", "ICT", "SPORTS", "ARTS_DESIGN")
 SYSTEM_SETTING_DEFAULTS = {
     "university_name": "University of Perpetual Help System Dalta Las Pinas",
     "school_year": "",
@@ -307,6 +312,18 @@ def _course_training_data():
 #Password Hashing and Verification
 def _hash_password(password):
     return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+
+
+def _password_policy_error(password):
+    if not isinstance(password, str) or len(password) < PASSWORD_MIN_LENGTH:
+        return "Password must be at least 8 characters long. " + PASSWORD_POLICY_MESSAGE
+    if len(password.encode("utf-8")) > PASSWORD_MAX_BYTES:
+        return "Password is too long for secure hashing. " + PASSWORD_POLICY_MESSAGE
+    if not any(character.isupper() for character in password):
+        return "Password needs an uppercase letter. " + PASSWORD_POLICY_MESSAGE
+    if not any(not character.isalnum() and not character.isspace() for character in password):
+        return "Password needs a symbol. " + PASSWORD_POLICY_MESSAGE
+    return None
 
 #Password Verification
 def _check_password(stored_hash, password):
@@ -1106,6 +1123,20 @@ def init_database():
         "INSERT INTO system_settings (settings_key, settings_json) VALUES ('global', ?) ON CONFLICT (settings_key) DO NOTHING",
         (json.dumps(SYSTEM_SETTING_DEFAULTS),),
     )
+    cursor.execute("SELECT settings_json FROM system_settings WHERE settings_key = 'global'")
+    saved_settings_row = cursor.fetchone()
+    if saved_settings_row:
+        try:
+            saved_settings = json.loads(saved_settings_row[0])
+            saved_strands = saved_settings.get("available_strands", [])
+            if isinstance(saved_strands, list) and "ICT" not in saved_strands:
+                saved_settings["available_strands"] = [*saved_strands, "ICT"]
+                cursor.execute(
+                    "UPDATE system_settings SET settings_json = ?, updated_at = CURRENT_TIMESTAMP WHERE settings_key = 'global'",
+                    (json.dumps(saved_settings),),
+                )
+        except (TypeError, ValueError, AttributeError):
+            pass
     # Create the student_profiles table if it does not exist
     cursor.execute(
         """
@@ -1217,6 +1248,10 @@ def init_database():
         cursor.execute("SELECT id, COALESCE(role, 'student') FROM users WHERE email = ?", (ADMIN_USERNAME,))
         bootstrap_user = cursor.fetchone()
         if not bootstrap_user:
+            password_error = _password_policy_error(ADMIN_PASSWORD)
+            if password_error:
+                conn.close()
+                raise RuntimeError(f"BOOTSTRAP_ADMIN_PASSWORD does not meet policy: {password_error}")
             cursor.execute(
                 "INSERT INTO users (name, email, password_hash, profile_picture, role) VALUES (?, ?, ?, ?, ?)",
                 (BOOTSTRAP_ADMIN_NAME, ADMIN_USERNAME, _hash_password(ADMIN_PASSWORD), "default.svg", ROLE_SUPER_ADMIN),
@@ -1254,11 +1289,14 @@ def _is_full_admin_session(sess):
     return sess.get("role") == ROLE_SUPER_ADMIN
 
 
-def _record_admin_activity(sess, action, target_user_id=None, target_label="", details=""):
+def _record_admin_activity(sess, action, target_user_id=None, target_label="", details="", connection=None):
     if not sess or sess.get("role") not in (ROLE_ADMIN, ROLE_SEMI_ADMIN) or not sess.get("user_id"):
         return
+    owns_connection = connection is None
+    conn = connection
     try:
-        conn = _db_conn()
+        if conn is None:
+            conn = _db_conn()
         cursor = conn.cursor()
         cursor.execute(
             """
@@ -1278,9 +1316,15 @@ def _record_admin_activity(sess, action, target_user_id=None, target_label="", d
             ),
         )
         conn.commit()
-        conn.close()
     except Exception:
-        return
+        if conn is not None:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+    finally:
+        if owns_connection and conn is not None:
+            conn.close()
 
 # Render a template with the current session context and additional context variables
 def _render(req, template_name, **ctx):
@@ -1307,12 +1351,38 @@ def _render(req, template_name, **ctx):
     )
     return HTMLResponse(body)
 
-# Initialize the FastHTML application and configure OAuth providers
-app, rt = fast_app(
+# FastHTML owns rendered pages; the FastAPI sub-app below owns the JSON API.
+app, fast_html_route = fast_app(
     secret_key=os.getenv("APP_SECRET_KEY", "your_secret_key"),
     static_path=".",
     default_hdrs=False,
 )
+
+_HTML_PAGE_METHODS = {
+    "/": {"GET"},
+    "/login": {"GET"},
+    "/home": {"GET"},
+    "/guest-login": {"GET"},
+    "/logout": {"GET"},
+    "/admin/login": {"GET", "POST"},
+    "/admin/logout": {"GET"},
+    "/admin": {"GET"},
+    "/admin/dashboard": {"GET"},
+    "/admin/force-password-change": {"GET"},
+    "/admin/students": {"GET"},
+    "/google-login": {"GET"},
+    "/authorize": {"GET"},
+}
+
+
+def fastapi_route(path, methods=None):
+    def register(handler):
+        route_methods = set(methods or ["GET"])
+        if route_methods.issubset(_HTML_PAGE_METHODS.get(path, set())):
+            return fast_html_route(path, methods=methods)(handler)
+        return handler
+
+    return register
 
 
 class _FirstLoginPasswordChangeMiddleware:
@@ -1326,6 +1396,7 @@ class _FirstLoginPasswordChangeMiddleware:
             allowed_paths = {
                 "/admin/force-password-change",
                 "/admin/change_password",
+                "/api/v1/admin/change_password",
                 "/admin/logout",
                 "/logout",
             }
@@ -1358,18 +1429,18 @@ google = oauth.register(
     client_kwargs={"scope": "openid email profile"},
 )
 # Define the route for the login page
-@rt("/", methods=["GET"])
+@fastapi_route("/", methods=["GET"])
 def login_page(req):
     return _render(req, "Login.html")
 
 # Define the route for the login page alias
-@rt("/login", methods=["GET"])
+@fastapi_route("/login", methods=["GET"])
 def login_page_alias(req):
     return _render(req, "Login.html")
 
 
 # Define the route for the home page
-@rt("/home", methods=["GET"])
+@fastapi_route("/home", methods=["GET"])
 def home(req):
     sess = req.session
     return _render(
@@ -1381,7 +1452,7 @@ def home(req):
 
 
 # Define the route for guest login
-@rt("/guest-login", methods=["GET"])
+@fastapi_route("/guest-login", methods=["GET"])
 def guest_login(req):
     req.session.clear()
     req.session["is_guest"] = True
@@ -1391,7 +1462,7 @@ def guest_login(req):
 
 
 # Define the route for generating course recommendations
-@rt("/generate_recommendations", methods=["POST"])
+@fastapi_route("/generate_recommendations", methods=["POST"])
 async def generate_recommendations(req):
     sess = req.session
     user_id = sess.get("user_id")
@@ -1431,12 +1502,15 @@ async def generate_recommendations(req):
 
 
 # Define the route for user registration
-@rt("/register", methods=["POST"])
+@fastapi_route("/register", methods=["POST"])
 async def register(req):
     data = await req.json()
     name = data.get("name", "")
     email = data.get("email", "")
-    password = data.get("password", "")
+    password = str(data.get("password") or "")
+    password_error = _password_policy_error(password)
+    if password_error:
+        return JSONResponse({"success": False, "message": password_error}, status_code=400)
 
     hashed_password = _hash_password(password)
 
@@ -1459,7 +1533,7 @@ async def register(req):
 
 
 # Define the route for user login
-@rt("/login", methods=["POST"])
+@fastapi_route("/login", methods=["POST"])
 async def login(req):
     data = await req.json()
     email = data.get("email", "")
@@ -1522,19 +1596,19 @@ async def login(req):
     return JSONResponse(resp)
 
 
-@rt("/logout", methods=["GET"])
+@fastapi_route("/logout", methods=["GET"])
 def logout(req):
     _record_admin_activity(req.session, "logout")
     req.session.clear()
     return RedirectResponse("/", status_code=302)
 
 # Define the route for admin login
-@rt("/admin/login", methods=["GET", "POST"])
+@fastapi_route("/admin/login", methods=["GET", "POST"])
 def admin_login(req):
     return RedirectResponse("/", status_code=302)
 
 # Define the route for admin logout
-@rt("/admin/logout", methods=["GET"])
+@fastapi_route("/admin/logout", methods=["GET"])
 def admin_logout(req):
     _record_admin_activity(req.session, "logout")
     req.session.clear()
@@ -1542,7 +1616,7 @@ def admin_logout(req):
 
 
 # Define the route for the admin home page
-@rt("/admin", methods=["GET"])
+@fastapi_route("/admin", methods=["GET"])
 def admin_home(req):
     if not _is_admin_session(req.session):
         return RedirectResponse("/", status_code=302)
@@ -1556,7 +1630,7 @@ def admin_home(req):
 
 
 # Define the route for the admin dashboard
-@rt("/admin/dashboard", methods=["GET"])
+@fastapi_route("/admin/dashboard", methods=["GET"])
 def admin_dashboard(req):
     if not _is_admin_session(req.session):
         return RedirectResponse("/", status_code=302)
@@ -1569,7 +1643,7 @@ def admin_dashboard(req):
     )
 
 
-@rt("/admin/force-password-change", methods=["GET"])
+@fastapi_route("/admin/force-password-change", methods=["GET"])
 def admin_force_password_change(req):
     user_id = req.session.get("user_id")
     if not user_id:
@@ -1594,7 +1668,7 @@ def admin_force_password_change(req):
     return _render(req, "ForcePasswordChange.html")
 
 
-@rt("/system-settings/public", methods=["GET"])
+@fastapi_route("/system-settings/public", methods=["GET"])
 def public_system_settings(req):
     settings = _get_system_settings()
     return JSONResponse({
@@ -1608,7 +1682,7 @@ def public_system_settings(req):
 
 
 # Define the route for fetching all users (admin only)
-@rt("/admin/users", methods=["GET"])
+@fastapi_route("/admin/users", methods=["GET"])
 def admin_get_users(req):
     if not _is_full_admin_session(req.session):
         return JSONResponse({"success": False, "error": "forbidden"}, status_code=403)
@@ -1622,14 +1696,14 @@ def admin_get_users(req):
     return JSONResponse({"users": users})
 
 
-@rt("/admin/system-settings", methods=["GET"])
+@fastapi_route("/admin/system-settings", methods=["GET"])
 def admin_get_system_settings(req):
     if not _is_full_admin_session(req.session):
         return JSONResponse({"success": False, "error": "forbidden"}, status_code=403)
     return JSONResponse({"success": True, "settings": _get_system_settings()})
 
 
-@rt("/admin/system-settings", methods=["POST"])
+@fastapi_route("/admin/system-settings", methods=["POST"])
 async def admin_save_system_settings(req):
     if not _is_full_admin_session(req.session):
         return JSONResponse({"success": False, "error": "forbidden"}, status_code=403)
@@ -1657,7 +1731,7 @@ async def admin_save_system_settings(req):
     return JSONResponse({"success": True, "settings": settings})
 
 
-@rt("/admin/activity", methods=["GET"])
+@fastapi_route("/admin/activity", methods=["GET"])
 def admin_get_activity(req):
     if not _is_full_admin_session(req.session):
         return JSONResponse({"success": False, "error": "forbidden"}, status_code=403)
@@ -1685,7 +1759,7 @@ def admin_get_activity(req):
 
 
 # Define the route for updating a user (admin only)
-@rt("/admin/update_user", methods=["POST"])
+@fastapi_route("/admin/update_user", methods=["POST"])
 async def admin_update_user(req):
     if not _is_full_admin_session(req.session):
         return JSONResponse({"success": False, "error": "forbidden"}, status_code=403)
@@ -1697,8 +1771,10 @@ async def admin_update_user(req):
     password = data.get("password")
     if not uid:
         return JSONResponse({"success": False, "message": "Missing id"})
-    if password and len(password) < 10:
-        return JSONResponse({"success": False, "message": "Admin passwords must be at least 10 characters."}, status_code=400)
+    if password:
+        password_error = _password_policy_error(password)
+        if password_error:
+            return JSONResponse({"success": False, "message": password_error}, status_code=400)
 
     conn = _db_conn()
     cursor = conn.cursor()
@@ -1723,7 +1799,7 @@ async def admin_update_user(req):
 
 
 # Define the route for deleting a user (admin only)
-@rt("/admin/delete_user", methods=["POST"])
+@fastapi_route("/admin/delete_user", methods=["POST"])
 async def admin_delete_user(req):
     if not _is_full_admin_session(req.session):
         return JSONResponse({"success": False, "error": "forbidden"}, status_code=403)
@@ -1779,7 +1855,7 @@ async def admin_delete_user(req):
     return JSONResponse({"success": True})
 
 
-@rt("/admin/remove_admin_account", methods=["POST"])
+@fastapi_route("/admin/remove_admin_account", methods=["POST"])
 async def admin_remove_admin_account(req):
     if not _is_full_admin_session(req.session):
         return JSONResponse({"success": False, "error": "forbidden"}, status_code=403)
@@ -1840,7 +1916,7 @@ async def admin_remove_admin_account(req):
 
 
 # Define the route for creating a coordinator (admin only)
-@rt("/admin/create_coordinator", methods=["POST"])
+@fastapi_route("/admin/create_coordinator", methods=["POST"])
 async def admin_create_coordinator(req):
     if not _is_full_admin_session(req.session):
         return JSONResponse({"success": False, "error": "forbidden"}, status_code=403)
@@ -1848,13 +1924,14 @@ async def admin_create_coordinator(req):
     data = await req.json()
     name = (data.get("name") or "").strip()
     email = (data.get("email") or "").strip()
-    password = (data.get("password") or "").strip()
+    password = str(data.get("password") or "")
 
     if not name or not email or not password:
         return JSONResponse({"success": False, "message": "Name, email, and password are required"}, status_code=400)
 
-    if len(password) < 10:
-        return JSONResponse({"success": False, "message": "Admin passwords must be at least 10 characters"}, status_code=400)
+    password_error = _password_policy_error(password)
+    if password_error:
+        return JSONResponse({"success": False, "message": password_error}, status_code=400)
 
     conn = _db_conn()
     cursor = conn.cursor()
@@ -1877,7 +1954,7 @@ async def admin_create_coordinator(req):
     return JSONResponse({"success": True, "message": "Level coordinator account created"})
 
 
-@rt("/admin/create_admin_user", methods=["POST"])
+@fastapi_route("/admin/create_admin_user", methods=["POST"])
 async def admin_create_user(req):
     if not _is_full_admin_session(req.session):
         return JSONResponse({"success": False, "error": "forbidden"}, status_code=403)
@@ -1891,8 +1968,9 @@ async def admin_create_user(req):
         return JSONResponse({"success": False, "message": "Name, email, and password are required."}, status_code=400)
     if role not in (ROLE_SUPER_ADMIN, ROLE_SEMI_ADMIN):
         return JSONResponse({"success": False, "message": "Choose Super Admin or Semi Admin."}, status_code=400)
-    if len(password) < 10:
-        return JSONResponse({"success": False, "message": "Admin passwords must be at least 10 characters."}, status_code=400)
+    password_error = _password_policy_error(password)
+    if password_error:
+        return JSONResponse({"success": False, "message": password_error}, status_code=400)
 
     conn = _db_conn()
     cursor = conn.cursor()
@@ -1911,7 +1989,7 @@ async def admin_create_user(req):
     return JSONResponse({"success": True, "message": f"{role.replace('_', ' ').title()} account created."})
 
 
-@rt("/admin/update_admin_role", methods=["POST"])
+@fastapi_route("/admin/update_admin_role", methods=["POST"])
 async def admin_update_admin_role(req):
     if not _is_full_admin_session(req.session):
         return JSONResponse({"success": False, "error": "forbidden"}, status_code=403)
@@ -1947,7 +2025,7 @@ async def admin_update_admin_role(req):
     return JSONResponse({"success": True, "message": "Admin role updated."})
 
 # Define the route for fetching all student profiles (admin only)
-@rt("/admin/student_profiles", methods=["GET"])
+@fastapi_route("/admin/student_profiles", methods=["GET"])
 def admin_get_student_profiles(req):
     if not _is_full_admin_session(req.session):
         return JSONResponse({"success": False, "error": "forbidden"}, status_code=403)
@@ -1984,7 +2062,7 @@ def admin_get_student_profiles(req):
     return JSONResponse({"success": True, "profiles": profiles})
 
 # Define the route for updating a student profile (admin only)
-@rt("/admin/update_student_profile", methods=["POST"])
+@fastapi_route("/admin/update_student_profile", methods=["POST"])
 async def admin_update_student_profile(req):
     if not _is_full_admin_session(req.session):
         return JSONResponse({"success": False, "error": "forbidden"}, status_code=403)
@@ -2055,7 +2133,7 @@ async def admin_update_student_profile(req):
     return JSONResponse({"success": True, "message": message})
 
 # Define the route for the admin students page (admin only)
-@rt("/admin/students", methods=["GET"])
+@fastapi_route("/admin/students", methods=["GET"])
 def admin_get_students(req):
     if not _is_admin_session(req.session):
         return RedirectResponse("/", status_code=302)
@@ -2087,7 +2165,7 @@ def admin_get_students(req):
 
 
 # Define the route for fetching all students via API (admin only)
-@rt("/admin/students/api", methods=["GET"])
+@fastapi_route("/admin/students/api", methods=["GET"])
 def admin_get_students_api(req):
     if not _is_admin_session(req.session):
         return JSONResponse({"success": False, "error": "unauthorized"}, status_code=401)
@@ -2149,7 +2227,7 @@ def admin_get_students_api(req):
     return JSONResponse({"success": True, "students": students})
 
 
-@rt("/admin/students/{user_id}", methods=["GET"])
+@fastapi_route("/admin/students/{user_id}", methods=["GET"])
 def admin_get_student_detail(req, user_id: str):
     if not _is_admin_session(req.session):
         return JSONResponse({"success": False, "error": "unauthorized"}, status_code=401)
@@ -2225,7 +2303,7 @@ def admin_get_student_detail(req, user_id: str):
     })
 
 
-@rt("/admin/deactivate_student", methods=["POST"])
+@fastapi_route("/admin/deactivate_student", methods=["POST"])
 async def admin_deactivate_student(req):
     if not _is_full_admin_session(req.session):
         return JSONResponse({"success": False, "error": "forbidden"}, status_code=403)
@@ -2256,7 +2334,7 @@ async def admin_deactivate_student(req):
 
 
 # Define the route for deleting a student (admin only)
-@rt("/admin/delete_student", methods=["POST"])
+@fastapi_route("/admin/delete_student", methods=["POST"])
 async def admin_delete_student(req):
     if not _is_full_admin_session(req.session):
         return JSONResponse({"success": False, "error": "forbidden"}, status_code=403)
@@ -2279,7 +2357,7 @@ async def admin_delete_student(req):
 
 
 # Define the route for fetching admin statistics (admin only)
-@rt("/admin/stats", methods=["GET"])
+@fastapi_route("/admin/stats", methods=["GET"])
 def admin_stats(req):
     if not _is_admin_session(req.session):
         return JSONResponse({"success": False, "error": "unauthorized"}, status_code=401)
@@ -2443,7 +2521,242 @@ def admin_stats(req):
     )
 
 
-@rt("/admin/recommendations", methods=["GET"])
+@fastapi_route("/admin/reports/generate", methods=["POST"])
+async def admin_generate_report(req):
+    if not _is_admin_session(req.session):
+        return JSONResponse({"success": False, "error": "forbidden"}, status_code=403)
+
+    try:
+        data = await req.json()
+    except Exception:
+        return JSONResponse({"success": False, "message": "Invalid report request."}, status_code=400)
+    if not isinstance(data, dict):
+        return JSONResponse({"success": False, "message": "Invalid report request."}, status_code=400)
+
+    report_type = str(data.get("report_type") or "student_summary").strip()
+    report_titles = {
+        "student_summary": "Student Summary Report",
+        "report_cards": "Report Card Status Report",
+        "recommendations": "Recommendation Frequency Report",
+    }
+    if report_type not in report_titles:
+        return JSONResponse({"success": False, "message": "Choose a supported report type."}, status_code=400)
+
+    strand = str(data.get("strand") or "").strip()
+    if strand and strand not in SYSTEM_SETTING_STRANDS and strand != "Unspecified":
+        return JSONResponse({"success": False, "message": "Choose a configured academic strand."}, status_code=400)
+
+    def parse_report_date(value, field_name):
+        if not value:
+            return None, None
+        try:
+            return datetime.strptime(str(value), "%Y-%m-%d").date(), None
+        except ValueError:
+            return None, f"{field_name} must be a valid date."
+
+    from_date, date_error = parse_report_date(data.get("from_date"), "Start date")
+    if date_error:
+        return JSONResponse({"success": False, "message": date_error}, status_code=400)
+    to_date, date_error = parse_report_date(data.get("to_date"), "End date")
+    if date_error:
+        return JSONResponse({"success": False, "message": date_error}, status_code=400)
+    if from_date and to_date and from_date > to_date:
+        return JSONResponse({"success": False, "message": "Start date must be on or before end date."}, status_code=400)
+
+    filters = {
+        "strand": strand or "All strands",
+        "from_date": from_date.isoformat() if from_date else "Any",
+        "to_date": to_date.isoformat() if to_date else "Any",
+    }
+    columns = []
+    rows = []
+    summary = []
+    conn = _db_conn()
+    cursor = conn.cursor()
+
+    if report_type == "student_summary":
+        conditions = ["COALESCE(users.role, 'student') = 'student'"]
+        params = []
+        if strand:
+            conditions.append("COALESCE(NULLIF(BTRIM(profile.strand), ''), 'Unspecified') = ?")
+            params.append(strand)
+        cursor.execute(
+            f"""
+            SELECT COALESCE(NULLIF(BTRIM(profile.strand), ''), 'Unspecified') AS strand,
+                   COUNT(users.id), COUNT(profile.id),
+                   AVG(CASE WHEN BTRIM(COALESCE(profile.gwa, '')) ~ '^[0-9]+([.][0-9]+){0,1}$'
+                       THEN BTRIM(profile.gwa)::NUMERIC END),
+                   COUNT(CASE WHEN BTRIM(COALESCE(profile.gwa, '')) ~ '^[0-9]+([.][0-9]+){0,1}$' THEN 1 END),
+                   COUNT(*) FILTER (WHERE COALESCE(users.is_active, TRUE)),
+                   COUNT(*) FILTER (WHERE NOT COALESCE(users.is_active, TRUE))
+            FROM users
+            LEFT JOIN LATERAL (
+                SELECT id, strand, gwa
+                FROM student_profiles
+                WHERE user_id = users.id
+                ORDER BY id DESC
+                LIMIT 1
+            ) profile ON TRUE
+            WHERE {' AND '.join(conditions)}
+            GROUP BY 1
+            ORDER BY 1
+            """,
+            tuple(params),
+        )
+        data_rows = cursor.fetchall()
+        total_students = sum(row[1] for row in data_rows)
+        total_profiles = sum(row[2] for row in data_rows)
+        gwa_count = sum(row[4] for row in data_rows)
+        average_gwa = (
+            round(sum(float(row[3]) * row[4] for row in data_rows if row[3] is not None) / gwa_count, 2)
+            if gwa_count else "—"
+        )
+        summary = [
+            {"label": "Student accounts", "value": total_students},
+            {"label": "Profiles with academic records", "value": total_profiles},
+            {"label": "Average GWA", "value": average_gwa},
+            {"label": "Active accounts", "value": sum(row[5] for row in data_rows)},
+            {"label": "Deactivated accounts", "value": sum(row[6] for row in data_rows)},
+        ]
+        columns = [
+            {"key": "strand", "label": "Academic strand"},
+            {"key": "students", "label": "Student accounts"},
+            {"key": "profiles", "label": "Profiles"},
+            {"key": "average_gwa", "label": "Average GWA"},
+            {"key": "active", "label": "Active"},
+            {"key": "inactive", "label": "Deactivated"},
+        ]
+        rows = [
+            {
+                "strand": row[0], "students": row[1], "profiles": row[2],
+                "average_gwa": round(float(row[3]), 2) if row[3] is not None else "—",
+                "active": row[5], "inactive": row[6],
+            }
+            for row in data_rows
+        ]
+
+    elif report_type == "report_cards":
+        conditions = ["COALESCE(users.role, 'student') = 'student'"]
+        params = []
+        if from_date:
+            conditions.append("uploads.uploaded_at::date >= ?")
+            params.append(from_date)
+        if to_date:
+            conditions.append("uploads.uploaded_at::date <= ?")
+            params.append(to_date)
+        if strand:
+            conditions.append(
+                "EXISTS (SELECT 1 FROM student_profiles profile WHERE profile.user_id = users.id "
+                "AND COALESCE(NULLIF(BTRIM(profile.strand), ''), 'Unspecified') = ?)"
+            )
+            params.append(strand)
+        cursor.execute(
+            f"""
+            SELECT COALESCE(NULLIF(BTRIM(uploads.ocr_status), ''), 'unknown'),
+                   COUNT(*),
+                   COUNT(*) FILTER (WHERE COALESCE(uploads.is_flagged, FALSE)),
+                   MAX(uploads.uploaded_at)
+            FROM report_card_uploads uploads
+            JOIN users ON users.id = uploads.user_id
+            WHERE {' AND '.join(conditions)}
+            GROUP BY 1
+            ORDER BY 1
+            """,
+            tuple(params),
+        )
+        data_rows = cursor.fetchall()
+        total_uploads = sum(row[1] for row in data_rows)
+        total_flagged = sum(row[2] for row in data_rows)
+        summary = [
+            {"label": "Report-card uploads", "value": total_uploads},
+            {"label": "Flagged uploads", "value": total_flagged},
+            {"label": "OCR statuses", "value": len(data_rows)},
+        ]
+        columns = [
+            {"key": "status", "label": "OCR status"},
+            {"key": "uploads", "label": "Uploads"},
+            {"key": "flagged", "label": "Flagged"},
+            {"key": "latest_upload", "label": "Latest upload"},
+        ]
+        rows = [
+            {
+                "status": row[0], "uploads": row[1], "flagged": row[2],
+                "latest_upload": row[3].isoformat() if row[3] else "—",
+            }
+            for row in data_rows
+        ]
+
+    else:
+        conditions = ["COALESCE(users.role, 'student') = 'student'"]
+        params = []
+        if from_date:
+            conditions.append("history.generated_at::date >= ?")
+            params.append(from_date)
+        if to_date:
+            conditions.append("history.generated_at::date <= ?")
+            params.append(to_date)
+        if strand:
+            conditions.append("COALESCE(NULLIF(BTRIM(profiles.strand), ''), 'Unspecified') = ?")
+            params.append(strand)
+        cursor.execute(
+            f"""
+            SELECT profiles.id, history.recommendations
+            FROM course_recommendation_history history
+            JOIN student_profiles profiles ON profiles.id = history.profile_id
+            JOIN users ON users.id = profiles.user_id
+            WHERE {' AND '.join(conditions)}
+            ORDER BY history.generated_at DESC, history.id DESC
+            """,
+            tuple(params),
+        )
+        data_rows = cursor.fetchall()
+        course_counts = {}
+        profile_ids = set()
+        total_suggestions = 0
+        recommendation_limit = _recommendation_limit()
+        for profile_id, payload in data_rows:
+            profile_ids.add(profile_id)
+            for item in _limit_recommendations(payload, recommendation_limit):
+                course_name = item.get("course")
+                if course_name:
+                    course_counts[course_name] = course_counts.get(course_name, 0) + 1
+                    total_suggestions += 1
+        sorted_courses = sorted(course_counts.items(), key=lambda item: (-item[1], item[0].casefold()))
+        summary = [
+            {"label": "Recommendation snapshots", "value": len(data_rows)},
+            {"label": "Student profiles", "value": len(profile_ids)},
+            {"label": "Course suggestions", "value": total_suggestions},
+        ]
+        columns = [
+            {"key": "course", "label": "Recommended course"},
+            {"key": "recommendations", "label": "Times recommended"},
+            {"key": "share", "label": "Share"},
+        ]
+        rows = [
+            {
+                "course": course,
+                "recommendations": count,
+                "share": f"{(count / total_suggestions * 100):.1f}%" if total_suggestions else "0%",
+            }
+            for course, count in sorted_courses
+        ]
+
+    conn.close()
+    return JSONResponse({
+        "success": True,
+        "report": {
+            "type": report_type,
+            "title": report_titles[report_type],
+            "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+            "filters": filters,
+            "summary": summary,
+            "columns": columns,
+            "rows": rows,
+        },
+    })
+
+
+@fastapi_route("/admin/recommendations", methods=["GET"])
 def admin_recommendation_history(req):
     if not _is_admin_session(req.session):
         return JSONResponse({"success": False, "error": "forbidden"}, status_code=403)
@@ -2468,13 +2781,14 @@ def admin_recommendation_history(req):
 
     history_items = []
     course_counts = {}
+    recommendation_limit = _recommendation_limit()
     for row in rows:
         profile_name = " ".join(part for part in (
             row[4] or "",
             row[5] or "",
             row[6] or "",
         ) if part).strip() or row[12] or "Unknown student"
-        recommendations = _sanitize_recommendations(row[10])
+        recommendations = _limit_recommendations(row[10], recommendation_limit)
         for item in recommendations:
             course_name = item.get("course")
             if course_name:
@@ -2504,7 +2818,7 @@ def admin_recommendation_history(req):
     })
 
 
-@rt("/admin/recommendations/{profile_id}/recalculate", methods=["POST"])
+@fastapi_route("/admin/recommendations/{profile_id}/recalculate", methods=["POST"])
 def admin_recalculate_recommendations(req, profile_id: str):
     if not _is_full_admin_session(req.session):
         return JSONResponse({"success": False, "error": "forbidden"}, status_code=403)
@@ -2552,7 +2866,7 @@ def admin_recalculate_recommendations(req, profile_id: str):
 
 
 # Define the route for saving a student profile
-@rt("/save_profile", methods=["POST"])
+@fastapi_route("/save_profile", methods=["POST"])
 async def save_profile(req):
     sess = req.session
     if "user_id" not in sess:
@@ -2726,7 +3040,7 @@ async def save_profile(req):
     })
 
 # Define the route for updating the user account
-@rt("/update_account", methods=["POST"])
+@fastapi_route("/update_account", methods=["POST"])
 async def update_account(req):
     sess = req.session
     if "user_id" not in sess:
@@ -2747,7 +3061,7 @@ async def update_account(req):
     return JSONResponse({"success": True, "name": name})
 
 # Define the route for changing the admin password
-@rt("/admin/change_password", methods=["POST"])
+@fastapi_route("/admin/change_password", methods=["POST"])
 async def admin_change_password(req):
     sess = req.session
     if not _is_admin_session(sess, allow_password_change=True) or not sess.get("user_id"):
@@ -2760,8 +3074,9 @@ async def admin_change_password(req):
 
     if not current_password or not new_password or not confirm_password:
         return JSONResponse({"success": False, "message": "Complete all password fields."}, status_code=400)
-    if len(new_password) < 10:
-        return JSONResponse({"success": False, "message": "Password must be at least 10 characters."}, status_code=400)
+    password_error = _password_policy_error(new_password)
+    if password_error:
+        return JSONResponse({"success": False, "message": password_error}, status_code=400)
     if new_password != confirm_password:
         return JSONResponse({"success": False, "message": "New passwords do not match."}, status_code=400)
     forced_change = bool(sess.get("must_change_password"))
@@ -2785,7 +3100,7 @@ async def admin_change_password(req):
     return JSONResponse({"success": True, "message": "Password updated."})
 
 # Define the route for recommending courses to anonymous users
-@rt("/recommend_anonymous", methods=["POST"])
+@fastapi_route("/recommend_anonymous", methods=["POST"])
 async def recommend_anonymous(req):
     if not req.session.get("is_guest"):
         return JSONResponse({"success": False, "message": "Guest session required."}, status_code=401)
@@ -2811,7 +3126,7 @@ async def recommend_anonymous(req):
     return JSONResponse({"success": True, "recommendation": recommendations, "comparisons": comparisons})
 
 # Define the route for fetching the user's profile
-@rt("/get_profile", methods=["GET"])
+@fastapi_route("/get_profile", methods=["GET"])
 def get_profile(req):
     sess = req.session
     if "user_id" not in sess:
@@ -2868,7 +3183,7 @@ def get_profile(req):
     )
 
 # Define the route for uploading a profile picture
-@rt("/upload_profile_picture", methods=["POST"])
+@fastapi_route("/upload_profile_picture", methods=["POST"])
 async def upload_profile_picture(req):
     sess = req.session
     if "user_id" not in sess:
@@ -2904,7 +3219,7 @@ async def upload_profile_picture(req):
 
 
 # Define the route for fetching the profile picture 
-@rt("/get_profile_picture", methods=["GET"])
+@fastapi_route("/get_profile_picture", methods=["GET"])
 def get_profile_picture(req):
     sess = req.session
     if "user_id" not in sess:
@@ -2923,13 +3238,13 @@ def get_profile_picture(req):
     return JSONResponse({"success": False})
 
 # Define the route for Google login and authorization
-@rt("/google-login", methods=["GET"])
+@fastapi_route("/google-login", methods=["GET"])
 async def google_login(req):
     redirect_uri = str(req.url_for("google_authorize"))
     return await google.authorize_redirect(req, redirect_uri)
 
 
-@rt("/authorize", methods=["GET"])
+@fastapi_route("/authorize", methods=["GET"])
 async def google_authorize(req):
     token = await google.authorize_access_token(req)
     userinfo = token.get("userinfo") or {}
@@ -3084,7 +3399,7 @@ def _process_report_card_bytes(file_bytes, filename):
 
 
 # OCR endpoint for processing report cards
-@rt("/ocr_report_card", methods=["POST"])
+@fastapi_route("/ocr_report_card", methods=["POST"])
 async def ocr_report_card(req):
     req.session.pop("latest_report_card_upload_id", None)
     form = await req.form()
@@ -3198,7 +3513,7 @@ async def ocr_report_card(req):
         return JSONResponse({"success": False, "message": f"Report card OCR failed: {exc}"})
 
 
-@rt("/admin/report_cards", methods=["GET"])
+@fastapi_route("/admin/report_cards", methods=["GET"])
 def admin_list_report_cards(req):
     if not _is_admin_session(req.session):
         return JSONResponse({"success": False, "error": "forbidden"}, status_code=403)
@@ -3256,7 +3571,7 @@ def admin_list_report_cards(req):
     return JSONResponse({"success": True, "reports": reports})
 
 
-@rt("/admin/report_cards/{upload_id}/edit", methods=["POST"])
+@fastapi_route("/admin/report_cards/{upload_id}/edit", methods=["POST"])
 async def admin_edit_report_card(req, upload_id: str):
     if not _is_full_admin_session(req.session):
         return JSONResponse({"success": False, "error": "forbidden"}, status_code=403)
@@ -3347,7 +3662,7 @@ async def admin_edit_report_card(req, upload_id: str):
     return JSONResponse({"success": True, "message": "Extracted grades saved and verified."})
 
 
-@rt("/admin/report_cards/{upload_id}/flag", methods=["POST"])
+@fastapi_route("/admin/report_cards/{upload_id}/flag", methods=["POST"])
 async def admin_flag_report_card(req, upload_id: str):
     if not _is_full_admin_session(req.session):
         return JSONResponse({"success": False, "error": "forbidden"}, status_code=403)
@@ -3382,7 +3697,7 @@ async def admin_flag_report_card(req, upload_id: str):
     return JSONResponse({"success": True, "is_flagged": is_flagged})
 
 
-@rt("/admin/report_cards/{upload_id}/reprocess", methods=["POST"])
+@fastapi_route("/admin/report_cards/{upload_id}/reprocess", methods=["POST"])
 def admin_reprocess_report_card(req, upload_id: str):
     if not _is_full_admin_session(req.session):
         return JSONResponse({"success": False, "error": "forbidden"}, status_code=403)
@@ -3446,7 +3761,7 @@ def admin_reprocess_report_card(req, upload_id: str):
     return JSONResponse({"success": True, "message": "Report card reprocessed.", "ocr_status": processed["ocr_status"]})
 
 
-@rt("/admin/report_cards/{upload_id}", methods=["DELETE"])
+@fastapi_route("/admin/report_cards/{upload_id}", methods=["DELETE"])
 def admin_delete_report_card(req, upload_id: str):
     if not _is_full_admin_session(req.session):
         return JSONResponse({"success": False, "error": "forbidden"}, status_code=403)
@@ -3477,9 +3792,10 @@ def admin_delete_report_card(req, upload_id: str):
     return JSONResponse({"success": True, "message": "Report card deleted."})
 
 
-@rt("/admin/report_cards/{upload_id}", methods=["GET"])
+@fastapi_route("/admin/report_cards/{upload_id}", methods=["GET"])
 def admin_get_report_card(req, upload_id: str):
-    if not _is_admin_session(req.session):
+    actor_id = req.session.get("user_id")
+    if not actor_id:
         return JSONResponse({"success": False, "error": "unauthorized"}, status_code=401)
     try:
         upload_id = int(upload_id)
@@ -3490,27 +3806,137 @@ def admin_get_report_card(req, upload_id: str):
     cursor = conn.cursor()
     cursor.execute(
         """
-        SELECT uploads.content_type, uploads.file_data
+        SELECT uploads.content_type, uploads.file_data,
+               COALESCE(actor.role, 'student'), COALESCE(actor.is_active, TRUE),
+               COALESCE(actor.must_change_password, FALSE)
         FROM report_card_uploads uploads
-        JOIN users ON users.id = uploads.user_id
-        WHERE uploads.id = ? AND COALESCE(users.role, 'student') = 'student'
+        JOIN users target ON target.id = uploads.user_id
+        LEFT JOIN users actor ON actor.id = ?
+        WHERE uploads.id = ? AND COALESCE(target.role, 'student') = 'student'
         """,
-        (upload_id,),
+        (actor_id, upload_id),
     )
     row = cursor.fetchone()
-    conn.close()
     if not row:
+        conn.close()
         return JSONResponse({"success": False, "message": "Report card not found"}, status_code=404)
 
-    _record_admin_activity(req.session, "report_card_viewed", target_label=f"report-card:{upload_id}")
+    if not row[3] or row[2] not in (ROLE_ADMIN, ROLE_SEMI_ADMIN) or row[4]:
+        conn.close()
+        req.session.clear()
+        return JSONResponse({"success": False, "error": "unauthorized"}, status_code=401)
+
+    req.session["role"] = row[2]
+    req.session["is_admin"] = True
+    _record_admin_activity(req.session, "report_card_viewed", target_label=f"report-card:{upload_id}", connection=conn)
+    conn.close()
     content_type = row[0] if row[0] in {"image/jpeg", "image/png", "image/webp"} else "application/octet-stream"
     return Response(
         content=row[1],
         media_type=content_type,
-        headers={"Content-Disposition": "inline", "X-Content-Type-Options": "nosniff"},
+        headers={
+            "Content-Disposition": "inline",
+            "X-Content-Type-Options": "nosniff",
+            "Cache-Control": "private, max-age=60",
+        },
     )
 
-# Main entry point for the FastHTML application
+
+api_app = FastAPI(
+    title="PathFinder API",
+    version="1.0.0",
+    description="Versioned JSON and report-card API for the PathFinder web application.",
+    docs_url="/docs",
+    redoc_url="/redoc",
+)
+
+
+def _fastapi_handler(handler, path_parameters=()):
+    if inspect.iscoroutinefunction(handler):
+        async def endpoint(request: FastAPIRequest, **route_values):
+            values = {name: request.path_params[name] for name in path_parameters}
+            return await handler(request, **values)
+    else:
+        def endpoint(request: FastAPIRequest, **route_values):
+            values = {name: request.path_params[name] for name in path_parameters}
+            return handler(request, **values)
+
+    endpoint.__name__ = f"api_{handler.__name__}"
+    endpoint.__doc__ = handler.__doc__ or f"Calls the {handler.__name__} application handler."
+    endpoint.__signature__ = inspect.Signature(
+        [
+            inspect.Parameter(
+                "request",
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                annotation=FastAPIRequest,
+            ),
+            *[
+                inspect.Parameter(
+                    name,
+                    inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                    annotation=str,
+                )
+                for name in path_parameters
+            ],
+        ]
+    )
+    return endpoint
+
+
+_FASTAPI_ENDPOINTS = (
+    ("/register", ["POST"], register, ()),
+    ("/login", ["POST"], login, ()),
+    ("/generate_recommendations", ["POST"], generate_recommendations, ()),
+    ("/system-settings/public", ["GET"], public_system_settings, ()),
+    ("/admin/users", ["GET"], admin_get_users, ()),
+    ("/admin/system-settings", ["GET"], admin_get_system_settings, ()),
+    ("/admin/system-settings", ["POST"], admin_save_system_settings, ()),
+    ("/admin/activity", ["GET"], admin_get_activity, ()),
+    ("/admin/update_user", ["POST"], admin_update_user, ()),
+    ("/admin/delete_user", ["POST"], admin_delete_user, ()),
+    ("/admin/remove_admin_account", ["POST"], admin_remove_admin_account, ()),
+    ("/admin/create_coordinator", ["POST"], admin_create_coordinator, ()),
+    ("/admin/create_admin_user", ["POST"], admin_create_user, ()),
+    ("/admin/update_admin_role", ["POST"], admin_update_admin_role, ()),
+    ("/admin/student_profiles", ["GET"], admin_get_student_profiles, ()),
+    ("/admin/update_student_profile", ["POST"], admin_update_student_profile, ()),
+    ("/admin/students/api", ["GET"], admin_get_students_api, ()),
+    ("/admin/students/{user_id}", ["GET"], admin_get_student_detail, ("user_id",)),
+    ("/admin/deactivate_student", ["POST"], admin_deactivate_student, ()),
+    ("/admin/delete_student", ["POST"], admin_delete_student, ()),
+    ("/admin/stats", ["GET"], admin_stats, ()),
+    ("/admin/reports/generate", ["POST"], admin_generate_report, ()),
+    ("/admin/recommendations", ["GET"], admin_recommendation_history, ()),
+    ("/admin/recommendations/{profile_id}/recalculate", ["POST"], admin_recalculate_recommendations, ("profile_id",)),
+    ("/save_profile", ["POST"], save_profile, ()),
+    ("/update_account", ["POST"], update_account, ()),
+    ("/admin/change_password", ["POST"], admin_change_password, ()),
+    ("/recommend_anonymous", ["POST"], recommend_anonymous, ()),
+    ("/get_profile", ["GET"], get_profile, ()),
+    ("/upload_profile_picture", ["POST"], upload_profile_picture, ()),
+    ("/get_profile_picture", ["GET"], get_profile_picture, ()),
+    ("/ocr_report_card", ["POST"], ocr_report_card, ()),
+    ("/admin/report_cards", ["GET"], admin_list_report_cards, ()),
+    ("/admin/report_cards/{upload_id}/edit", ["POST"], admin_edit_report_card, ("upload_id",)),
+    ("/admin/report_cards/{upload_id}/flag", ["POST"], admin_flag_report_card, ("upload_id",)),
+    ("/admin/report_cards/{upload_id}/reprocess", ["POST"], admin_reprocess_report_card, ("upload_id",)),
+    ("/admin/report_cards/{upload_id}", ["DELETE"], admin_delete_report_card, ("upload_id",)),
+    ("/admin/report_cards/{upload_id}", ["GET"], admin_get_report_card, ("upload_id",)),
+)
+
+for api_path, methods, handler, path_parameters in _FASTAPI_ENDPOINTS:
+    api_app.add_api_route(
+        api_path,
+        _fastapi_handler(handler, path_parameters),
+        methods=methods,
+        response_model=None,
+        name=f"api_{handler.__name__}",
+    )
+
+app.mount("/api/v1", api_app)
+app.middleware_stack = None
+
+# Main entry point for the FastHTML frontend and mounted FastAPI backend.
 def main():
     os.makedirs(UPLOAD_FOLDER, exist_ok=True)
     init_database()

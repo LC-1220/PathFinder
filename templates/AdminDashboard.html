@@ -9,8 +9,9 @@
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/7.0.1/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.3.0/dist/chart.umd.min.js"></script>
+  <script>try { document.documentElement.classList.toggle('admin-dark', localStorage.getItem('pathfinder-admin-theme') === 'dark'); } catch (error) {}</script>
 </head>
-<body class="admin-page{{ ' admin-compact-tables' if system_settings.admin_table_density == 'compact' else '' }}" data-can-manage-students="{{ 'true' if can_manage_students|default(false) else 'false' }}" data-can-view-admin-data="{{ 'true' if can_view_admin_data|default(false) else 'false' }}" data-current-user-id="{{ current_user_id|default('') }}" data-default-admin-view="{{ system_settings.admin_default_view }}">
+<body class="admin-page{{ ' admin-compact-tables' if system_settings.admin_table_density == 'compact' else '' }}" data-can-manage-students="{{ 'true' if can_manage_students|default(false) else 'false' }}" data-can-view-admin-data="{{ 'true' if can_view_admin_data|default(false) else 'false' }}" data-current-user-id="{{ current_user_id|default('') }}" data-default-admin-view="{{ system_settings.admin_default_view }}" data-available-strands="{{ system_settings.available_strands|join(',') }}">
   <nav class="admin-plain-sidebar" aria-label="Admin navigation">
     <div class="admin-nav-groups">
       <section class="admin-nav-group" aria-label="Overview">
@@ -29,6 +30,7 @@
         <ul>
           <li><a href="#manage-recommendations" class="logo admin-view-link" data-admin-view="manage-recommendations" title="Recommendation Management"><span class="icon"><i class="fa-solid fa-wand-magic-sparkles" aria-hidden="true"></i></span><span class="text">Recommendations</span></a></li>
           <li><a href="#manage-reports" class="logo admin-view-link" data-admin-view="manage-reports" title="Report Cards"><span class="icon"><i class="fa-solid fa-file-circle-check" aria-hidden="true"></i></span><span class="text">Report Cards</span></a></li>
+          <li><a href="#admin-reports" class="logo admin-view-link" data-admin-view="admin-reports" title="Generate Reports"><span class="icon"><i class="fa-solid fa-chart-pie" aria-hidden="true"></i></span><span class="text">Reports</span></a></li>
         </ul>
       </section>{% endif %}
       {% if can_manage_students|default(false) %}<section class="admin-nav-group" aria-label="Administration">
@@ -43,12 +45,13 @@
     </div>
   </nav>
   <header class="admin-topbar">
-    <div class="admin-topbar-brand"><a href="#dashboard"><i class="fa-brands fa-google-scholar"></i><strong>PathFinder</strong></a></div>
+    <div class="admin-topbar-brand"><a href="#dashboard"><img src="{{ url_for('static', filename='images/PathFinder2.png') }}" alt="" width="36" height="36"><strong>PathFinder</strong></a></div>
     <div class="admin-account-wrap">
       <button id="admin-account-trigger" class="admin-account-trigger" type="button" aria-expanded="false"><span>{{ admin }}</span><img src="{{ profile_image }}" alt="{{ admin }} profile picture"></button>
       <div id="admin-profile-menu" class="admin-profile-menu" hidden>
         <button type="button" data-admin-settings><i class="fa-solid fa-user-gear"></i> Account settings</button>
-        <a href="/admin/logout"><i class="fa-solid fa-right-from-bracket"></i> Logout</a>
+        <button id="admin-theme-toggle" type="button" aria-pressed="false"><i class="fa-solid fa-moon" aria-hidden="true"></i><span>Dark mode</span></button>
+        <a href="/admin/logout" data-confirm-logout><i class="fa-solid fa-right-from-bracket"></i> Logout</a>
       </div>
     </div>
   </header>
@@ -78,10 +81,11 @@
       <form id="add-admin-form" class="admin-user-form">
         <input name="name" type="text" placeholder="Admin name" required>
         <input name="email" type="email" placeholder="Email" required>
-        <input name="password" type="password" placeholder="Temporary password (10+ characters)" minlength="10" required>
+        <input name="password" type="password" placeholder="Temporary password (8+ characters)" minlength="8" maxlength="72" title="Use at least 8 characters, including an uppercase letter and a symbol." required>
         <label class="admin-role-choice">Role<select name="role" required><option value="semi_admin">Semi Admin · View-only</option><option value="admin">Super Admin · Full access</option></select></label>
         <button class="btn btn-primary" type="submit">Create admin</button>
       </form>
+      <p class="admin-password-policy-note">Use at least 8 characters, including an uppercase letter and a symbol. Maximum 72 UTF-8 bytes.</p>
       <div id="add-admin-status" class="admin-form-status" role="status"></div>
     </section>
     <section id="manage-admin-accounts" class="admin-students-section admin-account-management" style="margin-top:22px">
@@ -107,6 +111,7 @@
               <label><input type="checkbox" name="available_strands" value="HUMSS"> HUMSS</label>
               <label><input type="checkbox" name="available_strands" value="GAS"> GAS</label>
               <label><input type="checkbox" name="available_strands" value="TVL"> TVL</label>
+              <label><input type="checkbox" name="available_strands" value="ICT"> ICT</label>
               <label><input type="checkbox" name="available_strands" value="SPORTS"> Sports</label>
               <label><input type="checkbox" name="available_strands" value="ARTS_DESIGN"> Arts &amp; Design</label>
             </div></div>
@@ -183,23 +188,61 @@
       <p id="recommendationActionStatus" class="recommendation-action-status" role="status" hidden></p>
       <div class="recommendation-management-layout"><section class="admin-management-panel recommendation-history-panel"><div class="admin-panel-heading"><div><span class="admin-panel-kicker">SAVED SNAPSHOTS</span><h4>Recommendation history</h4></div><button id="refreshRecommendationHistory" class="report-secondary-action" type="button"><i class="fa-solid fa-rotate" aria-hidden="true"></i><span>Refresh</span></button></div><div id="recommendationHistoryWrap">Loading recommendation history...</div></section><section class="admin-management-panel recommendation-frequency-panel"><div class="admin-panel-heading"><div><span class="admin-panel-kicker">COURSE FREQUENCY</span><h4>Frequently recommended</h4></div><i class="fa-solid fa-ranking-star" aria-hidden="true"></i></div><div id="frequentRecommendationCourses">Loading course counts...</div></section></div>
     </section>
+    <section id="admin-reports" class="admin-students-section admin-generated-reports" style="margin-top:22px">
+      <div class="admin-student-list-heading"><div><span class="admin-panel-kicker">REPORT CENTER</span><h3>Generate reports</h3></div></div>
+      <form id="admin-report-form" class="admin-report-controls">
+        <label>Report type<select name="report_type"><option value="student_summary">Student summary</option><option value="report_cards">Report-card status</option><option value="recommendations">Recommendation frequency</option></select></label>
+        <label>Academic strand<select name="strand"><option value="">All strands</option>{% for strand in system_settings.available_strands %}<option value="{{ strand }}">{{ 'Arts & Design' if strand == 'ARTS_DESIGN' else strand }}</option>{% endfor %}<option value="Unspecified">Unspecified</option></select></label>
+        <div class="admin-report-date-filters" hidden>
+          <label>From date<input name="from_date" type="date"></label>
+          <label>To date<input name="to_date" type="date"></label>
+        </div>
+        <button class="btn btn-primary" type="submit"><i class="fa-solid fa-file-circle-check" aria-hidden="true"></i> Generate report</button>
+        <button id="print-admin-report" class="report-secondary-action" type="button" disabled><i class="fa-solid fa-print" aria-hidden="true"></i><span>Print</span></button>
+      </form>
+      <p id="admin-report-status" class="admin-report-status" role="status" hidden></p>
+      <div id="admin-generated-report" class="admin-generated-report-output"><div class="records-empty">Choose a report type and generate a report to view it here.</div></div>
+    </section>
     {% endif %}
   </div>
 
   <aside id="admin-settings-panel" class="admin-settings-panel" hidden>
     <div class="admin-settings-card">
-      <aside class="admin-settings-sidebar"><strong><i class="fa-solid fa-sliders"></i> Settings</strong><span class="active"><i class="fa-solid fa-user"></i> Profile</span><span><i class="fa-solid fa-shield-halved"></i> Account</span></aside>
+      <aside class="admin-settings-sidebar" role="tablist" aria-label="Account settings sections"><strong><i class="fa-solid fa-sliders"></i> Settings</strong><button id="admin-settings-tab-profile" class="admin-settings-tab active" type="button" role="tab" aria-selected="true" aria-controls="admin-settings-profile" data-settings-tab="profile"><i class="fa-solid fa-user"></i><span>Profile</span></button><button id="admin-settings-tab-account" class="admin-settings-tab" type="button" role="tab" aria-selected="false" aria-controls="admin-settings-account" data-settings-tab="account"><i class="fa-solid fa-shield-halved"></i><span>Account</span></button></aside>
       <section class="admin-settings-content">
         <div class="admin-settings-heading"><span>Account settings</span><button id="close-admin-settings" type="button" aria-label="Close settings"><i class="fa-solid fa-xmark"></i></button></div>
-        <div class="admin-settings-picture"><img id="admin-settings-picture" src="{{ profile_image }}" alt="{{ admin }} profile picture"><label for="admin-picture-input" class="admin-picture-button"><i class="fa-solid fa-camera"></i> Change picture</label><input id="admin-picture-input" type="file" accept="image/*" hidden><span id="admin-picture-status" role="status"></span></div>
-        <h3>{{ admin }}</h3>
-        <p>{{ 'Super Admin' if account_role == 'admin' else 'Semi Admin' if account_role == 'semi_admin' else 'Administrator' }} account</p>
-        <form id="admin-name-form" class="admin-name-form"><label for="admin-name-input">Display name</label><div><input id="admin-name-input" name="name" type="text" value="{{ admin }}" required><button type="submit">Save name</button></div><span id="admin-name-status" role="status"></span></form>
-        <form id="admin-password-form" class="admin-password-form"><label for="admin-current-password">Change password</label><input id="admin-current-password" name="current_password" type="password" placeholder="Current password" autocomplete="current-password" required><input id="admin-new-password" name="new_password" type="password" placeholder="New password (10+ characters)" minlength="10" autocomplete="new-password" required><input name="confirm_password" type="password" placeholder="Confirm new password" minlength="10" autocomplete="new-password" required><button type="submit">Update password</button><span id="admin-password-status" role="status"></span></form>
-        <a href="/admin/logout" class="admin-settings-action"><i class="fa-solid fa-right-from-bracket"></i> Log out</a>
+        <section id="admin-settings-profile" class="admin-settings-tab-panel" role="tabpanel" aria-labelledby="admin-settings-tab-profile" data-settings-panel="profile">
+          <div class="admin-settings-picture"><img id="admin-settings-picture" src="{{ profile_image }}" alt="{{ admin }} profile picture"><label for="admin-picture-input" class="admin-picture-button"><i class="fa-solid fa-camera"></i> Change picture</label><input id="admin-picture-input" type="file" accept="image/*" hidden><span id="admin-picture-status" role="status"></span></div>
+          <h3>{{ admin }}</h3>
+          <p>{{ 'Super Admin' if account_role == 'admin' else 'Semi Admin' if account_role == 'semi_admin' else 'Administrator' }} account</p>
+          <form id="admin-name-form" class="admin-name-form"><label for="admin-name-input">Display name</label><div><input id="admin-name-input" name="name" type="text" value="{{ admin }}" required><button type="submit">Save name</button></div><span id="admin-name-status" role="status"></span></form>
+        </section>
+        <section id="admin-settings-account" class="admin-settings-tab-panel" role="tabpanel" aria-labelledby="admin-settings-tab-account" data-settings-panel="account" hidden>
+          <h3>Account security</h3>
+          <p>Update your sign-in password and manage your session.</p>
+          <dl class="admin-account-details">
+            <div><dt>Sign-in email</dt><dd>{{ email }}</dd></div>
+            <div><dt>Access level</dt><dd>{{ 'Super Admin' if account_role == 'admin' else 'Semi Admin' if account_role == 'semi_admin' else 'Administrator' }}</dd></div>
+          </dl>
+          <p class="admin-password-policy-note">New passwords need 8+ characters, including an uppercase letter and a symbol. Maximum 72 UTF-8 bytes.</p>
+          <form id="admin-password-form" class="admin-password-form"><label for="admin-current-password">Change password</label><input id="admin-current-password" name="current_password" type="password" placeholder="Current password" autocomplete="current-password" required><input id="admin-new-password" name="new_password" type="password" placeholder="New password (8+ characters)" minlength="8" maxlength="72" autocomplete="new-password" required><input name="confirm_password" type="password" placeholder="Confirm new password" minlength="8" maxlength="72" autocomplete="new-password" required><button type="submit">Update password</button><span id="admin-password-status" role="status"></span></form>
+          <a href="/admin/logout" class="admin-settings-action" data-confirm-logout><i class="fa-solid fa-right-from-bracket"></i> Log out</a>
+        </section>
       </section>
     </div>
   </aside>
+
+  <div id="logout-confirm-modal" class="logout-confirm-modal" hidden aria-hidden="true">
+    <section class="logout-confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="logout-confirm-title" aria-describedby="logout-confirm-description" tabindex="-1">
+      <span class="logout-confirm-icon"><i class="fa-solid fa-right-from-bracket" aria-hidden="true"></i></span>
+      <div class="logout-confirm-copy">
+        <span class="admin-panel-kicker">ACCOUNT</span>
+        <h2 id="logout-confirm-title">Sign out?</h2>
+        <p id="logout-confirm-description">You'll need to sign back in to access the admin dashboard.</p>
+        <div class="logout-confirm-actions"><button id="cancel-admin-logout" class="logout-cancel-button" type="button">Cancel</button><button id="confirm-admin-logout" class="logout-confirm-button" type="button">Log out</button></div>
+      </div>
+    </section>
+  </div>
 
   <div id="student-editor-modal" class="student-editor-modal" hidden>
     <div class="student-editor-dialog" role="dialog" aria-modal="true" aria-labelledby="student-editor-title">
@@ -235,7 +278,7 @@
       <div class="student-editor-header"><div><span id="report-review-kicker">Report card review</span><h2 id="report-review-title">Report card</h2></div><button id="close-report-review" type="button" aria-label="Close report review"><i class="fa-solid fa-xmark"></i></button></div>
       <div class="report-review-meta"><span id="report-review-student"></span><span id="report-review-number"></span><time id="report-review-date"></time></div>
       <p id="report-review-error" class="report-review-error" hidden></p>
-      <div class="report-review-body"><div class="report-review-image-wrap"><a id="report-review-original-link" target="_blank" rel="noopener">Open original image</a><img id="report-review-image" alt="Original uploaded report card"></div><div class="report-review-grades"><div class="editor-table-heading">Extracted subject grades</div><table class="admin-editor-grade-table"><thead><tr><th>Subject</th><th>Grade</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody id="report-review-grade-body"></tbody></table>{% if can_manage_students|default(false) %}<button id="add-report-grade" class="report-secondary-action" type="button"><i class="fa-solid fa-plus" aria-hidden="true"></i><span>Add subject</span></button><label class="report-flag-note">Flag note<input id="report-flag-note" type="text" maxlength="500" placeholder="Why does this upload need attention?"></label>{% else %}<p id="report-flag-readonly" class="report-detail-flag-note"></p>{% endif %}</div></div>
+      <div class="report-review-body"><div class="report-review-image-wrap"><a id="report-review-original-link" target="_blank" rel="noopener">Open original image</a><div class="report-review-image-frame"><img id="report-review-image" alt="Original uploaded report card" hidden><p id="report-review-image-status" class="report-review-image-status" role="status" aria-live="polite">Loading original report card...</p></div></div><div class="report-review-grades"><div class="editor-table-heading">Extracted subject grades</div><table class="admin-editor-grade-table"><thead><tr><th>Subject</th><th>Grade</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody id="report-review-grade-body"></tbody></table>{% if can_manage_students|default(false) %}<button id="add-report-grade" class="report-secondary-action" type="button"><i class="fa-solid fa-plus" aria-hidden="true"></i><span>Add subject</span></button><label class="report-flag-note">Flag note<input id="report-flag-note" type="text" maxlength="500" placeholder="Why does this upload need attention?"></label>{% else %}<p id="report-flag-readonly" class="report-detail-flag-note"></p>{% endif %}</div></div>
       <div class="report-review-actions"><span id="report-review-status" role="status"></span><div>{% if can_manage_students|default(false) %}<button id="flag-report-card" class="report-secondary-action" type="button"><i class="fa-solid fa-flag" aria-hidden="true"></i><span>Flag upload</span></button><button id="reprocess-report-card" class="report-secondary-action" type="button"><i class="fa-solid fa-rotate" aria-hidden="true"></i><span>Re-process</span></button><button id="delete-report-card" class="btn btn-danger" type="button"><i class="fa-solid fa-trash" aria-hidden="true"></i><span>Delete report</span></button><button id="save-report-grades" class="btn btn-primary" type="button"><i class="fa-solid fa-check" aria-hidden="true"></i><span>Save verified grades</span></button>{% endif %}</div></div>
     </section>
   </div>
@@ -261,7 +304,8 @@ Chart.defaults.color = '#4d5866';
 Chart.defaults.borderColor = 'rgba(67, 82, 101, 0.16)';
 
 async function fetchJsonOrThrow(url, options = {}){
-  const res = await fetch(url, options);
+  const apiUrl = url.startsWith('/api/v1/') ? url : `/api/v1${url.startsWith('/') ? url : `/${url}`}`;
+  const res = await fetch(apiUrl, options);
   const contentType = res.headers.get('content-type') || '';
 
   if (res.redirected && res.url.includes('/')) {
@@ -598,18 +642,105 @@ const adminSettingsPanel = document.getElementById('admin-settings-panel');
 const closeAdminSettings = document.getElementById('close-admin-settings');
 const adminAccountTrigger = document.getElementById('admin-account-trigger');
 const adminProfileMenu = document.getElementById('admin-profile-menu');
+const adminThemeToggle = document.getElementById('admin-theme-toggle');
+function syncAdminThemeToggle(){
+  const dark = document.documentElement.classList.contains('admin-dark');
+  adminThemeToggle.setAttribute('aria-pressed', String(dark));
+  adminThemeToggle.querySelector('span').textContent = dark ? 'Light mode' : 'Dark mode';
+  adminThemeToggle.querySelector('i').className = dark ? 'fa-solid fa-sun' : 'fa-solid fa-moon';
+  const labelColor = dark ? '#cbbfbc' : '#4d5866';
+  const gridColor = dark ? 'rgba(203, 191, 188, 0.18)' : 'rgba(67, 82, 101, 0.16)';
+  Chart.defaults.color = labelColor;
+  Chart.defaults.borderColor = gridColor;
+  [chartProfiles, chartGwa, chartMonthly, chartStrand].forEach(chart => {
+    if(!chart) return;
+    Object.values(chart.options.scales || {}).forEach(scale => {
+      scale.ticks.color = labelColor;
+      scale.grid.color = gridColor;
+    });
+    if(chart.options.plugins.legend?.labels) chart.options.plugins.legend.labels.color = labelColor;
+    chart.update('none');
+  });
+}
+syncAdminThemeToggle();
+adminThemeToggle.addEventListener('click', () => {
+  const dark = document.documentElement.classList.toggle('admin-dark');
+  try { localStorage.setItem('pathfinder-admin-theme', dark ? 'dark' : 'light'); } catch (error) {}
+  syncAdminThemeToggle();
+});
 const adminPictureInput = document.getElementById('admin-picture-input');
 const adminPictureStatus = document.getElementById('admin-picture-status');
 const adminNameForm = document.getElementById('admin-name-form');
 const adminNameStatus = document.getElementById('admin-name-status');
 const adminPasswordForm = document.getElementById('admin-password-form');
 const adminPasswordStatus = document.getElementById('admin-password-status');
+const adminSettingsTabButtons = document.querySelectorAll('[data-settings-tab]');
+
+function selectAdminSettingsTab(tabName){
+  adminSettingsTabButtons.forEach(button => {
+    const active = button.dataset.settingsTab === tabName;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-selected', String(active));
+  });
+  document.querySelectorAll('[data-settings-panel]').forEach(panel => {
+    panel.hidden = panel.dataset.settingsPanel !== tabName;
+  });
+}
+
+adminSettingsTabButtons.forEach(button => button.addEventListener('click', () => selectAdminSettingsTab(button.dataset.settingsTab)));
+const logoutConfirmModal = document.getElementById('logout-confirm-modal');
+const logoutReturnFocus = {element: null};
+let pendingLogoutHref = '';
+let logoutCloseTimer = null;
+
+function openLogoutConfirmation(link){
+  if(!logoutConfirmModal) return;
+  window.clearTimeout(logoutCloseTimer);
+  pendingLogoutHref = link.href;
+  logoutReturnFocus.element = link;
+  logoutConfirmModal.hidden = false;
+  logoutConfirmModal.setAttribute('aria-hidden', 'false');
+  document.body.classList.add('logout-confirm-open');
+  requestAnimationFrame(() => {
+    logoutConfirmModal.classList.add('is-open');
+    document.getElementById('cancel-admin-logout')?.focus();
+  });
+}
+
+function closeLogoutConfirmation(){
+  if(!logoutConfirmModal || logoutConfirmModal.hidden) return;
+  logoutConfirmModal.classList.remove('is-open');
+  document.body.classList.remove('logout-confirm-open');
+  logoutCloseTimer = window.setTimeout(() => {
+    logoutConfirmModal.hidden = true;
+    logoutConfirmModal.setAttribute('aria-hidden', 'true');
+    logoutReturnFocus.element?.focus({preventScroll:true});
+    logoutReturnFocus.element = null;
+    pendingLogoutHref = '';
+    logoutCloseTimer = null;
+  }, window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 180);
+}
+
+document.querySelectorAll('[data-confirm-logout]').forEach(link => link.addEventListener('click', event => {
+  event.preventDefault();
+  openLogoutConfirmation(link);
+}));
+document.getElementById('cancel-admin-logout')?.addEventListener('click', closeLogoutConfirmation);
+document.getElementById('confirm-admin-logout')?.addEventListener('click', () => {
+  if(pendingLogoutHref) window.location.assign(pendingLogoutHref);
+});
+logoutConfirmModal?.addEventListener('click', event => {
+  if(event.target === logoutConfirmModal) closeLogoutConfirmation();
+});
+document.addEventListener('keydown', event => {
+  if(event.key === 'Escape' && logoutConfirmModal && !logoutConfirmModal.hidden) closeLogoutConfirmation();
+});
 
 adminNameForm?.addEventListener('submit', async event => {
   event.preventDefault();
   adminNameStatus.textContent = 'Saving...';
   try{
-    const response = await fetch('/update_account', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name: document.getElementById('admin-name-input').value})});
+    const response = await fetch('/api/v1/update_account', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name: document.getElementById('admin-name-input').value})});
     const result = await response.json();
     if(!result.success) throw new Error(result.message || 'Could not update name.');
     document.querySelector('.admin-account-trigger span').textContent = result.name;
@@ -640,7 +771,7 @@ adminPictureInput?.addEventListener('change', async () => {
   const formData = new FormData();
   formData.append('profile_picture', file);
   try{
-    const response = await fetch('/upload_profile_picture', {method:'POST', body:formData});
+    const response = await fetch('/api/v1/upload_profile_picture', {method:'POST', body:formData});
     const result = await response.json();
     if(!result.success) throw new Error(result.message || 'Upload failed.');
     const imageUrl = `${result.profile_image}?t=${Date.now()}`;
@@ -654,6 +785,7 @@ adminPictureInput?.addEventListener('change', async () => {
 function setAdminSettings(open){
   if(!adminSettingsPanel) return;
   adminSettingsPanel.hidden = !open;
+  if(open) selectAdminSettingsTab('profile');
   adminSettingsTriggers.forEach(trigger => trigger.setAttribute('aria-expanded', String(open)));
 }
 
@@ -714,7 +846,7 @@ document.getElementById('add-admin-form')?.addEventListener('submit', async even
 });
 
 let adminStudents = [];
-let systemAvailableStrands = [];
+let systemAvailableStrands = (document.body.dataset.availableStrands || '').split(',').filter(Boolean);
 let adminSubadmins = [];
 let adminReports = [];
 let activeReport = null;
@@ -1048,8 +1180,26 @@ function openReportReview(reportId){
   document.getElementById('report-review-student').textContent = report.student_name || 'Unknown student';
   document.getElementById('report-review-number').textContent = report.student_number ? `Student no. ${report.student_number}` : 'Student number unavailable';
   document.getElementById('report-review-date').textContent = formatReportDate(report.uploaded_at);
-  const reportUrl = `/admin/report_cards/${encodeURIComponent(report.id)}`;
-  document.getElementById('report-review-image').src = reportUrl;
+  const reportUrl = `/api/v1/admin/report_cards/${encodeURIComponent(report.id)}`;
+  const reportImage = document.getElementById('report-review-image');
+  const reportImageStatus = document.getElementById('report-review-image-status');
+  reportImage.hidden = true;
+  reportImageStatus.textContent = 'Loading original report card...';
+  reportImageStatus.hidden = false;
+  reportImage.onload = () => {
+    reportImage.hidden = false;
+    reportImageStatus.hidden = true;
+  };
+  reportImage.onerror = () => {
+    reportImage.hidden = true;
+    reportImageStatus.textContent = 'The original report card could not be loaded. Use Open original image to retry.';
+    reportImageStatus.hidden = false;
+  };
+  reportImage.src = reportUrl;
+  if(reportImage.complete && reportImage.naturalWidth > 0){
+    reportImage.hidden = false;
+    reportImageStatus.hidden = true;
+  }
   document.getElementById('report-review-original-link').href = reportUrl;
   const errorNode = document.getElementById('report-review-error');
   errorNode.textContent = report.ocr_error ? `OCR error: ${report.ocr_error}` : '';
@@ -1093,7 +1243,7 @@ function renderAdminStudents(){
   }).join('')}</tbody></table>`;
   wrap.querySelectorAll('.student-name-link').forEach(button => button.addEventListener('click', () => openStudentEditor(button.dataset.studentId)));
   wrap.querySelectorAll('.student-report-button').forEach(button => button.addEventListener('click', () => {
-    const reportUrl = `/admin/report_cards/${encodeURIComponent(button.dataset.reportId)}`;
+    const reportUrl = `/api/v1/admin/report_cards/${encodeURIComponent(button.dataset.reportId)}`;
     window.open(reportUrl, '_blank', 'noopener,noreferrer');
   }));
 }
@@ -1175,7 +1325,7 @@ async function openStudentEditor(studentId){
     reportLink.hidden = !hasReport;
     reportEmpty.hidden = hasReport;
     if(hasReport){
-      const reportUrl = `/admin/report_cards/${encodeURIComponent(student.report_card_upload_id)}`;
+      const reportUrl = `/api/v1/admin/report_cards/${encodeURIComponent(student.report_card_upload_id)}`;
       reportImage.src = reportUrl;
       reportLink.href = reportUrl;
     }else{
@@ -1356,7 +1506,7 @@ document.getElementById('delete-student-profile')?.addEventListener('click', asy
   const id = document.querySelector('#student-editor-form [name="id"]')?.value;
   if(!id || !confirm('Remove this student profile and all saved grades?')) return;
   try{
-    const response = await fetch('/admin/delete_student', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id})});
+    const response = await fetch('/api/v1/admin/delete_student', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id})});
     const result = await response.json();
     if(!result.success) throw new Error(result.message || 'Could not remove profile.');
     document.getElementById('student-editor-modal').hidden = true;
@@ -1385,6 +1535,129 @@ function showAdminView(view){
   if(view !== 'dashboard') document.getElementById(view)?.scrollIntoView({block:'start'});
 }
 
+function renderAdminGeneratedReport(report){
+  const output = document.getElementById('admin-generated-report');
+  output.replaceChildren();
+  const header = document.createElement('header');
+  header.className = 'admin-generated-report-header';
+  const brandRow = document.createElement('div');
+  brandRow.className = 'admin-generated-report-brand';
+  const logo = document.createElement('img');
+  logo.src = '/static/images/PathFinder2.png';
+  logo.alt = '';
+  logo.width = 38;
+  logo.height = 38;
+  const brand = document.createElement('p');
+  brand.textContent = 'PathFinder';
+  brandRow.append(logo, brand);
+  const title = document.createElement('h2');
+  title.textContent = report.title;
+  const generated = document.createElement('p');
+  generated.textContent = `Generated ${new Date(report.generated_at).toLocaleString()}`;
+  header.append(brandRow, title, generated);
+  output.append(header);
+
+  const filterLine = document.createElement('p');
+  filterLine.className = 'admin-generated-report-filters';
+  filterLine.textContent = `Strand: ${report.filters.strand} | Dates: ${report.filters.from_date} to ${report.filters.to_date}`;
+  output.append(filterLine);
+
+  if(report.summary.length){
+    const summary = document.createElement('dl');
+    summary.className = 'admin-generated-report-summary';
+    report.summary.forEach(item => {
+      const group = document.createElement('div');
+      const label = document.createElement('dt');
+      label.textContent = item.label;
+      const value = document.createElement('dd');
+      value.textContent = String(item.value);
+      group.append(label, value);
+      summary.append(group);
+    });
+    output.append(summary);
+  }
+
+  const tableWrap = document.createElement('div');
+  tableWrap.className = 'admin-generated-report-table-wrap';
+  const table = document.createElement('table');
+  table.className = 'admin-generated-report-table';
+  const tableHead = document.createElement('thead');
+  const headingRow = document.createElement('tr');
+  report.columns.forEach(column => {
+    const cell = document.createElement('th');
+    cell.scope = 'col';
+    cell.textContent = column.label;
+    headingRow.append(cell);
+  });
+  tableHead.append(headingRow);
+  const tableBody = document.createElement('tbody');
+  if(report.rows.length){
+    report.rows.forEach(row => {
+      const rowElement = document.createElement('tr');
+      report.columns.forEach(column => {
+        const cell = document.createElement('td');
+        cell.textContent = String(row[column.key] ?? '');
+        rowElement.append(cell);
+      });
+      tableBody.append(rowElement);
+    });
+  }else{
+    const emptyRow = document.createElement('tr');
+    const emptyCell = document.createElement('td');
+    emptyCell.colSpan = report.columns.length;
+    emptyCell.textContent = 'No records match the selected filters.';
+    emptyRow.append(emptyCell);
+    tableBody.append(emptyRow);
+  }
+  table.append(tableHead, tableBody);
+  tableWrap.append(table);
+  output.append(tableWrap);
+}
+
+const adminReportForm = document.getElementById('admin-report-form');
+const adminReportType = adminReportForm?.elements.report_type;
+const adminReportDateFilters = document.querySelector('.admin-report-date-filters');
+adminReportType?.addEventListener('change', () => {
+  const showDateFilters = adminReportType.value !== 'student_summary';
+  adminReportDateFilters.hidden = !showDateFilters;
+  ['from_date', 'to_date'].forEach(name => {
+    adminReportForm.elements[name].disabled = !showDateFilters;
+    if(!showDateFilters) adminReportForm.elements[name].value = '';
+  });
+});
+adminReportForm?.addEventListener('submit', async event => {
+  event.preventDefault();
+  const submitButton = adminReportForm.querySelector('button[type="submit"]');
+  const printButton = document.getElementById('print-admin-report');
+  const status = document.getElementById('admin-report-status');
+  const output = document.getElementById('admin-generated-report');
+  submitButton.disabled = true;
+  printButton.disabled = true;
+  status.hidden = false;
+  status.textContent = 'Generating report...';
+  try{
+    const formData = new FormData(adminReportForm);
+    const result = await fetchJsonOrThrow('/admin/reports/generate', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(Object.fromEntries(formData.entries()))
+    });
+    renderAdminGeneratedReport(result.report);
+    printButton.disabled = false;
+    status.hidden = true;
+  }catch(error){
+    output.replaceChildren();
+    const message = document.createElement('p');
+    message.className = 'records-empty';
+    message.textContent = error.message || 'Unable to generate report.';
+    output.append(message);
+    status.textContent = 'Report generation failed.';
+  }finally{
+    submitButton.disabled = false;
+  }
+});
+document.getElementById('print-admin-report')?.addEventListener('click', () => window.print());
+
 document.querySelectorAll('[data-admin-view]').forEach(link => {
   link.addEventListener('click', event => {
     event.preventDefault();
@@ -1402,7 +1675,7 @@ document.getElementById('refresh-admin-accounts')?.addEventListener('click', loa
 document.getElementById('refresh-admin-activity')?.addEventListener('click', loadAdminActivity);
 
 const availableAdminViews = ['dashboard'];
-if(canViewAdminData) availableAdminViews.push('view-students', 'manage-reports', 'manage-recommendations');
+if(canViewAdminData) availableAdminViews.push('view-students', 'manage-reports', 'manage-recommendations', 'admin-reports');
 if(canManageStudents) availableAdminViews.push('add-users', 'view-subadmins', 'manage-admin-accounts', 'admin-activity', 'system-settings');
 const initialAdminView = window.location.hash.slice(1) || document.body.dataset.defaultAdminView || 'dashboard';
 const selectedAdminView = availableAdminViews.includes(initialAdminView) ? initialAdminView : 'dashboard';

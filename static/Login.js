@@ -25,7 +25,7 @@ function loginUser(){
     let password = document.getElementById("login-password").value;
 
 
-    fetch("/login", {
+    fetch("/api/v1/login", {
         method: "POST",
         credentials: "same-origin",
         headers:{

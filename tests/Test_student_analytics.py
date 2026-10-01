@@ -1,9 +1,9 @@
 import pytest
 from types import SimpleNamespace
 
-import fasthtml_app as app
+import fastapi_app as app
 
-from fasthtml_app import (
+from fastapi_app import (
     _build_student_performance_analytics,
     _course_average_profile,
     _extract_subject_scores,

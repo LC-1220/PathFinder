@@ -1,7 +1,7 @@
 /* ocr */
 let students = [];
 let selectedStudent = null;
-let configuredAcademicStrands = ['STEM', 'ABM', 'HUMSS', 'GAS', 'TVL', 'SPORTS', 'ARTS_DESIGN'];
+let configuredAcademicStrands = ['STEM', 'ABM', 'HUMSS', 'GAS', 'TVL', 'ICT', 'SPORTS', 'ARTS_DESIGN'];
  
 
 function addStudent() {
@@ -1633,7 +1633,7 @@ function clearInputs() {
             const formData = new FormData();
             formData.append('report_card', blob, blob.name || 'report-card.png');
 
-            const response = await fetch('/ocr_report_card', { method: 'POST', body: formData });
+            const response = await fetch('/api/v1/ocr_report_card', { method: 'POST', body: formData });
             let data;
             try{
                 data = await response.json();
@@ -1748,7 +1748,7 @@ function clearInputs() {
         if(!input) return;
 
         try{
-            const settingsResponse = await fetch('/system-settings/public');
+            const settingsResponse = await fetch('/api/v1/system-settings/public');
             const settingsData = await settingsResponse.json();
             if(settingsData.success && Array.isArray(settingsData.settings?.available_strands) && settingsData.settings.available_strands.length){
                 configuredAcademicStrands = settingsData.settings.available_strands;
@@ -2457,7 +2457,7 @@ function clearInputs() {
 
                 try{
                     setProgress(null, isGuest ? 'Preparing recommendations...' : 'Saving report card...');
-                    const response = await fetch(isGuest ? '/recommend_anonymous' : '/save_profile', {
+                    const response = await fetch(isGuest ? '/api/v1/recommend_anonymous' : '/api/v1/save_profile', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify(payload)
@@ -2649,7 +2649,7 @@ function clearInputs() {
 
 
 function loadSavedProfile() {
-    return fetch('/get_profile')
+    return fetch('/api/v1/get_profile')
         .then(response => response.json())
         .then(data => {
             if (!data.success) return data;
@@ -2718,7 +2718,7 @@ function loadSavedProfile() {
                     profileRecommendationBtn.disabled = true;
                     profileRecommendationBtn.textContent = 'Generating...';
                     try{
-                        const response = await fetch('/generate_recommendations', { method: 'POST' });
+                        const response = await fetch('/api/v1/generate_recommendations', { method: 'POST' });
                         const result = await response.json();
                         if(!result.success) throw new Error(result.message || 'Could not generate recommendations');
                         window.location.href = '/course';
@@ -2740,7 +2740,7 @@ function loadSavedProfile() {
 async function showSavedGrades(){
     let profile = window.latestSavedProfile;
     if(!profile){
-        const response = await fetch('/get_profile');
+            const response = await fetch('/api/v1/get_profile');
         profile = await response.json();
         if(profile.success) window.latestSavedProfile = profile;
     }
@@ -2849,7 +2849,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const formData = new FormData();
         formData.append('profile_picture', file);
         try {
-            const response = await fetch('/upload_profile_picture', { method: 'POST', body: formData });
+            const response = await fetch('/api/v1/upload_profile_picture', { method: 'POST', body: formData });
             const data = await response.json();
             if (!data.success) throw new Error(data.message || 'Upload failed.');
             const imageUrl = `${data.profile_image}?t=${Date.now()}`;
@@ -2865,7 +2865,7 @@ document.addEventListener('DOMContentLoaded', () => {
         event.preventDefault();
         setStatus(nameStatus, 'Saving...');
         try {
-            const response = await fetch('/update_account', {
+            const response = await fetch('/api/v1/update_account', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ name: nameInput.value })

@@ -1,4 +1,6 @@
 python-fasthtml
+fastapi
+uvicorn
 authlib
 httpx
 bcrypt
