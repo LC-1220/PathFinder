@@ -1108,6 +1108,27 @@ function updateOcrIdentityPreview(metadata){
     preview.innerHTML = values.map(([label, value]) => `<span><strong>${label}</strong><em>${escapeText(value || 'Not detected')}</em></span>`).join('');
 }
 
+function majorSubjectCategory(label){
+    const text = String(label || '').toLowerCase();
+    if(/math|algebra|calculus|statistics|trigonometry|geometry|probability/.test(text)) return 'Math';
+    if(/science|physics|chemistry|biology|environment|anatomy|physiology/.test(text)) return 'Science';
+    if(/english|literature|reading|writing|communication|speech/.test(text)) return 'English';
+    return '';
+}
+
+function strongestMajorSubjectRows(rows){
+    const strongest = new Map();
+    for(const row of rows || []){
+        const category = majorSubjectCategory(row.label || row.subject || '');
+        const grade = Number.parseFloat(row.grade);
+        if(!category || !Number.isFinite(grade)) continue;
+        if(!strongest.has(category) || grade > strongest.get(category).grade){
+            strongest.set(category, {label: category, grade});
+        }
+    }
+    return ['Math', 'Science', 'English'].filter(category => strongest.has(category)).map(category => strongest.get(category));
+}
+
 function parseAcademicRecord(text){
     const tableLines = String(text || '').split(/\r?\n/)
         .map(line => line.trim())
@@ -1964,17 +1985,17 @@ function clearInputs() {
 
         function extractSubjectEvidence(academicRecord){
             const evidence = [];
-            const coreSubject = /math|algebra|calculus|statistics|trigonometry|geometry|probability|science|physics|chemistry|biology|english|communication|speech|writing|literature|reading/i;
             const lines = String(academicRecord?.subjects || '').split(/\r?\n/).map(line => line.trim()).filter(Boolean);
             for(const line of lines){
                 const match = line.match(/^(.+?)\s*[-:|]\s*(\d{1,3}(?:\.\d+)?)\s*$/);
                 if(!match) continue;
                 const grade = Number.parseFloat(match[2]);
-                if(Number.isFinite(grade) && grade >= 0 && grade <= 100 && coreSubject.test(match[1])){
-                    evidence.push({subject:match[1].trim(),grade});
+                const category = majorSubjectCategory(match[1]);
+                if(Number.isFinite(grade) && grade >= 0 && grade <= 100 && category){
+                    evidence.push({subject: category, grade});
                 }
             }
-            return evidence.sort((left, right) => right.grade - left.grade).slice(0, 1);
+            return strongestMajorSubjectRows(evidence).map(row => ({subject: row.label, grade: row.grade}));
         }
 
         function renderInlineRecommendations(recommendations, academicRecord, comparisons = {}, shouldScroll = true){
@@ -2023,7 +2044,10 @@ function clearInputs() {
             if(whyButton && bestCourse){
                 whyButton.dataset.question = `Why is ${bestCourse} recommended for me?`;
             }
-            const subjectEvidence = extractSubjectEvidence(academicRecord);
+            const subjectEvidence = extractSubjectEvidence(academicRecord)
+                .map(entry => ({...entry, subject: majorSubjectCategory(entry.subject) || entry.subject}))
+                .filter((entry, index, entries) => entries.findIndex(candidate => candidate.subject === entry.subject) === index)
+                .slice(0, 3);
             list.innerHTML = items.length
                 ? items.map((item, index) => `
                     <article class="inline-recommendation-card${index === 0 ? ' best-match' : ''}" data-recommendation-index="${index}" role="button" tabindex="0" aria-haspopup="dialog">
@@ -2051,7 +2075,10 @@ function clearInputs() {
                 if(!item) return;
                 selectedInlineCourse = item.course || '';
                 const comparison = comparisons[item.course] || {};
-                const rows = Array.isArray(comparison.comparison) ? comparison.comparison : [];
+                const rows = (Array.isArray(comparison.comparison) ? comparison.comparison : [])
+                    .filter(row => /math|science|english/i.test(String(row.subject || '')) && Number(row.student || 0) > 0)
+                    .sort((left, right) => Number(right.student || 0) - Number(left.student || 0))
+                    .slice(0, 3);
                 const studentAverage = Number(comparison.student_overall);
                 const courseAverage = Number(comparison.course_average);
                 const difference = Number(comparison.overall_gap);

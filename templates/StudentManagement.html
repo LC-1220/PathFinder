@@ -16,7 +16,7 @@
             <div class="focus-account">
                 <span>{{ 'Anonymous guest' if is_guest|default(false) else name }}</span>
                 <button id="profile-menu-trigger" class="focus-profile-trigger" type="button" aria-label="Open account menu" aria-haspopup="true" aria-expanded="false">
-                    {% if is_guest|default(false) %}<span class="focus-profile-icon"><i class="fa-solid fa-user-secret"></i></span>{% else %}<img src="{{ profile_image }}" alt="{{ name }} profile picture">{% endif %}
+                    {% if is_guest|default(false) %}<img src="/static/profile_pictures/default.svg" alt="Guest profile picture">{% else %}<img src="{{ profile_image }}" alt="{{ name }} profile picture">{% endif %}
                 </button>
                 <div id="profile-menu" class="profile-menu" hidden>
                     <div class="profile-menu-header"><strong>{{ 'Guest' if is_guest|default(false) else name }}</strong><span>{{ 'Anonymous session' if is_guest|default(false) else email }}</span></div>
