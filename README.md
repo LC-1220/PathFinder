@@ -63,7 +63,9 @@ use Docling OCR plus the accurate TableFormer table-structure model.
 - Configure `BOOTSTRAP_ADMIN_EMAIL` and `BOOTSTRAP_ADMIN_PASSWORD` in `.env` before the first run to create the initial Super Admin. No default admin credentials are committed to the repository.
 - Super Admins can manage admin accounts and roles, student records, reports, recommendations, and audit activity.
 - Semi Admins can view student, report, recommendation, and analytics pages, but cannot edit records, recalculate recommendations, manage admin accounts, or view the admin audit log.
-- Newly created Semi Admins must change their temporary password before accessing the dashboard for the first time.
+- New admin accounts use a unique username and temporary password; existing email-based sign-in remains available. The initial Super Admin can still be bootstrapped with `BOOTSTRAP_ADMIN_EMAIL`.
+- Newly created Semi Admins change their temporary password in a required dashboard pop-up before accessing admin data.
+- Super Admins and Semi Admins can generate, print, and download PDF reports from the Reports page.
 - New or changed passwords require at least 8 characters, an uppercase letter, and a symbol; the maximum is 72 UTF-8 bytes.
 - Admin activity logs record sign-ins and administrative changes, including the session source IP. Logs are retained in `admin_activity_logs`.
 

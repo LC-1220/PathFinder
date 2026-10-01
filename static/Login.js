@@ -21,7 +21,7 @@ if (loginForm) {
 
 function loginUser(){
 
-    let email = document.getElementById("login-email").value;
+    let username = document.getElementById("login-identifier").value;
     let password = document.getElementById("login-password").value;
 
 
@@ -32,7 +32,7 @@ function loginUser(){
             "Content-Type":"application/json"
         },
         body: JSON.stringify({
-            email: email,
+            username: username,
             password: password
         })
     })
@@ -43,9 +43,7 @@ function loginUser(){
 
         if(data.success){
             if(data.admin){
-                window.location.href = data.must_change_password
-                    ? "/admin/force-password-change"
-                    : "/admin/dashboard";
+                window.location.href = "/admin/dashboard";
             } else {
                 window.location.href = "/home";
             }

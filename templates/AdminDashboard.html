@@ -11,7 +11,7 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.3.0/dist/chart.umd.min.js"></script>
   <script>try { document.documentElement.classList.toggle('admin-dark', localStorage.getItem('pathfinder-admin-theme') === 'dark'); } catch (error) {}</script>
 </head>
-<body class="admin-page{{ ' admin-compact-tables' if system_settings.admin_table_density == 'compact' else '' }}" data-can-manage-students="{{ 'true' if can_manage_students|default(false) else 'false' }}" data-can-view-admin-data="{{ 'true' if can_view_admin_data|default(false) else 'false' }}" data-current-user-id="{{ current_user_id|default('') }}" data-default-admin-view="{{ system_settings.admin_default_view }}" data-available-strands="{{ system_settings.available_strands|join(',') }}">
+<body class="admin-page{{ ' admin-compact-tables' if system_settings.admin_table_density == 'compact' else '' }}{{ ' admin-password-required' if password_change_required|default(false) else '' }}" data-can-manage-students="{{ 'true' if can_manage_students|default(false) else 'false' }}" data-can-view-admin-data="{{ 'true' if can_view_admin_data|default(false) else 'false' }}" data-must-change-password="{{ 'true' if password_change_required|default(false) else 'false' }}" data-current-user-id="{{ current_user_id|default('') }}" data-default-admin-view="{{ system_settings.admin_default_view }}" data-available-strands="{{ system_settings.available_strands|join(',') }}">
   <nav class="admin-plain-sidebar" aria-label="Admin navigation">
     <div class="admin-nav-groups">
       <section class="admin-nav-group" aria-label="Overview">
@@ -80,7 +80,7 @@
       <div class="admin-section-heading"><span>Account management</span><h3>Create admin account</h3></div>
       <form id="add-admin-form" class="admin-user-form">
         <input name="name" type="text" placeholder="Admin name" required>
-        <input name="email" type="email" placeholder="Email" required>
+        <input name="username" type="text" placeholder="Username" autocomplete="off" pattern="[A-Za-z][A-Za-z0-9._-]{2,31}" title="3-32 characters, starting with a letter; use letters, numbers, dots, underscores, or hyphens." required>
         <input name="password" type="password" placeholder="Temporary password (8+ characters)" minlength="8" maxlength="72" title="Use at least 8 characters, including an uppercase letter and a symbol." required>
         <label class="admin-role-choice">Role<select name="role" required><option value="semi_admin">Semi Admin · View-only</option><option value="admin">Super Admin · Full access</option></select></label>
         <button class="btn btn-primary" type="submit">Create admin</button>
@@ -174,7 +174,7 @@
     </div>
     {% if can_manage_students|default(false) %}
     <section id="view-subadmins" class="admin-students-section admin-subadmins-section" style="margin-top:22px">
-      <div class="admin-student-list-heading"><div><span class="admin-panel-kicker">ACCOUNT DIRECTORY</span><h3>Subadmin profiles</h3></div><label class="admin-global-search"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i><input id="subadminSearch" type="search" placeholder="Search name or email" aria-label="Search subadmin accounts"></label></div>
+      <div class="admin-student-list-heading"><div><span class="admin-panel-kicker">ACCOUNT DIRECTORY</span><h3>Subadmin profiles</h3></div><label class="admin-global-search"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i><input id="subadminSearch" type="search" placeholder="Search name or username" aria-label="Search subadmin accounts"></label></div>
       <div id="subadminProfilesWrap">Loading subadmin profiles...</div>
     </section>
     {% endif %}
@@ -191,7 +191,7 @@
     <section id="admin-reports" class="admin-students-section admin-generated-reports" style="margin-top:22px">
       <div class="admin-student-list-heading"><div><span class="admin-panel-kicker">REPORT CENTER</span><h3>Generate reports</h3></div></div>
       <form id="admin-report-form" class="admin-report-controls">
-        <label>Report type<select name="report_type"><option value="student_summary">Student summary</option><option value="report_cards">Report-card status</option><option value="recommendations">Recommendation frequency</option></select></label>
+        <label>Report type<select name="report_type"><option value="all_reports">All reports</option><option value="student_summary" selected>Student summary</option><option value="report_cards">Report-card status</option><option value="recommendations">Recommendation frequency</option></select></label>
         <label>Academic strand<select name="strand"><option value="">All strands</option>{% for strand in system_settings.available_strands %}<option value="{{ strand }}">{{ 'Arts & Design' if strand == 'ARTS_DESIGN' else strand }}</option>{% endfor %}<option value="Unspecified">Unspecified</option></select></label>
         <div class="admin-report-date-filters" hidden>
           <label>From date<input name="from_date" type="date"></label>
@@ -199,6 +199,7 @@
         </div>
         <button class="btn btn-primary" type="submit"><i class="fa-solid fa-file-circle-check" aria-hidden="true"></i> Generate report</button>
         <button id="print-admin-report" class="report-secondary-action" type="button" disabled><i class="fa-solid fa-print" aria-hidden="true"></i><span>Print</span></button>
+        <button id="download-admin-report" class="report-secondary-action" type="button" disabled><i class="fa-solid fa-file-arrow-down" aria-hidden="true"></i><span>Download PDF</span></button>
       </form>
       <p id="admin-report-status" class="admin-report-status" role="status" hidden></p>
       <div id="admin-generated-report" class="admin-generated-report-output"><div class="records-empty">Choose a report type and generate a report to view it here.</div></div>
@@ -221,7 +222,7 @@
           <h3>Account security</h3>
           <p>Update your sign-in password and manage your session.</p>
           <dl class="admin-account-details">
-            <div><dt>Sign-in email</dt><dd>{{ email }}</dd></div>
+            <div><dt>Username</dt><dd>{{ username or email }}</dd></div>
             <div><dt>Access level</dt><dd>{{ 'Super Admin' if account_role == 'admin' else 'Semi Admin' if account_role == 'semi_admin' else 'Administrator' }}</dd></div>
           </dl>
           <p class="admin-password-policy-note">New passwords need 8+ characters, including an uppercase letter and a symbol. Maximum 72 UTF-8 bytes.</p>
@@ -243,6 +244,23 @@
       </div>
     </section>
   </div>
+
+  {% if password_change_required|default(false) %}
+  <dialog id="first-password-dialog" class="first-password-dialog" aria-labelledby="first-password-title" aria-describedby="first-password-description">
+    <span class="admin-panel-kicker">ACCOUNT SECURITY</span>
+    <h2 id="first-password-title">Change your temporary password</h2>
+    <p id="first-password-description">Set a new password to access your Semi Admin dashboard.</p>
+    <p class="admin-password-policy-note">Use at least 8 characters, including an uppercase letter and a symbol. Maximum 72 UTF-8 bytes.</p>
+    <form id="first-password-form">
+      <label>Temporary password<input name="current_password" type="password" autocomplete="current-password" required></label>
+      <label>New password<input name="new_password" type="password" minlength="8" maxlength="72" autocomplete="new-password" required></label>
+      <label>Confirm new password<input name="confirm_password" type="password" minlength="8" maxlength="72" autocomplete="new-password" required></label>
+      <p id="first-password-status" role="status" aria-live="polite"></p>
+      <button class="btn btn-primary" type="submit">Update password</button>
+    </form>
+    <a href="/admin/logout" class="first-password-signout">Sign out</a>
+  </dialog>
+  {% endif %}
 
   <div id="student-editor-modal" class="student-editor-modal" hidden>
     <div class="student-editor-dialog" role="dialog" aria-modal="true" aria-labelledby="student-editor-title">
@@ -267,7 +285,7 @@
   <div id="subadmin-profile-modal" class="student-editor-modal subadmin-profile-modal" hidden>
     <section class="subadmin-profile-dialog" role="dialog" aria-modal="true" aria-labelledby="subadmin-profile-name">
       <div class="student-editor-header"><div><span>Level coordinator</span><h2 id="subadmin-profile-name">Subadmin profile</h2></div><button id="close-subadmin-profile" type="button" aria-label="Close profile"><i class="fa-solid fa-xmark"></i></button></div>
-      <div class="subadmin-profile-details"><img id="subadmin-profile-picture" src="/static/profile_pictures/default.svg" alt="Subadmin profile picture"><dl><div><dt>Email</dt><dd id="subadmin-profile-email"></dd></div><div><dt>Role</dt><dd>View-only coordinator</dd></div><div><dt>Account status</dt><dd id="subadmin-profile-status"></dd></div></dl></div>
+      <div class="subadmin-profile-details"><img id="subadmin-profile-picture" src="/static/profile_pictures/default.svg" alt="Subadmin profile picture"><dl><div><dt>Username</dt><dd id="subadmin-profile-username"></dd></div><div><dt>Role</dt><dd>View-only coordinator</dd></div><div><dt>Account status</dt><dd id="subadmin-profile-status"></dd></div></dl></div>
       <div class="subadmin-profile-actions"><span id="subadmin-profile-action-status" role="status"></span><button id="remove-subadmin-account" class="btn btn-danger" type="button"><i class="fa-solid fa-user-xmark" aria-hidden="true"></i><span>Remove subadmin</span></button></div>
     </section>
   </div>
@@ -294,6 +312,7 @@
 <script>
 const canManageStudents = document.body.dataset.canManageStudents === 'true';
 const canViewAdminData = document.body.dataset.canViewAdminData === 'true';
+const mustChangePassword = document.body.dataset.mustChangePassword === 'true';
 const currentAdminUserId = document.body.dataset.currentUserId;
 const adminChartPalette = {
   set1: ['#e41a1c', '#377eb8', '#4daf4a', '#984ea3', '#ff7f00', '#ffff33', '#a65628', '#f781bf'],
@@ -764,6 +783,28 @@ adminPasswordForm?.addEventListener('submit', async event => {
   }
 });
 
+const firstPasswordDialog = document.getElementById('first-password-dialog');
+firstPasswordDialog?.addEventListener('cancel', event => event.preventDefault());
+document.getElementById('first-password-form')?.addEventListener('submit', async event => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const button = form.querySelector('button[type="submit"]');
+  const status = document.getElementById('first-password-status');
+  button.disabled = true;
+  status.textContent = 'Updating password...';
+  try{
+    await fetchJsonOrThrow('/admin/change_password', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(Object.fromEntries(new FormData(form).entries()))
+    });
+    window.location.replace('/admin/dashboard');
+  }catch(error){
+    status.textContent = error.message || 'Could not update password.';
+    button.disabled = false;
+  }
+});
+
 adminPictureInput?.addEventListener('change', async () => {
   const file = adminPictureInput.files[0];
   if(!file) return;
@@ -862,10 +903,10 @@ function renderAdminAccounts(users){
     wrap.innerHTML = '<div class="records-empty">No administrator accounts found.</div>';
     return;
   }
-  wrap.innerHTML = `<table class="table-fixed admin-students-table admin-accounts-table"><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th>Last activity</th><th>Actions</th></tr></thead><tbody>${accounts.map(user => {
+  wrap.innerHTML = `<table class="table-fixed admin-students-table admin-accounts-table"><thead><tr><th>Name</th><th>Username</th><th>Role</th><th>Status</th><th>Last activity</th><th>Actions</th></tr></thead><tbody>${accounts.map(user => {
     const isCurrent = String(user.id) === String(currentAdminUserId);
     const roleLabel = user.role === 'admin' ? 'Super Admin' : 'Semi Admin';
-    return `<tr><td>${escapeAdminHtml(user.name || 'Unnamed admin')}${isCurrent ? '<small class="admin-current-account">You</small>' : ''}</td><td>${escapeAdminHtml(user.email || '—')}</td><td><select class="admin-role-select" data-admin-role-id="${escapeAdminHtml(user.id)}" aria-label="Role for ${escapeAdminHtml(user.name)}" ${isCurrent ? 'disabled' : ''}><option value="semi_admin" ${user.role === 'semi_admin' ? 'selected' : ''}>Semi Admin</option><option value="admin" ${user.role === 'admin' ? 'selected' : ''}>Super Admin</option></select><small class="admin-role-current">${roleLabel}</small></td><td><span class="student-status ${user.is_active ? 'is-active' : 'is-inactive'}">${user.is_active ? 'Active' : 'Deactivated'}</span></td><td>${escapeAdminHtml(user.last_login_at ? formatReportDate(user.last_login_at) : 'Never signed in')}</td><td><div class="admin-account-actions"><button class="admin-save-role" type="button" data-admin-id="${escapeAdminHtml(user.id)}" ${isCurrent ? 'disabled' : ''}>Save role</button><button class="admin-remove-account" type="button" data-admin-id="${escapeAdminHtml(user.id)}" ${isCurrent ? 'disabled' : ''}>Remove</button></div></td></tr>`;
+    return `<tr><td>${escapeAdminHtml(user.name || 'Unnamed admin')}${isCurrent ? '<small class="admin-current-account">You</small>' : ''}</td><td>${escapeAdminHtml(user.username || '—')}</td><td><select class="admin-role-select" data-admin-role-id="${escapeAdminHtml(user.id)}" aria-label="Role for ${escapeAdminHtml(user.name)}" ${isCurrent ? 'disabled' : ''}><option value="semi_admin" ${user.role === 'semi_admin' ? 'selected' : ''}>Semi Admin</option><option value="admin" ${user.role === 'admin' ? 'selected' : ''}>Super Admin</option></select><small class="admin-role-current">${roleLabel}</small></td><td><span class="student-status ${user.is_active ? 'is-active' : 'is-inactive'}">${user.is_active ? 'Active' : 'Deactivated'}</span></td><td>${escapeAdminHtml(user.last_login_at ? formatReportDate(user.last_login_at) : 'Never signed in')}</td><td><div class="admin-account-actions"><button class="admin-save-role" type="button" data-admin-id="${escapeAdminHtml(user.id)}" ${isCurrent ? 'disabled' : ''}>Save role</button><button class="admin-remove-account" type="button" data-admin-id="${escapeAdminHtml(user.id)}" ${isCurrent ? 'disabled' : ''}>Remove</button></div></td></tr>`;
   }).join('')}</tbody></table>`;
   wrap.querySelectorAll('.admin-save-role').forEach(button => button.addEventListener('click', () => updateAdminRole(button.dataset.adminId, wrap)));
   wrap.querySelectorAll('.admin-remove-account').forEach(button => button.addEventListener('click', () => removeAdminAccount(button.dataset.adminId)));
@@ -904,7 +945,7 @@ async function updateAdminRole(userId, wrap){
 
 async function removeAdminAccount(userId){
   const account = await fetchJsonOrThrow('/admin/users').then(result => (result.users || []).find(user => String(user.id) === String(userId)));
-  if(!account || !confirm(`Permanently remove ${account.name || account.email} (${account.role === 'admin' ? 'Super Admin' : 'Semi Admin'})?`)) return;
+  if(!account || !confirm(`Permanently remove ${account.name || account.username} (${account.role === 'admin' ? 'Super Admin' : 'Semi Admin'})?`)) return;
   try{
     const result = await fetchJsonOrThrow('/admin/remove_admin_account', {
       method: 'POST',
@@ -974,15 +1015,15 @@ function renderSubadminProfiles(){
     return;
   }
   const query = (document.getElementById('subadminSearch')?.value || '').trim().toLowerCase();
-  const filtered = adminSubadmins.filter(user => `${user.name || ''} ${user.email || ''}`.toLowerCase().includes(query));
+  const filtered = adminSubadmins.filter(user => `${user.name || ''} ${user.username || ''}`.toLowerCase().includes(query));
   if(!filtered.length){
     wrap.innerHTML = '<div class="records-empty">No subadmin profiles match your search.</div>';
     return;
   }
-  wrap.innerHTML = `<table class="table-fixed admin-students-table admin-subadmins-table"><thead><tr><th>Profile</th><th>Name</th><th>Email</th><th>Account status</th><th></th></tr></thead><tbody>${filtered.map(user => {
+  wrap.innerHTML = `<table class="table-fixed admin-students-table admin-subadmins-table"><thead><tr><th>Profile</th><th>Name</th><th>Username</th><th>Account status</th><th></th></tr></thead><tbody>${filtered.map(user => {
     const image = adminProfileImageUrl(user.profile_picture);
     const status = user.is_active ? 'Active' : 'Deactivated';
-    return `<tr><td><img class="subadmin-avatar" src="${escapeAdminHtml(image)}" alt=""></td><td>${escapeAdminHtml(user.name || 'Unnamed coordinator')}</td><td>${escapeAdminHtml(user.email || '—')}</td><td><span class="student-status ${user.is_active ? 'is-active' : 'is-inactive'}">${status}</span></td><td><button class="subadmin-view-button" type="button" data-subadmin-id="${escapeAdminHtml(user.id)}">View profile</button></td></tr>`;
+    return `<tr><td><img class="subadmin-avatar" src="${escapeAdminHtml(image)}" alt=""></td><td>${escapeAdminHtml(user.name || 'Unnamed coordinator')}</td><td>${escapeAdminHtml(user.username || '—')}</td><td><span class="student-status ${user.is_active ? 'is-active' : 'is-inactive'}">${status}</span></td><td><button class="subadmin-view-button" type="button" data-subadmin-id="${escapeAdminHtml(user.id)}">View profile</button></td></tr>`;
   }).join('')}</tbody></table>`;
   wrap.querySelectorAll('.subadmin-view-button').forEach(button => button.addEventListener('click', () => {
     const user = adminSubadmins.find(item => String(item.id) === button.dataset.subadminId);
@@ -990,7 +1031,7 @@ function renderSubadminProfiles(){
     document.getElementById('subadmin-profile-picture').src = adminProfileImageUrl(user.profile_picture);
     document.getElementById('subadmin-profile-picture').alt = `${user.name || 'Subadmin'} profile picture`;
     document.getElementById('subadmin-profile-name').textContent = user.name || 'Subadmin profile';
-    document.getElementById('subadmin-profile-email').textContent = user.email || 'Email unavailable';
+    document.getElementById('subadmin-profile-username').textContent = user.username || 'Username unavailable';
     document.getElementById('subadmin-profile-status').textContent = user.is_active ? 'Active' : 'Deactivated';
     document.getElementById('subadmin-profile-action-status').textContent = '';
     document.getElementById('remove-subadmin-account').dataset.userId = user.id;
@@ -1430,7 +1471,7 @@ document.getElementById('delete-report-card')?.addEventListener('click', async (
 document.getElementById('remove-subadmin-account')?.addEventListener('click', async event => {
   const button = event.currentTarget;
   const user = adminSubadmins.find(item => String(item.id) === button.dataset.userId);
-  if(!user || !confirm(`Permanently remove ${user.name || user.email || 'this subadmin'} and its linked data?`)) return;
+  if(!user || !confirm(`Permanently remove ${user.name || user.username || 'this subadmin'} and its linked data?`)) return;
   const status = document.getElementById('subadmin-profile-action-status');
   status.textContent = 'Removing account...';
   try{
@@ -1561,7 +1602,20 @@ function renderAdminGeneratedReport(report){
   filterLine.className = 'admin-generated-report-filters';
   filterLine.textContent = `Strand: ${report.filters.strand} | Dates: ${report.filters.from_date} to ${report.filters.to_date}`;
   output.append(filterLine);
+  (report.sections || [report]).forEach(section => {
+    const container = document.createElement('section');
+    container.className = 'admin-generated-report-section';
+    if(report.sections){
+      const heading = document.createElement('h3');
+      heading.textContent = section.title;
+      container.append(heading);
+    }
+    renderAdminReportBody(section, container);
+    output.append(container);
+  });
+}
 
+function renderAdminReportBody(report, output){
   if(report.summary.length){
     const summary = document.createElement('dl');
     summary.className = 'admin-generated-report-summary';
@@ -1617,8 +1671,9 @@ function renderAdminGeneratedReport(report){
 const adminReportForm = document.getElementById('admin-report-form');
 const adminReportType = adminReportForm?.elements.report_type;
 const adminReportDateFilters = document.querySelector('.admin-report-date-filters');
+let generatedAdminReportPayload = null;
 adminReportType?.addEventListener('change', () => {
-  const showDateFilters = adminReportType.value !== 'student_summary';
+  const showDateFilters = ['report_cards', 'recommendations'].includes(adminReportType.value);
   adminReportDateFilters.hidden = !showDateFilters;
   ['from_date', 'to_date'].forEach(name => {
     adminReportForm.elements[name].disabled = !showDateFilters;
@@ -1629,21 +1684,27 @@ adminReportForm?.addEventListener('submit', async event => {
   event.preventDefault();
   const submitButton = adminReportForm.querySelector('button[type="submit"]');
   const printButton = document.getElementById('print-admin-report');
+  const downloadButton = document.getElementById('download-admin-report');
   const status = document.getElementById('admin-report-status');
   const output = document.getElementById('admin-generated-report');
   submitButton.disabled = true;
   printButton.disabled = true;
+  downloadButton.disabled = true;
+  generatedAdminReportPayload = null;
   status.hidden = false;
   status.textContent = 'Generating report...';
   try{
     const formData = new FormData(adminReportForm);
+    const payload = JSON.stringify(Object.fromEntries(formData.entries()));
     const result = await fetchJsonOrThrow('/admin/reports/generate', {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
-      body: JSON.stringify(Object.fromEntries(formData.entries()))
+      body: payload
     });
     renderAdminGeneratedReport(result.report);
+    generatedAdminReportPayload = payload;
     printButton.disabled = false;
+    downloadButton.disabled = false;
     status.hidden = true;
   }catch(error){
     output.replaceChildren();
@@ -1657,6 +1718,40 @@ adminReportForm?.addEventListener('submit', async event => {
   }
 });
 document.getElementById('print-admin-report')?.addEventListener('click', () => window.print());
+document.getElementById('download-admin-report')?.addEventListener('click', async event => {
+  if(!generatedAdminReportPayload) return;
+  const button = event.currentTarget;
+  const status = document.getElementById('admin-report-status');
+  button.disabled = true;
+  status.hidden = false;
+  status.textContent = 'Preparing PDF...';
+  try{
+    const response = await fetch('/api/v1/admin/reports/download', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: generatedAdminReportPayload
+    });
+    if(!response.ok){
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.message || error.error || 'Unable to download report.');
+    }
+    if(!response.headers.get('content-type')?.includes('application/pdf')) throw new Error('PDF download is unavailable. Please sign in again.');
+    const filename = response.headers.get('content-disposition')?.match(/filename="([^"]+)"/)?.[1] || 'pathfinder-report.pdf';
+    const url = URL.createObjectURL(await response.blob());
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 60000);
+    status.textContent = 'PDF downloaded.';
+  }catch(error){
+    status.textContent = error.message || 'Unable to download report.';
+  }finally{
+    button.disabled = false;
+  }
+});
 
 document.querySelectorAll('[data-admin-view]').forEach(link => {
   link.addEventListener('click', event => {
@@ -1750,7 +1845,12 @@ async function loadDashboard(){
   }
 }
 
-loadDashboard();
+if(mustChangePassword){
+  firstPasswordDialog.showModal();
+  firstPasswordDialog.querySelector('[name="current_password"]').focus();
+}else{
+  loadDashboard();
+}
 </script>
 </body>
 </html>

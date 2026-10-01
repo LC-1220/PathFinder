@@ -3419,6 +3419,16 @@ body.logout-confirm-open {
   color: var(--admin-muted);
   font-size: 11px;
 }
+.admin-page .admin-generated-report-section + .admin-generated-report-section {
+  margin-top: 28px;
+  padding-top: 22px;
+  border-top: 1px solid var(--admin-line);
+}
+.admin-page .admin-generated-report-section h3 {
+  margin: 4px 0 14px;
+  color: var(--admin-ink);
+  font-size: 16px;
+}
 .admin-page .admin-generated-report-summary {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(135px, 1fr));
@@ -3517,6 +3527,15 @@ body.logout-confirm-open {
   }
   body.admin-page .admin-generated-report-table tr {
     break-inside: avoid;
+  }
+  body.admin-page .admin-generated-report-section + .admin-generated-report-section {
+    break-before: page;
+    margin-top: 0;
+    padding-top: 0;
+    border-top: 0;
+  }
+  body.admin-page .admin-generated-report-table thead {
+    display: table-header-group;
   }
   body.admin-page .admin-generated-report-table th {
     background: #edf3ee !important;
@@ -3832,7 +3851,7 @@ body.graph-expanded-open {
   }
 }
 .admin-page .admin-user-form {
-  grid-template-columns: repeat(3, minmax(0, 1fr)) minmax(205px, 0.72fr) auto;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) minmax(205px, 0.72fr) auto;
   align-items: center;
 }
 .admin-page .admin-role-choice {
@@ -4094,4 +4113,70 @@ body.graph-expanded-open {
   html.admin-dark .admin-page :is(.btn-primary, .admin-name-form button, .admin-password-form button):hover {
     background: #b34449;
   }
+}
+.admin-page.admin-password-required :is(.admin-plain-sidebar, .admin-topbar, .admin-dashboard-page) {
+  filter: blur(2px);
+}
+.admin-page .first-password-dialog {
+  width: min(430px, calc(100vw - 28px));
+  max-height: calc(100dvh - 28px);
+  overflow: auto;
+  padding: 26px;
+  border: 1px solid var(--admin-line);
+  border-radius: 7px;
+  background: var(--admin-paper);
+  color: var(--admin-ink);
+  box-shadow: 0 24px 64px rgba(20, 10, 10, 0.26);
+  font-family: "DM Sans", sans-serif;
+}
+.admin-page .first-password-dialog::backdrop {
+  background: rgba(23, 17, 18, 0.66);
+}
+.admin-page .first-password-dialog h2 {
+  margin: 8px 0;
+  font-size: 22px;
+  line-height: 1.2;
+}
+.admin-page .first-password-dialog p {
+  color: var(--admin-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.admin-page .first-password-dialog form {
+  display: grid;
+  gap: 12px;
+  margin-top: 20px;
+}
+.admin-page .first-password-dialog label {
+  display: grid;
+  gap: 5px;
+  color: var(--admin-ink);
+  font-size: 12px;
+  font-weight: 700;
+}
+.admin-page .first-password-dialog input {
+  width: 100%;
+  min-height: 40px;
+  padding: 0 10px;
+  border: 1px solid var(--admin-line);
+  border-radius: 4px;
+  background: var(--admin-canvas);
+  color: var(--admin-ink);
+  font: 500 13px "DM Sans", sans-serif;
+}
+.admin-page .first-password-dialog #first-password-status {
+  min-height: 18px;
+  margin: 0;
+  color: var(--admin-green);
+}
+.admin-page .first-password-dialog .btn-primary {
+  width: 100%;
+  min-height: 40px;
+}
+.admin-page .first-password-signout {
+  display: block;
+  margin-top: 16px;
+  color: var(--admin-muted);
+  font-size: 12px;
+  text-align: center;
 }
