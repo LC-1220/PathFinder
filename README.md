@@ -14,7 +14,10 @@ This project now runs on FastHTML.
    Copy `.env.example` to `.env` and fill in `DATABASE_URL` with your Supabase
    Postgres connection string. In Supabase, open **Project Settings > Database**,
    choose the transaction pooler connection string for deployed apps, and set
-   the password there. The app loads `.env` automatically on startup.
+   the password there. Set `BOOTSTRAP_ADMIN_EMAIL` and a strong
+   `BOOTSTRAP_ADMIN_PASSWORD` to create the initial Super Admin on a fresh
+   database. The app loads `.env` automatically on startup; subsequent admin
+   accounts and roles are managed from the Admin Accounts page.
 
       postgresql://postgres.[project-ref]:[password]@[pooler-host]:6543/postgres
 
@@ -48,6 +51,14 @@ use Docling OCR plus the accurate TableFormer table-structure model.
 - Static assets: static/
 - HTML templates: templates/
 - Database: Supabase Postgres, configured through `DATABASE_URL`
+
+## Admin Roles
+
+- Configure `BOOTSTRAP_ADMIN_EMAIL` and `BOOTSTRAP_ADMIN_PASSWORD` in `.env` before the first run to create the initial Super Admin. No default admin credentials are committed to the repository.
+- Super Admins can manage admin accounts and roles, student records, reports, recommendations, and audit activity.
+- Semi Admins can view student, report, recommendation, and analytics pages, but cannot edit records, recalculate recommendations, manage admin accounts, or view the admin audit log.
+- Newly created Semi Admins must change their temporary password before accessing the dashboard for the first time.
+- Admin activity logs record sign-ins and administrative changes, including the session source IP. Logs are retained in `admin_activity_logs`.
 
 ## OAuth Redirect URIs
 

@@ -43,11 +43,9 @@ function loginUser(){
 
         if(data.success){
             if(data.admin){
-                if (data.semi_admin) {
-                    window.location.href = "/admin/dashboard";
-                } else {
-                    window.location.href = "/admin/dashboard";
-                }
+                window.location.href = data.must_change_password
+                    ? "/admin/force-password-change"
+                    : "/admin/dashboard";
             } else {
                 window.location.href = "/home";
             }

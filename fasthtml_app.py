@@ -1,3 +1,4 @@
+# FastHTML Application Configuration and Imports
 import json
 import html
 import math
@@ -9,6 +10,7 @@ from json import dumps
 from datetime import datetime
 from difflib import SequenceMatcher
 
+# Standard Library Imports
 import cv2
 import httpx
 import numpy as np
@@ -19,6 +21,8 @@ from psycopg.errors import UniqueViolation
 from dotenv import load_dotenv
 from fasthtml.common import *
 from jinja2 import Environment, FileSystemLoader, select_autoescape
+from starlette.middleware import Middleware
+from starlette.responses import Response
 
 load_dotenv()
 
@@ -35,10 +39,23 @@ except Exception:
 
 #Admin Configuration
 UPLOAD_FOLDER = "static/profile_pictures"
-ADMIN_USERNAME = "UPHSDAdmin2026"
-ADMIN_PASSWORD = "UPHSD2026"
+ADMIN_USERNAME = (os.getenv("BOOTSTRAP_ADMIN_EMAIL") or "").strip()
+ADMIN_PASSWORD = os.getenv("BOOTSTRAP_ADMIN_PASSWORD") or ""
+BOOTSTRAP_ADMIN_NAME = (os.getenv("BOOTSTRAP_ADMIN_NAME") or "Administrator").strip()
 ROLE_ADMIN = "admin"
 ROLE_SEMI_ADMIN = "semi_admin"
+ROLE_SUPER_ADMIN = ROLE_ADMIN
+SYSTEM_SETTING_STRANDS = ("STEM", "ABM", "HUMSS", "GAS", "TVL", "SPORTS", "ARTS_DESIGN")
+SYSTEM_SETTING_DEFAULTS = {
+    "university_name": "University of Perpetual Help System Dalta Las Pinas",
+    "school_year": "",
+    "available_strands": list(SYSTEM_SETTING_STRANDS),
+    "max_file_size_mb": 10,
+    "automatic_ocr_enabled": True,
+    "recommendation_limit": 3,
+    "admin_default_view": "dashboard",
+    "admin_table_density": "comfortable",
+}
 
 
 #Subject Required Categories
@@ -206,6 +223,64 @@ def _db_conn():
         "connection and use the transaction pooler DATABASE_URL from "
         "Supabase Project Settings > Database."
     ) from last_error
+
+
+def _get_system_settings():
+    conn = _db_conn()
+    cursor = conn.cursor()
+    cursor.execute("SELECT settings_json FROM system_settings WHERE settings_key = 'global'")
+    row = cursor.fetchone()
+    conn.close()
+    settings = {**SYSTEM_SETTING_DEFAULTS, "available_strands": list(SYSTEM_SETTING_DEFAULTS["available_strands"])}
+    if row:
+        try:
+            saved = json.loads(row[0])
+            if isinstance(saved, dict):
+                settings.update(saved)
+        except (TypeError, ValueError):
+            pass
+    settings.pop("current_semester", None)
+    return settings
+
+
+def _validate_system_settings(data):
+    if not isinstance(data, dict):
+        raise ValueError("Settings must be submitted as an object.")
+
+    university_name = str(data.get("university_name", "")).strip()
+    school_year = str(data.get("school_year", "")).strip()
+    strands = data.get("available_strands")
+    max_file_size = data.get("max_file_size_mb")
+    automatic_ocr = data.get("automatic_ocr_enabled")
+    recommendation_limit = data.get("recommendation_limit")
+    default_view = data.get("admin_default_view")
+    table_density = data.get("admin_table_density")
+
+    if len(university_name) > 160 or len(school_year) > 24:
+        raise ValueError("University name or school year is too long.")
+    if not isinstance(strands, list) or not strands or any(strand not in SYSTEM_SETTING_STRANDS for strand in strands):
+        raise ValueError("Select at least one valid academic strand.")
+    if type(max_file_size) is not int or not 1 <= max_file_size <= 50:
+        raise ValueError("Maximum file size must be between 1 and 50 MB.")
+    if type(automatic_ocr) is not bool:
+        raise ValueError("Automatic OCR must be enabled or disabled.")
+    if type(recommendation_limit) is not int or not 1 <= recommendation_limit <= 5:
+        raise ValueError("Recommendation count must be between 1 and 5.")
+    if default_view not in ("dashboard", "view-students", "manage-reports", "manage-recommendations", "admin-activity"):
+        raise ValueError("Choose a valid default admin page.")
+    if table_density not in ("comfortable", "compact"):
+        raise ValueError("Choose a valid table density.")
+
+    return {
+        "university_name": university_name,
+        "school_year": school_year,
+        "available_strands": [strand for strand in SYSTEM_SETTING_STRANDS if strand in strands],
+        "max_file_size_mb": max_file_size,
+        "automatic_ocr_enabled": automatic_ocr,
+        "recommendation_limit": recommendation_limit,
+        "admin_default_view": default_view,
+        "admin_table_density": table_density,
+    }
 
 
 #Course Training Data Retrieval (from the database)
@@ -468,7 +543,7 @@ def _normalize_full_name(value):
     return "".join(tokens).upper()
 
 #Validate Uploaded Image File
-async def validate_upload(file_obj):
+async def validate_upload(file_obj, max_file_size_mb=10):
     if file_obj is None:
         return False, "No file selected."
 
@@ -489,8 +564,9 @@ async def validate_upload(file_obj):
     if not file_bytes:
         return False, "Uploaded file is empty."
 
-    if len(file_bytes) > 10 * 1024 * 1024:
-        return False, "Uploaded file exceeds 10 MB."
+    max_file_size_mb = max(1, min(50, int(max_file_size_mb)))
+    if len(file_bytes) > max_file_size_mb * 1024 * 1024:
+        return False, f"Uploaded file exceeds {max_file_size_mb} MB."
 
     try:
         image = cv2.imdecode(np.frombuffer(file_bytes, np.uint8), cv2.IMREAD_COLOR)
@@ -852,6 +928,26 @@ def recommend_course(subjects_text, current_course="", strand=""):
         recommendations[0]["reason"] += f" This top match combines your {strand.upper()} strand with your Math, Science, and English grade profile."
     return recommendations[:5]
 
+
+def _recommendation_limit():
+    limit = _get_system_settings().get("recommendation_limit", 3)
+    try:
+        limit = max(1, min(5, int(limit)))
+    except (TypeError, ValueError):
+        limit = 3
+    return limit
+
+
+def _limit_recommendations(payload, limit=None):
+    limit = _recommendation_limit() if limit is None else limit
+    return _sanitize_recommendations(payload)[:limit]
+
+
+def _configured_recommendations(subjects_text, current_course="", strand=""):
+    limit = _recommendation_limit()
+    recommendations = recommend_course(subjects_text, current_course, strand)
+    return _sanitize_recommendations(json.dumps(recommendations))[:limit]
+
 # Calculate the average profile for a given course based on historical training data
 def _course_average_profile(course_name):
     training_data = _course_training_data()
@@ -986,9 +1082,29 @@ def init_database():
             email TEXT NOT NULL UNIQUE,
             password_hash TEXT NOT NULL,
             profile_picture TEXT DEFAULT 'default.png',
-            role TEXT DEFAULT 'student'
+            role TEXT DEFAULT 'student',
+            is_active BOOLEAN NOT NULL DEFAULT TRUE,
+            last_login_at TIMESTAMPTZ,
+            must_change_password BOOLEAN NOT NULL DEFAULT FALSE
         )
         """
+    )
+    cursor.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE")
+    cursor.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ")
+    cursor.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN NOT NULL DEFAULT FALSE")
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS system_settings (
+            settings_key TEXT PRIMARY KEY,
+            settings_json TEXT NOT NULL,
+            updated_by BIGINT REFERENCES users(id) ON DELETE SET NULL,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    cursor.execute(
+        "INSERT INTO system_settings (settings_key, settings_json) VALUES ('global', ?) ON CONFLICT (settings_key) DO NOTHING",
+        (json.dumps(SYSTEM_SETTING_DEFAULTS),),
     )
     # Create the student_profiles table if it does not exist
     cursor.execute(
@@ -1011,6 +1127,82 @@ def init_database():
         )
         """
     )
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS report_card_uploads (
+            id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+            user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            original_filename TEXT NOT NULL,
+            content_type TEXT NOT NULL,
+            file_data BYTEA NOT NULL,
+            uploaded_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            ocr_status TEXT NOT NULL DEFAULT 'needs_review',
+            is_flagged BOOLEAN NOT NULL DEFAULT FALSE,
+            flag_note TEXT,
+            student_name TEXT NOT NULL DEFAULT '',
+            student_number TEXT NOT NULL DEFAULT '',
+            extracted_subjects TEXT NOT NULL DEFAULT '',
+            extracted_gwa TEXT NOT NULL DEFAULT '',
+            ocr_error TEXT,
+            processed_at TIMESTAMPTZ
+        )
+        """
+    )
+    cursor.execute("ALTER TABLE report_card_uploads ADD COLUMN IF NOT EXISTS ocr_status TEXT NOT NULL DEFAULT 'needs_review'")
+    cursor.execute("ALTER TABLE report_card_uploads ADD COLUMN IF NOT EXISTS is_flagged BOOLEAN NOT NULL DEFAULT FALSE")
+    cursor.execute("ALTER TABLE report_card_uploads ADD COLUMN IF NOT EXISTS flag_note TEXT")
+    cursor.execute("ALTER TABLE report_card_uploads ADD COLUMN IF NOT EXISTS student_name TEXT NOT NULL DEFAULT ''")
+    cursor.execute("ALTER TABLE report_card_uploads ADD COLUMN IF NOT EXISTS student_number TEXT NOT NULL DEFAULT ''")
+    cursor.execute("ALTER TABLE report_card_uploads ADD COLUMN IF NOT EXISTS extracted_subjects TEXT NOT NULL DEFAULT ''")
+    cursor.execute("ALTER TABLE report_card_uploads ADD COLUMN IF NOT EXISTS extracted_gwa TEXT NOT NULL DEFAULT ''")
+    cursor.execute("ALTER TABLE report_card_uploads ADD COLUMN IF NOT EXISTS ocr_error TEXT")
+    cursor.execute("ALTER TABLE report_card_uploads ADD COLUMN IF NOT EXISTS processed_at TIMESTAMPTZ")
+    cursor.execute(
+        """
+        ALTER TABLE student_profiles
+        ADD COLUMN IF NOT EXISTS report_card_upload_id BIGINT
+        REFERENCES report_card_uploads(id) ON DELETE SET NULL
+        """
+    )
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS course_recommendation_history (
+            id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+            profile_id BIGINT NOT NULL REFERENCES student_profiles(id) ON DELETE CASCADE,
+            recommendations TEXT NOT NULL,
+            generated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS admin_activity_logs (
+            id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+            actor_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+            actor_name TEXT NOT NULL DEFAULT '',
+            actor_email TEXT NOT NULL DEFAULT '',
+            action TEXT NOT NULL,
+            target_user_id BIGINT,
+            target_label TEXT NOT NULL DEFAULT '',
+            details TEXT NOT NULL DEFAULT '',
+            session_ip TEXT NOT NULL DEFAULT '',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    cursor.execute("ALTER TABLE admin_activity_logs ADD COLUMN IF NOT EXISTS session_ip TEXT NOT NULL DEFAULT ''")
+    cursor.execute(
+        """
+        INSERT INTO course_recommendation_history (profile_id, recommendations)
+        SELECT profiles.id, profiles.recommendation
+        FROM student_profiles profiles
+        WHERE profiles.recommendation IS NOT NULL AND profiles.recommendation != ''
+            AND NOT EXISTS (
+                SELECT 1 FROM course_recommendation_history history
+                WHERE history.profile_id = profiles.id
+            )
+        """
+    )
     # Remove orphaned student profiles that do not have a corresponding user
     cursor.execute(
         """
@@ -1021,36 +1213,81 @@ def init_database():
     )
     # Commit the changes and close the connection
     conn.commit()
-    try:
-        cursor.execute("SELECT id FROM users WHERE email = ?", (ADMIN_USERNAME,))
-        row = cursor.fetchone()
-        if not row:
-            hashed = _hash_password(ADMIN_PASSWORD)
+    if ADMIN_USERNAME and ADMIN_PASSWORD:
+        cursor.execute("SELECT id, COALESCE(role, 'student') FROM users WHERE email = ?", (ADMIN_USERNAME,))
+        bootstrap_user = cursor.fetchone()
+        if not bootstrap_user:
             cursor.execute(
                 "INSERT INTO users (name, email, password_hash, profile_picture, role) VALUES (?, ?, ?, ?, ?)",
-                ("Administrator", ADMIN_USERNAME, hashed, "default.svg", ROLE_ADMIN),
+                (BOOTSTRAP_ADMIN_NAME, ADMIN_USERNAME, _hash_password(ADMIN_PASSWORD), "default.svg", ROLE_SUPER_ADMIN),
             )
             conn.commit()
-        else:
-            cursor.execute("UPDATE users SET role = ? WHERE email = ?", (ROLE_ADMIN, ADMIN_USERNAME))
-            conn.commit()
-    except Exception:
-        pass
 
     conn.close()
 # Check if the current session belongs to an admin user
-def _is_admin_session(sess):
-    role = sess.get("role")
-    return bool(sess.get("is_admin")) and role in (ROLE_ADMIN, ROLE_SEMI_ADMIN)
+def _is_admin_session(sess, allow_password_change=False):
+    user_id = sess.get("user_id")
+    if not user_id:
+        return False
+    try:
+        conn = _db_conn()
+        cursor = conn.cursor()
+        cursor.execute("SELECT COALESCE(role, 'student'), COALESCE(is_active, TRUE), COALESCE(must_change_password, FALSE) FROM users WHERE id = ?", (user_id,))
+        row = cursor.fetchone()
+        conn.close()
+    except Exception:
+        return False
+    if not row or not row[1] or row[0] not in (ROLE_ADMIN, ROLE_SEMI_ADMIN):
+        sess.clear()
+        return False
+    sess["role"] = row[0]
+    sess["is_admin"] = True
+    sess["must_change_password"] = bool(row[2])
+    if row[2] and not allow_password_change:
+        return False
+    return True
 
 # Check if the current session belongs to a full admin user
 def _is_full_admin_session(sess):
-    return sess.get("role") == ROLE_ADMIN
+    if not _is_admin_session(sess):
+        return False
+    return sess.get("role") == ROLE_SUPER_ADMIN
+
+
+def _record_admin_activity(sess, action, target_user_id=None, target_label="", details=""):
+    if not sess or sess.get("role") not in (ROLE_ADMIN, ROLE_SEMI_ADMIN) or not sess.get("user_id"):
+        return
+    try:
+        conn = _db_conn()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO admin_activity_logs
+                (actor_user_id, actor_name, actor_email, action, target_user_id, target_label, details, session_ip)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                sess["user_id"],
+                str(sess.get("name") or "")[:200],
+                str(sess.get("email") or "")[:320],
+                str(action)[:100],
+                target_user_id,
+                str(target_label or "")[:320],
+                str(details or "")[:1000],
+                str(sess.get("admin_ip") or "")[:64],
+            ),
+        )
+        conn.commit()
+        conn.close()
+    except Exception:
+        return
 
 # Render a template with the current session context and additional context variables
 def _render(req, template_name, **ctx):
     sess = req.session
     if "user_id" in sess:
+        if sess.get("role") in (ROLE_ADMIN, ROLE_SEMI_ADMIN) and not sess.get("admin_ip"):
+            sess["admin_ip"] = req.client.host if req.client else ""
         conn = _db_conn()
         cursor = conn.cursor()
         cursor.execute("SELECT profile_picture FROM users WHERE id = ?", (sess["user_id"],))
@@ -1064,6 +1301,8 @@ def _render(req, template_name, **ctx):
         email=sess.get("email", "User"),
         admin=sess.get("admin_user", sess.get("name", "Administrator")),
         profile_image=sess.get("profile_image", _default_profile_image_url()),
+        current_user_id=sess.get("user_id", ""),
+        account_role=sess.get("role", ""),
         **ctx,
     )
     return HTMLResponse(body)
@@ -1074,6 +1313,40 @@ app, rt = fast_app(
     static_path=".",
     default_hdrs=False,
 )
+
+
+class _FirstLoginPasswordChangeMiddleware:
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http":
+            session = scope.get("session", {})
+            path = scope.get("path", "")
+            allowed_paths = {
+                "/admin/force-password-change",
+                "/admin/change_password",
+                "/admin/logout",
+                "/logout",
+            }
+            if session.get("must_change_password") and path not in allowed_paths and not path.startswith("/static/"):
+                headers = {key.lower(): value for key, value in scope.get("headers", [])}
+                if b"text/html" in headers.get(b"accept", b""):
+                    response = RedirectResponse("/admin/force-password-change", status_code=303)
+                else:
+                    response = JSONResponse(
+                        {"success": False, "code": "password_change_required", "message": "Change your temporary password before continuing."},
+                        status_code=403,
+                    )
+                await response(scope, receive, send)
+                return
+        await self.app(scope, receive, send)
+
+
+# Run after SessionMiddleware so the gate can inspect the authenticated session.
+app.user_middleware.append(Middleware(_FirstLoginPasswordChangeMiddleware))
+app.middleware_stack = None
+
 # Configure OAuth providers for the application
 oauth = OAuth()
 # Register the Google OAuth provider
@@ -1130,21 +1403,28 @@ async def generate_recommendations(req):
         return JSONResponse({"success": False, "message": "Save a student profile first."})
 
     recommendation_subjects = _clean_subjects_for_recommendation(profile.get("subjects", "")) or profile.get("subjects", "")
-    recommendations = _sanitize_recommendations(json.dumps(recommend_course(
+    recommendations = _configured_recommendations(
         recommendation_subjects,
         profile.get("course", ""),
         profile.get("strand", ""),
-    )))[:5]
+    )
     if not recommendations:
         return JSONResponse({"success": False, "message": "No course matches could be generated from the saved grades."})
 
     payload = json.dumps(recommendations)
     sess["latest_recommendations"] = payload
     conn = _db_conn()
-    conn.execute(
-        "UPDATE student_profiles SET recommendation = ? WHERE id = (SELECT id FROM student_profiles WHERE user_id = ? ORDER BY id DESC LIMIT 1)",
+    cursor = conn.cursor()
+    cursor.execute(
+        "UPDATE student_profiles SET recommendation = ? WHERE id = (SELECT id FROM student_profiles WHERE user_id = ? ORDER BY id DESC LIMIT 1) RETURNING id",
         (payload, user_id),
     )
+    profile_row = cursor.fetchone()
+    if profile_row:
+        cursor.execute(
+            "INSERT INTO course_recommendation_history (profile_id, recommendations) VALUES (?, ?)",
+            (profile_row[0], payload),
+        )
     conn.commit()
     conn.close()
     return JSONResponse({"success": True, "count": len(recommendations)})
@@ -1189,7 +1469,7 @@ async def login(req):
     cursor = conn.cursor()
     cursor.execute(
         """
-        SELECT id, name, password_hash, COALESCE(role, 'student'), COALESCE(profile_picture, '')
+        SELECT id, name, password_hash, COALESCE(role, 'student'), COALESCE(profile_picture, ''), COALESCE(is_active, TRUE), COALESCE(must_change_password, FALSE)
         FROM users
         WHERE email = ?
         """,
@@ -1201,7 +1481,10 @@ async def login(req):
     if not result:
         return JSONResponse({"success": False, "message": "Email not found"})
 
-    user_id, name, stored_hash, role, profile_picture = result
+    user_id, name, stored_hash, role, profile_picture, is_active, must_change_password = result
+
+    if not is_active:
+        return JSONResponse({"success": False, "message": "This account has been deactivated."})
 
     try:
         valid = _check_password(stored_hash, password)
@@ -1211,26 +1494,37 @@ async def login(req):
     if not valid:
         return JSONResponse({"success": False, "message": "Incorrect Password"})
 
+    conn = _db_conn()
+    conn.execute("UPDATE users SET last_login_at = CURRENT_TIMESTAMP WHERE id = ?", (user_id,))
+    conn.commit()
+    conn.close()
+
     sess = req.session
     sess["user_id"] = user_id
     sess["name"] = name
     sess["email"] = email
     sess["role"] = role
+    sess["must_change_password"] = bool(must_change_password)
     if role in (ROLE_ADMIN, ROLE_SEMI_ADMIN):
         sess["is_admin"] = True
         sess["admin_user"] = name or email
+        sess["admin_ip"] = req.client.host if req.client else ""
     _set_session_profile_image(sess, profile_picture)
+    if role in (ROLE_ADMIN, ROLE_SEMI_ADMIN):
+        _record_admin_activity(sess, "login", target_label=email)
 
     resp = {"success": True}
     if role in (ROLE_ADMIN, ROLE_SEMI_ADMIN):
         resp["admin"] = True
     if role == ROLE_SEMI_ADMIN:
         resp["semi_admin"] = True
+        resp["must_change_password"] = bool(must_change_password)
     return JSONResponse(resp)
 
 
 @rt("/logout", methods=["GET"])
 def logout(req):
+    _record_admin_activity(req.session, "logout")
     req.session.clear()
     return RedirectResponse("/", status_code=302)
 
@@ -1242,6 +1536,7 @@ def admin_login(req):
 # Define the route for admin logout
 @rt("/admin/logout", methods=["GET"])
 def admin_logout(req):
+    _record_admin_activity(req.session, "logout")
     req.session.clear()
     return RedirectResponse("/", status_code=302)
 
@@ -1251,7 +1546,13 @@ def admin_logout(req):
 def admin_home(req):
     if not _is_admin_session(req.session):
         return RedirectResponse("/", status_code=302)
-    return _render(req, "AdminDashboard.html", can_manage_students=(_is_full_admin_session(req.session)))
+    return _render(
+        req,
+        "AdminDashboard.html",
+        can_manage_students=_is_full_admin_session(req.session),
+        can_view_admin_data=True,
+        system_settings=_get_system_settings(),
+    )
 
 
 # Define the route for the admin dashboard
@@ -1259,7 +1560,51 @@ def admin_home(req):
 def admin_dashboard(req):
     if not _is_admin_session(req.session):
         return RedirectResponse("/", status_code=302)
-    return _render(req, "AdminDashboard.html", can_manage_students=(_is_full_admin_session(req.session)))
+    return _render(
+        req,
+        "AdminDashboard.html",
+        can_manage_students=_is_full_admin_session(req.session),
+        can_view_admin_data=True,
+        system_settings=_get_system_settings(),
+    )
+
+
+@rt("/admin/force-password-change", methods=["GET"])
+def admin_force_password_change(req):
+    user_id = req.session.get("user_id")
+    if not user_id:
+        return RedirectResponse("/", status_code=303)
+    conn = _db_conn()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT COALESCE(role, 'student'), COALESCE(is_active, TRUE), COALESCE(must_change_password, FALSE) FROM users WHERE id = ?",
+        (user_id,),
+    )
+    row = cursor.fetchone()
+    conn.close()
+    if not row or not row[1] or row[0] != ROLE_SEMI_ADMIN:
+        req.session.clear()
+        return RedirectResponse("/", status_code=303)
+    if not row[2]:
+        req.session["must_change_password"] = False
+        return RedirectResponse("/admin/dashboard", status_code=303)
+    req.session["must_change_password"] = True
+    req.session["role"] = row[0]
+    req.session["is_admin"] = True
+    return _render(req, "ForcePasswordChange.html")
+
+
+@rt("/system-settings/public", methods=["GET"])
+def public_system_settings(req):
+    settings = _get_system_settings()
+    return JSONResponse({
+        "success": True,
+        "settings": {
+            "university_name": settings["university_name"],
+            "school_year": settings["school_year"],
+            "available_strands": settings["available_strands"],
+        },
+    })
 
 
 # Define the route for fetching all users (admin only)
@@ -1270,11 +1615,73 @@ def admin_get_users(req):
 
     conn = _db_conn()
     cursor = conn.cursor()
-    cursor.execute("SELECT id, name, email, profile_picture, COALESCE(role, 'student') FROM users ORDER BY id DESC")
+    cursor.execute("SELECT id, name, email, profile_picture, COALESCE(role, 'student'), COALESCE(is_active, TRUE), last_login_at FROM users WHERE COALESCE(role, 'student') IN (?, ?) ORDER BY id DESC", (ROLE_ADMIN, ROLE_SEMI_ADMIN))
     rows = cursor.fetchall()
     conn.close()
-    users = [{"id": r[0], "name": r[1], "email": r[2], "profile_picture": r[3], "role": r[4]} for r in rows]
+    users = [{"id": r[0], "name": r[1], "email": r[2], "profile_picture": r[3], "role": r[4], "is_active": bool(r[5]), "last_login_at": r[6].isoformat() if r[6] else ""} for r in rows]
     return JSONResponse({"users": users})
+
+
+@rt("/admin/system-settings", methods=["GET"])
+def admin_get_system_settings(req):
+    if not _is_full_admin_session(req.session):
+        return JSONResponse({"success": False, "error": "forbidden"}, status_code=403)
+    return JSONResponse({"success": True, "settings": _get_system_settings()})
+
+
+@rt("/admin/system-settings", methods=["POST"])
+async def admin_save_system_settings(req):
+    if not _is_full_admin_session(req.session):
+        return JSONResponse({"success": False, "error": "forbidden"}, status_code=403)
+    try:
+        settings = _validate_system_settings(await req.json())
+    except (ValueError, TypeError) as exc:
+        return JSONResponse({"success": False, "message": str(exc)}, status_code=400)
+
+    conn = _db_conn()
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        INSERT INTO system_settings (settings_key, settings_json, updated_by, updated_at)
+        VALUES ('global', ?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT (settings_key) DO UPDATE SET
+            settings_json = EXCLUDED.settings_json,
+            updated_by = EXCLUDED.updated_by,
+            updated_at = CURRENT_TIMESTAMP
+        """,
+        (json.dumps(settings), req.session.get("user_id")),
+    )
+    conn.commit()
+    conn.close()
+    _record_admin_activity(req.session, "system_settings_updated", target_label="global system settings")
+    return JSONResponse({"success": True, "settings": settings})
+
+
+@rt("/admin/activity", methods=["GET"])
+def admin_get_activity(req):
+    if not _is_full_admin_session(req.session):
+        return JSONResponse({"success": False, "error": "forbidden"}, status_code=403)
+    conn = _db_conn()
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT id, actor_name, actor_email, action, target_label, details, session_ip, created_at
+        FROM admin_activity_logs
+        ORDER BY created_at DESC, id DESC
+        LIMIT 500
+        """
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return JSONResponse({"success": True, "activity": [
+        {
+            "id": row[0], "actor_name": row[1] or "Unknown admin",
+            "actor_email": row[2] or "", "action": row[3],
+            "target_label": row[4] or "", "details": row[5] or "",
+            "session_ip": row[6] or "", "created_at": row[7].isoformat() if row[7] else "",
+        }
+        for row in rows
+    ]})
 
 
 # Define the route for updating a user (admin only)
@@ -1290,13 +1697,20 @@ async def admin_update_user(req):
     password = data.get("password")
     if not uid:
         return JSONResponse({"success": False, "message": "Missing id"})
+    if password and len(password) < 10:
+        return JSONResponse({"success": False, "message": "Admin passwords must be at least 10 characters."}, status_code=400)
 
     conn = _db_conn()
     cursor = conn.cursor()
     try:
+        cursor.execute("SELECT COALESCE(role, 'student') FROM users WHERE id = ?", (uid,))
+        account = cursor.fetchone()
+        if not account or account[0] not in (ROLE_ADMIN, ROLE_SEMI_ADMIN):
+            conn.close()
+            return JSONResponse({"success": False, "message": "Admin account not found."}, status_code=404)
         if password:
             hashed = _hash_password(password)
-            cursor.execute('UPDATE users SET name = ?, email = ?, password_hash = ? WHERE id = ?', (name, email, hashed, uid))
+            cursor.execute('UPDATE users SET name = ?, email = ?, password_hash = ?, must_change_password = ? WHERE id = ?', (name, email, hashed, account[0] == ROLE_SEMI_ADMIN, uid))
         else:
             cursor.execute('UPDATE users SET name = ?, email = ? WHERE id = ?', (name, email, uid))
         conn.commit()
@@ -1304,6 +1718,7 @@ async def admin_update_user(req):
         conn.close()
         return JSONResponse({"success": False, "message": "Email already exists"})
     conn.close()
+    _record_admin_activity(req.session, "admin_account_updated", uid, email or "")
     return JSONResponse({"success": True})
 
 
@@ -1321,7 +1736,7 @@ async def admin_delete_user(req):
     conn = _db_conn()
     cursor = conn.cursor()
     try:
-        cursor.execute("SELECT email, profile_picture FROM users WHERE id = ?", (uid,))
+        cursor.execute("SELECT email, profile_picture, COALESCE(role, 'student'), name FROM users WHERE id = ?", (uid,))
         row = cursor.fetchone()
         if not row:
             conn.close()
@@ -1329,10 +1744,17 @@ async def admin_delete_user(req):
 
         email = (row[0] or "").strip()
         profile_picture = (row[1] or "").strip()
+        target_role = row[2]
+        target_name = row[3] or email
 
-        if email == ADMIN_USERNAME:
+        if int(uid) == int(req.session.get("user_id")):
             conn.close()
-            return JSONResponse({"success": False, "message": "Cannot delete the main admin account"})
+            return JSONResponse({"success": False, "message": "You cannot remove your own account."}, status_code=400)
+        if target_role == ROLE_SUPER_ADMIN:
+            cursor.execute("SELECT COUNT(*) FROM users WHERE role = ? AND COALESCE(is_active, TRUE)", (ROLE_SUPER_ADMIN,))
+            if cursor.fetchone()[0] <= 1:
+                conn.close()
+                return JSONResponse({"success": False, "message": "Cannot remove the last active super admin."}, status_code=400)
 
         cursor.execute("DELETE FROM student_profiles WHERE user_id = ?", (uid,))
         cursor.execute("DELETE FROM users WHERE id = ?", (uid,))
@@ -1342,6 +1764,8 @@ async def admin_delete_user(req):
         conn.close()
         return JSONResponse({"success": False, "message": "Delete failed"})
     conn.close()
+
+    _record_admin_activity(req.session, "admin_account_removed", uid, target_name, f"role={target_role}")
 
     lowered = profile_picture.lower()
     if profile_picture and not lowered.startswith("http://") and not lowered.startswith("https://") and lowered not in ("default.jpg", "default.png", "default.svg"):
@@ -1353,6 +1777,66 @@ async def admin_delete_user(req):
                 pass
 
     return JSONResponse({"success": True})
+
+
+@rt("/admin/remove_admin_account", methods=["POST"])
+async def admin_remove_admin_account(req):
+    if not _is_full_admin_session(req.session):
+        return JSONResponse({"success": False, "error": "forbidden"}, status_code=403)
+
+    data = await req.json()
+    try:
+        user_id = int(data.get("id"))
+    except (TypeError, ValueError):
+        return JSONResponse({"success": False, "message": "Invalid admin account id."}, status_code=400)
+    if user_id == int(req.session.get("user_id")):
+        return JSONResponse({"success": False, "message": "You cannot remove your own account."}, status_code=400)
+
+    conn = _db_conn()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT email, profile_picture, COALESCE(role, 'student'), name FROM users WHERE id = ?",
+        (user_id,),
+    )
+    account = cursor.fetchone()
+    if not account or account[2] not in (ROLE_ADMIN, ROLE_SEMI_ADMIN):
+        conn.close()
+        return JSONResponse({"success": False, "message": "Admin account not found."}, status_code=404)
+
+    email = (account[0] or "").strip()
+    profile_picture = (account[1] or "").strip()
+    role = account[2]
+    target_name = account[3] or email
+    if role == ROLE_SUPER_ADMIN:
+        cursor.execute(
+            "SELECT COUNT(*) FROM users WHERE role = ? AND COALESCE(is_active, TRUE)",
+            (ROLE_SUPER_ADMIN,),
+        )
+        if cursor.fetchone()[0] <= 1:
+            conn.close()
+            return JSONResponse({"success": False, "message": "Cannot remove the last active super admin."}, status_code=400)
+
+    try:
+        cursor.execute("DELETE FROM student_profiles WHERE user_id = ?", (user_id,))
+        cursor.execute("DELETE FROM users WHERE id = ?", (user_id,))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        conn.close()
+        return JSONResponse({"success": False, "message": "Admin account removal failed."}, status_code=500)
+    conn.close()
+
+    _record_admin_activity(req.session, "admin_account_removed", user_id, target_name, f"role={role}")
+    lowered = profile_picture.lower()
+    if profile_picture and not lowered.startswith(("http://", "https://")) and lowered not in ("default.jpg", "default.png", "default.svg"):
+        image_path = os.path.abspath(os.path.join(UPLOAD_FOLDER, os.path.basename(profile_picture)))
+        upload_root = os.path.abspath(UPLOAD_FOLDER)
+        if os.path.commonpath((upload_root, image_path)) == upload_root and os.path.isfile(image_path):
+            try:
+                os.remove(image_path)
+            except OSError:
+                pass
+    return JSONResponse({"success": True, "message": "Admin account removed."})
 
 
 # Define the route for creating a coordinator (admin only)
@@ -1369,8 +1853,8 @@ async def admin_create_coordinator(req):
     if not name or not email or not password:
         return JSONResponse({"success": False, "message": "Name, email, and password are required"}, status_code=400)
 
-    if len(password) < 6:
-        return JSONResponse({"success": False, "message": "Password must be at least 6 characters"}, status_code=400)
+    if len(password) < 10:
+        return JSONResponse({"success": False, "message": "Admin passwords must be at least 10 characters"}, status_code=400)
 
     conn = _db_conn()
     cursor = conn.cursor()
@@ -1378,8 +1862,8 @@ async def admin_create_coordinator(req):
         hashed = _hash_password(password)
         cursor.execute(
             """
-            INSERT INTO users (name, email, password_hash, profile_picture, role)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO users (name, email, password_hash, profile_picture, role, must_change_password)
+            VALUES (?, ?, ?, ?, ?, TRUE)
             """,
             (name, email, hashed, "default.svg", ROLE_SEMI_ADMIN),
         )
@@ -1389,7 +1873,78 @@ async def admin_create_coordinator(req):
         return JSONResponse({"success": False, "message": "Email already exists"}, status_code=409)
 
     conn.close()
+    _record_admin_activity(req.session, "admin_account_created", target_label=email, details=f"role={ROLE_SEMI_ADMIN}")
     return JSONResponse({"success": True, "message": "Level coordinator account created"})
+
+
+@rt("/admin/create_admin_user", methods=["POST"])
+async def admin_create_user(req):
+    if not _is_full_admin_session(req.session):
+        return JSONResponse({"success": False, "error": "forbidden"}, status_code=403)
+
+    data = await req.json()
+    name = " ".join(str(data.get("name") or "").split())
+    email = str(data.get("email") or "").strip().lower()
+    password = str(data.get("password") or "")
+    role = str(data.get("role") or ROLE_SEMI_ADMIN).strip()
+    if not name or not email or not password:
+        return JSONResponse({"success": False, "message": "Name, email, and password are required."}, status_code=400)
+    if role not in (ROLE_SUPER_ADMIN, ROLE_SEMI_ADMIN):
+        return JSONResponse({"success": False, "message": "Choose Super Admin or Semi Admin."}, status_code=400)
+    if len(password) < 10:
+        return JSONResponse({"success": False, "message": "Admin passwords must be at least 10 characters."}, status_code=400)
+
+    conn = _db_conn()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "INSERT INTO users (name, email, password_hash, profile_picture, role, is_active, must_change_password) VALUES (?, ?, ?, ?, ?, TRUE, ?) RETURNING id",
+            (name, email, _hash_password(password), "default.svg", role, role == ROLE_SEMI_ADMIN),
+        )
+        created = cursor.fetchone()
+        conn.commit()
+    except UniqueViolation:
+        conn.close()
+        return JSONResponse({"success": False, "message": "Email already exists."}, status_code=409)
+    conn.close()
+    _record_admin_activity(req.session, "admin_account_created", created[0], email, f"role={role}")
+    return JSONResponse({"success": True, "message": f"{role.replace('_', ' ').title()} account created."})
+
+
+@rt("/admin/update_admin_role", methods=["POST"])
+async def admin_update_admin_role(req):
+    if not _is_full_admin_session(req.session):
+        return JSONResponse({"success": False, "error": "forbidden"}, status_code=403)
+
+    data = await req.json()
+    try:
+        user_id = int(data.get("id"))
+    except (TypeError, ValueError):
+        return JSONResponse({"success": False, "message": "Invalid admin account id."}, status_code=400)
+    role = str(data.get("role") or "").strip()
+    if role not in (ROLE_SUPER_ADMIN, ROLE_SEMI_ADMIN):
+        return JSONResponse({"success": False, "message": "Choose Super Admin or Semi Admin."}, status_code=400)
+    if user_id == int(req.session["user_id"]) and role != ROLE_SUPER_ADMIN:
+        return JSONResponse({"success": False, "message": "You cannot remove your own super-admin access."}, status_code=400)
+
+    conn = _db_conn()
+    cursor = conn.cursor()
+    cursor.execute("SELECT name, email, COALESCE(role, 'student') FROM users WHERE id = ?", (user_id,))
+    account = cursor.fetchone()
+    if not account or account[2] not in (ROLE_SUPER_ADMIN, ROLE_SEMI_ADMIN):
+        conn.close()
+        return JSONResponse({"success": False, "message": "Admin account not found."}, status_code=404)
+    old_role = account[2]
+    if old_role == ROLE_SUPER_ADMIN and role != ROLE_SUPER_ADMIN:
+        cursor.execute("SELECT COUNT(*) FROM users WHERE role = ? AND COALESCE(is_active, TRUE)", (ROLE_SUPER_ADMIN,))
+        if cursor.fetchone()[0] <= 1:
+            conn.close()
+            return JSONResponse({"success": False, "message": "At least one active super admin must remain."}, status_code=400)
+    cursor.execute("UPDATE users SET role = ? WHERE id = ?", (role, user_id))
+    conn.commit()
+    conn.close()
+    _record_admin_activity(req.session, "admin_role_changed", user_id, account[1], f"{old_role} -> {role}")
+    return JSONResponse({"success": True, "message": "Admin role updated."})
 
 # Define the route for fetching all student profiles (admin only)
 @rt("/admin/student_profiles", methods=["GET"])
@@ -1436,33 +1991,68 @@ async def admin_update_student_profile(req):
 
     data = await req.json()
     sid = data.get("id")
-    if not sid:
-        return JSONResponse({"success": False, "message": "Missing student id"}, status_code=400)
-
     conn = _db_conn()
     cursor = conn.cursor()
-    cursor.execute(
-        """
-        UPDATE student_profiles
-        SET first_name = ?, middle_initial = ?, last_name = ?, student_number = ?, course = ?, gwa = ?, grades = ?, subjects = ?, strand = ?
-        WHERE id = ?
-        """,
-        (
-            (data.get("first_name") or "").strip(),
-            (data.get("middle_initial") or "").strip(),
-            (data.get("last_name") or "").strip(),
-            (data.get("student_number") or "").strip(),
-            (data.get("course") or "").strip(),
-            (data.get("gwa") or "").strip(),
-            (data.get("grades") or "").strip(),
-            (data.get("subjects") or "").strip(),
-            (data.get("strand") or "").strip(),
-            sid,
-        ),
+    values = (
+        (data.get("first_name") or "").strip(),
+        (data.get("middle_initial") or "").strip(),
+        (data.get("last_name") or "").strip(),
+        (data.get("student_number") or "").strip(),
+        (data.get("gwa") or "").strip(),
+        (data.get("grades") or "").strip(),
+        (data.get("subjects") or "").strip(),
+        (data.get("strand") or "").strip(),
     )
+    if sid:
+        try:
+            profile_id = int(sid)
+        except (TypeError, ValueError):
+            conn.close()
+            return JSONResponse({"success": False, "message": "Invalid profile id"}, status_code=400)
+        cursor.execute(
+            """
+            UPDATE student_profiles
+            SET first_name = ?, middle_initial = ?, last_name = ?, student_number = ?, gwa = ?, grades = ?, subjects = ?, strand = ?
+            WHERE id = ? AND user_id IN (SELECT id FROM users WHERE COALESCE(role, 'student') = 'student')
+            RETURNING id
+            """,
+            (*values, profile_id),
+        )
+        updated = cursor.fetchone()
+        if not updated:
+            conn.close()
+            return JSONResponse({"success": False, "message": "Student profile not found"}, status_code=404)
+    else:
+        try:
+            student_user_id = int(data.get("user_id"))
+        except (TypeError, ValueError):
+            conn.close()
+            return JSONResponse({"success": False, "message": "Missing student account id"}, status_code=400)
+        cursor.execute(
+            """
+            INSERT INTO student_profiles
+                (user_id, first_name, middle_initial, last_name, student_number, gwa, grades, subjects, strand, upload_date)
+            SELECT id, ?, ?, ?, ?, ?, ?, ?, ?, ?
+            FROM users
+            WHERE id = ? AND COALESCE(role, 'student') = 'student'
+            RETURNING id
+            """,
+            (*values, datetime.utcnow().isoformat(), student_user_id),
+        )
+        created = cursor.fetchone()
+        if not created:
+            conn.close()
+            return JSONResponse({"success": False, "message": "Student account not found"}, status_code=404)
     conn.commit()
     conn.close()
-    return JSONResponse({"success": True, "message": "Student profile updated"})
+    message = "Student profile updated" if sid else "Student profile created"
+    _record_admin_activity(
+        req.session,
+        "student_profile_updated" if sid else "student_profile_created",
+        data.get("user_id"),
+        values[3] or f"profile:{sid or ''}",
+    )
+    return JSONResponse({"success": True, "message": message})
 
 # Define the route for the admin students page (admin only)
 @rt("/admin/students", methods=["GET"])
@@ -1487,7 +2077,13 @@ def admin_get_students(req):
                 "strand": r[5],
             }
         )
-    return _render(req, "AdminDashboard.html", can_manage_students=(_is_full_admin_session(req.session)))
+    return _render(
+        req,
+        "AdminDashboard.html",
+        can_manage_students=_is_full_admin_session(req.session),
+        can_view_admin_data=True,
+        system_settings=_get_system_settings(),
+    )
 
 
 # Define the route for fetching all students via API (admin only)
@@ -1498,20 +2094,165 @@ def admin_get_students_api(req):
 
     conn = _db_conn()
     cursor = conn.cursor()
-    cursor.execute("SELECT id, student_number, first_name, middle_initial, last_name, strand FROM student_profiles ORDER BY id DESC")
+    cursor.execute(
+        """
+        SELECT users.id, users.email, users.name, COALESCE(users.is_active, TRUE),
+               profile.id, profile.student_number, profile.first_name,
+             profile.middle_initial, profile.last_name, profile.gwa,
+             profile.grades, profile.subjects,
+               profile.recommendation, profile.strand, profile.upload_date,
+               profile.report_card_upload_id
+        FROM users
+        LEFT JOIN LATERAL (
+            SELECT id, student_number, first_name, middle_initial, last_name,
+                     gwa, grades, subjects, recommendation, strand,
+                   upload_date, report_card_upload_id
+            FROM student_profiles
+            WHERE user_id = users.id
+            ORDER BY id DESC
+            LIMIT 1
+        ) profile ON TRUE
+        WHERE COALESCE(users.role, 'student') = 'student'
+        ORDER BY users.id DESC
+        """
+    )
     rows = cursor.fetchall()
     conn.close()
-    return JSONResponse({"students": [
-        {
+    students = []
+    recommendation_limit = _recommendation_limit()
+    for row in rows:
+        profile_name = " ".join(part for part in (
+            row[6] or "",
+            f"{row[7]}" if row[7] else "",
+            row[8] or "",
+        ) if part).strip()
+        recommendation_value = _limit_recommendations(row[12], recommendation_limit)
+        students.append({
             "id": row[0],
-            "student_number": row[1],
-            "first_name": row[2],
-            "middle_initial": row[3],
-            "last_name": row[4],
-            "strand": row[5],
-        }
-        for row in rows
-    ]})
+            "email": row[1] or "",
+            "account_name": row[2] or "",
+            "is_active": bool(row[3]),
+            "profile_id": row[4],
+            "student_number": row[5] or "",
+            "first_name": row[6] or "",
+            "middle_initial": row[7] or "",
+            "last_name": row[8] or "",
+            "student_name": profile_name or row[2] or "Unnamed student",
+            "gwa": row[9] or "",
+            "grades": row[10] or "",
+            "subjects": row[11] or "",
+            "recommendation": recommendation_value,
+            "strand": row[13] or "",
+            "upload_date": row[14] or "",
+            "report_card_upload_id": row[15],
+        })
+    return JSONResponse({"success": True, "students": students})
+
+
+@rt("/admin/students/{user_id}", methods=["GET"])
+def admin_get_student_detail(req, user_id: str):
+    if not _is_admin_session(req.session):
+        return JSONResponse({"success": False, "error": "unauthorized"}, status_code=401)
+
+    try:
+        requested_user_id = int(user_id)
+    except (TypeError, ValueError):
+        return JSONResponse({"success": False, "message": "Invalid student id"}, status_code=400)
+
+    conn = _db_conn()
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT users.id, users.email, users.name, COALESCE(users.is_active, TRUE),
+               COALESCE(users.role, 'student'), profile.id, profile.student_number,
+               profile.first_name, profile.middle_initial, profile.last_name,
+               profile.gwa, profile.grades, profile.subjects,
+               profile.recommendation, profile.strand, profile.upload_date,
+               profile.report_card_upload_id
+        FROM users
+        LEFT JOIN LATERAL (
+            SELECT id, student_number, first_name, middle_initial, last_name,
+                     gwa, grades, subjects, recommendation, strand,
+                   upload_date, report_card_upload_id
+            FROM student_profiles
+            WHERE user_id = users.id
+            ORDER BY id DESC
+            LIMIT 1
+        ) profile ON TRUE
+        WHERE users.id = ? AND COALESCE(users.role, 'student') = 'student'
+        """,
+        (requested_user_id,),
+    )
+    row = cursor.fetchone()
+    conn.close()
+    if not row:
+        return JSONResponse({"success": False, "message": "Student account not found"}, status_code=404)
+
+    profile_name = " ".join(part for part in (
+        row[7] or "",
+        row[8] or "",
+        row[9] or "",
+    ) if part).strip()
+    _record_admin_activity(
+        req.session,
+        "student_profile_viewed",
+        requested_user_id,
+        row[6] or profile_name or row[2] or f"student:{requested_user_id}",
+        f"profile_id={row[5]}" if row[5] else "no profile saved",
+    )
+    return JSONResponse({
+        "success": True,
+        "student": {
+            "id": row[0],
+            "email": row[1] or "",
+            "account_name": row[2] or "",
+            "is_active": bool(row[3]),
+            "role": row[4],
+            "profile_id": row[5],
+            "student_number": row[6] or "",
+            "first_name": row[7] or "",
+            "middle_initial": row[8] or "",
+            "last_name": row[9] or "",
+            "student_name": profile_name or row[2] or "Unnamed student",
+            "gwa": row[10] or "",
+            "grades": row[11] or "",
+            "subjects": row[12] or "",
+            "recommendation": _limit_recommendations(row[13]),
+            "strand": row[14] or "",
+            "upload_date": row[15] or "",
+            "report_card_upload_id": row[16],
+        },
+    })
+
+
+@rt("/admin/deactivate_student", methods=["POST"])
+async def admin_deactivate_student(req):
+    if not _is_full_admin_session(req.session):
+        return JSONResponse({"success": False, "error": "forbidden"}, status_code=403)
+
+    data = await req.json()
+    try:
+        user_id = int(data.get("id"))
+    except (TypeError, ValueError):
+        return JSONResponse({"success": False, "message": "Invalid student id"}, status_code=400)
+    is_active = data.get("is_active") is True
+    if user_id == req.session.get("user_id"):
+        return JSONResponse({"success": False, "message": "You cannot deactivate your own account."}, status_code=400)
+
+    conn = _db_conn()
+    cursor = conn.cursor()
+    cursor.execute(
+        "UPDATE users SET is_active = ? WHERE id = ? AND COALESCE(role, 'student') = 'student' RETURNING id",
+        (is_active, user_id),
+    )
+    updated = cursor.fetchone()
+    conn.commit()
+    conn.close()
+    if not updated:
+        return JSONResponse({"success": False, "message": "Student account not found"}, status_code=404)
+    message = "Student account reactivated." if is_active else "Student account deactivated."
+    _record_admin_activity(req.session, "student_account_reactivated" if is_active else "student_account_deactivated", user_id, f"student:{user_id}")
+    return JSONResponse({"success": True, "is_active": is_active, "message": message})
 
 
 # Define the route for deleting a student (admin only)
@@ -1527,9 +2268,13 @@ async def admin_delete_student(req):
 
     conn = _db_conn()
     cursor = conn.cursor()
-    cursor.execute("DELETE FROM student_profiles WHERE id = ?", (sid,))
+    cursor.execute("DELETE FROM student_profiles WHERE id = ? RETURNING user_id, student_number", (sid,))
+    deleted = cursor.fetchone()
     conn.commit()
     conn.close()
+    if not deleted:
+        return JSONResponse({"success": False, "message": "Student profile not found"}, status_code=404)
+    _record_admin_activity(req.session, "student_profile_removed", deleted[0], deleted[1] or f"profile:{sid}")
     return JSONResponse({"success": True})
 
 
@@ -1547,14 +2292,25 @@ def admin_stats(req):
 
     cursor.execute("SELECT COUNT(*) FROM student_profiles WHERE subjects IS NOT NULL AND subjects != ''")
     total_report_cards = cursor.fetchone()[0]
+    cursor.execute(
+        """
+        SELECT COUNT(DISTINCT profile.user_id)
+        FROM student_profiles profile
+        JOIN users ON users.id = profile.user_id
+        WHERE profile.subjects IS NOT NULL AND profile.subjects != ''
+            AND COALESCE(users.role, 'student') = 'student'
+        """
+    )
+    students_who_uploaded_reports = cursor.fetchone()[0]
 
     cursor.execute("SELECT recommendation FROM student_profiles WHERE recommendation IS NOT NULL AND recommendation != ''")
     rec_rows = cursor.fetchall()
     rec_first_counts = {}
     rec_all_counts = {}
+    recommendation_limit = _recommendation_limit()
     for (rec_val,) in rec_rows:
         try:
-            rec = _sanitize_recommendations(rec_val)
+            rec = _limit_recommendations(rec_val, recommendation_limit)
             if len(rec) > 0:
                 first = rec[0].get("course")
                 if first:
@@ -1568,6 +2324,12 @@ def admin_stats(req):
 
     cursor.execute("SELECT COUNT(*) FROM users")
     total_users = cursor.fetchone()[0]
+    cursor.execute("SELECT COUNT(*) FROM users WHERE COALESCE(role, 'student') = 'student'")
+    total_students = cursor.fetchone()[0]
+    cursor.execute(
+        "SELECT COUNT(*) FROM users WHERE last_login_at >= CURRENT_TIMESTAMP - INTERVAL '30 days'"
+    )
+    active_users = cursor.fetchone()[0]
     cursor.execute("SELECT COUNT(*) FROM student_profiles")
     total_profiles = cursor.fetchone()[0]
     cursor.execute("SELECT COUNT(*) FROM student_profiles WHERE recommendation IS NOT NULL AND recommendation != ''")
@@ -1607,7 +2369,13 @@ def admin_stats(req):
         else:
             buckets["90-100"] += 1
 
-    cursor.execute("SELECT strand, COUNT(*) FROM student_profiles GROUP BY strand")
+    cursor.execute(
+        """
+        SELECT COALESCE(NULLIF(BTRIM(strand), ''), 'Other'), COUNT(*)
+        FROM student_profiles
+        GROUP BY COALESCE(NULLIF(BTRIM(strand), ''), 'Other')
+        """
+    )
     strand_counts = {row[0] or "Other": row[1] for row in cursor.fetchall()}
     # Define the route for fetching admin statistics (admin only)
     cursor.execute("SELECT TO_CHAR(NULLIF(upload_date, '')::timestamp, 'MM'), COUNT(*) FROM student_profiles WHERE upload_date IS NOT NULL AND upload_date != '' GROUP BY TO_CHAR(NULLIF(upload_date, '')::timestamp, 'MM') ORDER BY TO_CHAR(NULLIF(upload_date, '')::timestamp, 'MM')")
@@ -1631,10 +2399,18 @@ def admin_stats(req):
     cursor.execute("SELECT COUNT(*) FROM student_profiles WHERE recommendation IS NULL OR recommendation = ''")
     missing_recs = cursor.fetchone()[0]
 
-    top_recs = sorted(rec_all_counts.items(), key=lambda x: x[1], reverse=True)[:10]
+    top_recs = sorted(rec_all_counts.items(), key=lambda x: (-x[1], x[0].casefold()))[:10]
     top_recommended = [{"course": k, "count": v} for k, v in top_recs]
 
     all_recommended = [{"course": k, "count": v} for k, v in sorted(rec_all_counts.items(), key=lambda x: (-x[1], x[0]))]
+    most_recommended_course = top_recs[0][0] if top_recs else ""
+    most_recommended_course_count = top_recs[0][1] if top_recs else 0
+    most_common_strand = min(
+        strand_counts,
+        key=lambda strand: (-strand_counts[strand], strand.casefold()),
+        default="",
+    )
+    most_common_strand_count = strand_counts.get(most_common_strand, 0)
 
     conn.close()
     # Return the compiled admin statistics as a JSON response
@@ -1643,20 +2419,137 @@ def admin_stats(req):
             "by_profile_course": course_counts,
             "by_recommended_first": rec_first_counts,
             "total_users": total_users,
+            "total_students": total_students,
             "total_profiles": total_profiles,
             "total_report_cards_uploaded": total_report_cards,
+            "students_who_uploaded_reports": students_who_uploaded_reports,
             "total_recommendations_generated": total_recommendations,
+            "total_course_recommendations": sum(rec_all_counts.values()),
             "total_available_courses": total_available_courses,
             "pending_evaluations": pending_evaluations,
             "avg_gwa": avg_gwa,
+            "active_users": active_users,
+            "most_recommended_course": most_recommended_course,
+            "most_recommended_course_count": most_recommended_course_count,
             "gwa_buckets": buckets,
             "strand_counts": strand_counts,
+            "most_common_strand": most_common_strand,
+            "most_common_strand_count": most_common_strand_count,
             "monthly_uploads": monthly_uploads,
             "profiles_missing_recommendation": missing_recs,
             "top_recommended": top_recommended,
             "all_recommended_courses": all_recommended,
         }
     )
+
+
+@rt("/admin/recommendations", methods=["GET"])
+def admin_recommendation_history(req):
+    if not _is_admin_session(req.session):
+        return JSONResponse({"success": False, "error": "forbidden"}, status_code=403)
+
+    conn = _db_conn()
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT history.id, history.generated_at, profiles.id, profiles.student_number,
+               profiles.first_name, profiles.middle_initial, profiles.last_name,
+               profiles.strand, profiles.gwa, profiles.subjects, history.recommendations,
+               users.email, users.name
+        FROM course_recommendation_history history
+        JOIN student_profiles profiles ON profiles.id = history.profile_id
+        JOIN users ON users.id = profiles.user_id
+        WHERE COALESCE(users.role, 'student') = 'student'
+        ORDER BY history.generated_at DESC, history.id DESC
+        """
+    )
+    rows = cursor.fetchall()
+    conn.close()
+
+    history_items = []
+    course_counts = {}
+    for row in rows:
+        profile_name = " ".join(part for part in (
+            row[4] or "",
+            row[5] or "",
+            row[6] or "",
+        ) if part).strip() or row[12] or "Unknown student"
+        recommendations = _sanitize_recommendations(row[10])
+        for item in recommendations:
+            course_name = item.get("course")
+            if course_name:
+                course_counts[course_name] = course_counts.get(course_name, 0) + 1
+        history_items.append({
+            "history_id": row[0],
+            "generated_at": row[1].isoformat() if row[1] else "",
+            "profile_id": row[2],
+            "student_number": row[3] or "",
+            "student_name": profile_name,
+            "strand": row[7] or "",
+            "gwa": row[8] or "",
+            "subjects": row[9] or "",
+            "email": row[11] or "",
+            "recommendations": recommendations,
+        })
+
+    frequent_courses = [
+        {"course": name, "count": count}
+        for name, count in sorted(course_counts.items(), key=lambda item: (-item[1], item[0].casefold()))
+    ]
+    return JSONResponse({
+        "success": True,
+        "history": history_items,
+        "frequent_courses": frequent_courses,
+        "history_count": len(history_items),
+    })
+
+
+@rt("/admin/recommendations/{profile_id}/recalculate", methods=["POST"])
+def admin_recalculate_recommendations(req, profile_id: str):
+    if not _is_full_admin_session(req.session):
+        return JSONResponse({"success": False, "error": "forbidden"}, status_code=403)
+    try:
+        profile_id = int(profile_id)
+    except (TypeError, ValueError):
+        return JSONResponse({"success": False, "message": "Invalid student profile id"}, status_code=400)
+
+    conn = _db_conn()
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT profiles.subjects, profiles.course, profiles.strand
+        FROM student_profiles profiles
+        JOIN users ON users.id = profiles.user_id
+        WHERE profiles.id = ? AND COALESCE(users.role, 'student') = 'student'
+        """,
+        (profile_id,),
+    )
+    profile = cursor.fetchone()
+    if not profile:
+        conn.close()
+        return JSONResponse({"success": False, "message": "Student profile not found"}, status_code=404)
+
+    recommendation_subjects = _clean_subjects_for_recommendation(profile[0] or "") or profile[0] or ""
+    recommendations = _configured_recommendations(
+        recommendation_subjects,
+        profile[1] or "",
+        profile[2] or "",
+    )
+    if not recommendations:
+        conn.close()
+        return JSONResponse({"success": False, "message": "No recommendations could be generated from this profile's saved grades."}, status_code=400)
+
+    payload = json.dumps(recommendations)
+    cursor.execute("UPDATE student_profiles SET recommendation = ? WHERE id = ?", (payload, profile_id))
+    cursor.execute(
+        "INSERT INTO course_recommendation_history (profile_id, recommendations) VALUES (?, ?)",
+        (profile_id, payload),
+    )
+    conn.commit()
+    conn.close()
+    _record_admin_activity(req.session, "recommendations_recalculated", target_label=f"profile:{profile_id}", details=f"count={len(recommendations)}")
+    return JSONResponse({"success": True, "count": len(recommendations), "recommendations": recommendations})
+
 
 # Define the route for saving a student profile
 @rt("/save_profile", methods=["POST"])
@@ -1679,8 +2572,7 @@ async def save_profile(req):
     normalized_grades = _coalesce_grades_text(subjects_text, data.get("grades", ""))
 
     recommendation_subjects = _clean_subjects_for_recommendation(subjects_text) or subjects_text
-    recommendation = recommend_course(recommendation_subjects, data.get("course", ""), data.get("strand", ""))
-    recommendation = _sanitize_recommendations(json.dumps(recommendation))
+    recommendation = _configured_recommendations(recommendation_subjects, data.get("course", ""), data.get("strand", ""))
     recommendation_payload = json.dumps(recommendation)
     sess["latest_recommendations"] = recommendation_payload
     sess["latest_subjects"] = subjects_text
@@ -1689,7 +2581,7 @@ async def save_profile(req):
     cursor = conn.cursor()
     cursor.execute(
         """
-        SELECT id, student_number, first_name, middle_initial, last_name, course, gwa, grades, subjects, strand
+        SELECT id, student_number, first_name, middle_initial, last_name, course, gwa, grades, subjects, strand, report_card_upload_id
         FROM student_profiles
         WHERE user_id = ?
         ORDER BY upload_date DESC
@@ -1698,6 +2590,38 @@ async def save_profile(req):
         (user_id,),
     )
     existing_profile = cursor.fetchone()
+    pending_upload_id = req.session.get("latest_report_card_upload_id")
+    if pending_upload_id:
+        cursor.execute(
+            "SELECT id FROM report_card_uploads WHERE id = ? AND user_id = ?",
+            (pending_upload_id, user_id),
+        )
+        pending_upload = cursor.fetchone()
+        pending_upload_id = pending_upload[0] if pending_upload else None
+    report_card_upload_id = pending_upload_id or (existing_profile[10] if existing_profile else None)
+    if pending_upload_id:
+        student_name = " ".join(part for part in (
+            (data.get("firstName") or "").strip(),
+            (data.get("middleInitial") or "").strip().rstrip("."),
+            (data.get("lastName") or "").strip(),
+        ) if part)
+        cursor.execute(
+            """
+            UPDATE report_card_uploads
+            SET ocr_status = 'verified', student_name = ?, student_number = ?,
+                extracted_subjects = ?, extracted_gwa = ?, ocr_error = NULL,
+                processed_at = CURRENT_TIMESTAMP
+            WHERE id = ? AND user_id = ?
+            """,
+            (
+                student_name,
+                (data.get("studentNumber") or "").strip(),
+                subjects_text,
+                normalized_gwa,
+                pending_upload_id,
+                user_id,
+            ),
+        )
 
     target_student = None
     if existing_profile:
@@ -1731,10 +2655,11 @@ async def save_profile(req):
         }
     # If a target student exists, update their profile in the database; otherwise, insert a new profile
     if target_student:
+        recommendation_profile_id = existing_profile[0]
         cursor.execute(
             """
             UPDATE student_profiles
-            SET student_number = ?, first_name = ?, middle_initial = ?, last_name = ?, course = ?, gwa = ?, grades = ?, subjects = ?, recommendation = ?, strand = ?, upload_date = ?
+            SET student_number = ?, first_name = ?, middle_initial = ?, last_name = ?, course = ?, gwa = ?, grades = ?, subjects = ?, recommendation = ?, strand = ?, upload_date = ?, report_card_upload_id = ?
             WHERE user_id = ? AND id = ?
             """,
             (
@@ -1749,6 +2674,7 @@ async def save_profile(req):
                 recommendation_payload,
                 merged_student.get("strand") or _infer_strand(merged_student.get("course", "")),
                 datetime.utcnow().isoformat(),
+                report_card_upload_id,
                 user_id,
                 existing_profile[0],
             ),
@@ -1757,8 +2683,9 @@ async def save_profile(req):
         cursor.execute(
             """
             INSERT INTO student_profiles
-            (user_id, student_number, first_name, middle_initial, last_name, course, gwa, grades, subjects, recommendation, strand, upload_date)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (user_id, student_number, first_name, middle_initial, last_name, course, gwa, grades, subjects, recommendation, strand, upload_date, report_card_upload_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            RETURNING id
             """,
             (
                 user_id,
@@ -1773,11 +2700,19 @@ async def save_profile(req):
                 recommendation_payload,
                 data.get("strand") or _infer_strand(data.get("course", "")),
                 datetime.utcnow().isoformat(),
+                report_card_upload_id,
             ),
+        )
+        recommendation_profile_id = cursor.fetchone()[0]
+    if recommendation:
+        cursor.execute(
+            "INSERT INTO course_recommendation_history (profile_id, recommendations) VALUES (?, ?)",
+            (recommendation_profile_id, recommendation_payload),
         )
     # Commit the changes to the database and close the connection
     conn.commit()
     conn.close()
+    sess.pop("latest_report_card_upload_id", None)
     # Build the comparisons for the top 3 recommended courses based on student performance analytics
     comparisons = {
         item["course"]: _build_student_performance_analytics(item["course"], subjects_text)
@@ -1807,13 +2742,15 @@ async def update_account(req):
     conn.commit()
     conn.close()
     sess["name"] = name
+    if sess.get("role") in (ROLE_ADMIN, ROLE_SEMI_ADMIN):
+        _record_admin_activity(sess, "profile_name_changed", target_label=sess.get("email", ""))
     return JSONResponse({"success": True, "name": name})
 
 # Define the route for changing the admin password
 @rt("/admin/change_password", methods=["POST"])
 async def admin_change_password(req):
     sess = req.session
-    if not _is_admin_session(sess) or not sess.get("user_id"):
+    if not _is_admin_session(sess, allow_password_change=True) or not sess.get("user_id"):
         return JSONResponse({"success": False, "message": "Admin session required."}, status_code=401)
 
     data = await req.json()
@@ -1823,10 +2760,11 @@ async def admin_change_password(req):
 
     if not current_password or not new_password or not confirm_password:
         return JSONResponse({"success": False, "message": "Complete all password fields."}, status_code=400)
-    if len(new_password) < 6:
-        return JSONResponse({"success": False, "message": "Password must be at least 6 characters."}, status_code=400)
+    if len(new_password) < 10:
+        return JSONResponse({"success": False, "message": "Password must be at least 10 characters."}, status_code=400)
     if new_password != confirm_password:
         return JSONResponse({"success": False, "message": "New passwords do not match."}, status_code=400)
+    forced_change = bool(sess.get("must_change_password"))
 
     conn = _db_conn()
     cursor = conn.cursor()
@@ -1835,10 +2773,15 @@ async def admin_change_password(req):
     if not row or not _check_password(row[0], current_password):
         conn.close()
         return JSONResponse({"success": False, "message": "Current password is incorrect."}, status_code=400)
+    if _check_password(row[0], new_password):
+        conn.close()
+        return JSONResponse({"success": False, "message": "Choose a password different from your temporary password."}, status_code=400)
 
-    cursor.execute("UPDATE users SET password_hash = ? WHERE id = ?", (_hash_password(new_password), sess["user_id"]))
+    cursor.execute("UPDATE users SET password_hash = ?, must_change_password = FALSE WHERE id = ?", (_hash_password(new_password), sess["user_id"]))
     conn.commit()
     conn.close()
+    sess["must_change_password"] = False
+    _record_admin_activity(sess, "temporary_password_changed" if forced_change else "password_changed", target_label=sess.get("email", ""))
     return JSONResponse({"success": True, "message": "Password updated."})
 
 # Define the route for recommending courses to anonymous users
@@ -1857,11 +2800,7 @@ async def recommend_anonymous(req):
         )
 
     recommendation_subjects = _clean_subjects_for_recommendation(subjects_text) or subjects_text
-    recommendations = _sanitize_recommendations(json.dumps(recommend_course(
-        recommendation_subjects,
-        "",
-        data.get("strand", ""),
-    )))[:5]
+    recommendations = _configured_recommendations(recommendation_subjects, "", data.get("strand", ""))
     req.session["latest_recommendations"] = json.dumps(recommendations)
     req.session["latest_subjects"] = subjects_text
     req.session["latest_strand"] = data.get("strand", "")
@@ -1901,10 +2840,10 @@ def get_profile(req):
         recommendation_data = json.loads(recommendation_value) if recommendation_value else None
     except (TypeError, ValueError):
         recommendation_data = recommendation_value
-    saved_recommendations = _sanitize_recommendations(recommendation_data)
+    saved_recommendations = _limit_recommendations(recommendation_data)
     if not saved_recommendations and profile[7]:
         subjects = _clean_subjects_for_recommendation(profile[7]) or profile[7]
-        saved_recommendations = _sanitize_recommendations(recommend_course(subjects, profile[4] or "", profile[9] or ""))
+        saved_recommendations = _configured_recommendations(subjects, profile[4] or "", profile[9] or "")
     saved_comparisons = {
         item["course"]: _build_student_performance_analytics(item["course"], profile[7] or "")
         for item in saved_recommendations[:3]
@@ -1959,6 +2898,8 @@ async def upload_profile_picture(req):
     conn.close()
 
     _set_session_profile_image(sess, filename)
+    if sess.get("role") in (ROLE_ADMIN, ROLE_SEMI_ADMIN):
+        _record_admin_activity(sess, "profile_picture_changed", target_label=sess.get("email", ""))
     return JSONResponse({"success": True, "picture": filename, "profile_image": _profile_image_from_value(filename)})
 
 
@@ -2002,15 +2943,19 @@ async def google_authorize(req):
     conn = _db_conn()
     cursor = conn.cursor()
     cursor.execute(
-        "SELECT id, COALESCE(profile_picture, ''), COALESCE(role, 'student') FROM users WHERE email = ?",
+        "SELECT id, COALESCE(profile_picture, ''), COALESCE(role, 'student'), COALESCE(is_active, TRUE), COALESCE(must_change_password, FALSE) FROM users WHERE email = ?",
         (email,),
     )
     existing_user = cursor.fetchone()
 
     if existing_user:
+        if not existing_user[3]:
+            conn.close()
+            return RedirectResponse("/", status_code=302)
         user_id = existing_user[0]
         current_picture = (existing_user[1] or "").strip()
         role = existing_user[2] or "student"
+        must_change_password = bool(existing_user[4])
         if google_picture and (not current_picture or current_picture.lower() in ("default.jpg", "default.png", "default.svg")):
             cursor.execute("UPDATE users SET profile_picture = ? WHERE id = ?", (google_picture, user_id))
             conn.commit()
@@ -2025,14 +2970,20 @@ async def google_authorize(req):
         )
         conn.commit()
         cursor.execute(
-            "SELECT id, COALESCE(profile_picture, ''), COALESCE(role, 'student') FROM users WHERE email = ?",
+            "SELECT id, COALESCE(profile_picture, ''), COALESCE(role, 'student'), COALESCE(is_active, TRUE), COALESCE(must_change_password, FALSE) FROM users WHERE email = ?",
             (email,),
         )
         inserted = cursor.fetchone()
+        if not inserted[3]:
+            conn.close()
+            return RedirectResponse("/", status_code=302)
         user_id = inserted[0]
         current_picture = inserted[1] or ""
         role = inserted[2] or "student"
+        must_change_password = bool(inserted[4])
 
+    cursor.execute("UPDATE users SET last_login_at = CURRENT_TIMESTAMP WHERE id = ?", (user_id,))
+    conn.commit()
     conn.close()
     # Set the session variables for the logged-in user
     sess = req.session
@@ -2040,12 +2991,18 @@ async def google_authorize(req):
     sess["name"] = name
     sess["email"] = email
     sess["role"] = role
+    sess["must_change_password"] = must_change_password
     if role in (ROLE_ADMIN, ROLE_SEMI_ADMIN):
         sess["is_admin"] = True
         sess["admin_user"] = name or email
+        sess["admin_ip"] = req.client.host if req.client else ""
     _set_session_profile_image(sess, current_picture)
+    if role in (ROLE_ADMIN, ROLE_SEMI_ADMIN):
+        _record_admin_activity(sess, "google_login", target_label=email)
 
-    return RedirectResponse("/home", status_code=302)
+    if must_change_password:
+        return RedirectResponse("/admin/force-password-change", status_code=303)
+    return RedirectResponse("/admin/dashboard" if role in (ROLE_ADMIN, ROLE_SEMI_ADMIN) else "/home", status_code=302)
 
 # Group OCR boxes into table rows for report card processing
 def _group_ocr_boxes_into_table_rows(boxes):
@@ -2083,53 +3040,137 @@ def _group_ocr_boxes_into_table_rows(boxes):
         return []
     return table_rows
 
+# Process a report image through Docling and normalize the parsed grade rows.
+def _process_report_card_bytes(file_bytes, filename):
+    ocr_payload = scan_report_card_docling(file_bytes, filename=filename)
+    raw_ocr = {
+        "raw_text": ocr_payload.get("raw_text", ""),
+        "student_info_raw": ocr_payload.get("student_info_raw", []),
+        "table": ocr_payload.get("table", []),
+        "paddle_boxes": [],
+        "image_width": 0,
+        "image_height": 0,
+    }
+    parse_started = time.perf_counter()
+    parsed = parse_report_card_structure(raw_ocr)
+    if ocr_payload.get("subjects"):
+        parsed["subjects"] = ocr_payload["subjects"]
+        parsed["needs_review"] = bool(parsed.get("needs_review")) or any(
+            item.get("needs_review") for item in parsed["subjects"]
+        )
+
+    parsed_subjects = [
+        item for item in parsed.get("subjects", [])
+        if item.get("subject_name") and item.get("grade") is not None
+    ]
+    structured_text = "\n".join(
+        f"{item['subject_name']} - {item['grade']:g}"
+        for item in parsed_subjects
+    )
+    grades = [float(item["grade"]) for item in parsed_subjects]
+    extracted_gwa = f"{sum(grades) / len(grades):.2f}" if grades else ""
+    needs_review = bool(parsed.get("needs_review")) or not parsed_subjects
+    parsed["needs_review"] = needs_review
+    parsed["gwa"] = float(extracted_gwa) if extracted_gwa else ""
+    return {
+        "ocr_payload": ocr_payload,
+        "raw_ocr": raw_ocr,
+        "parsed": parsed,
+        "structured_text": structured_text,
+        "extracted_gwa": extracted_gwa,
+        "ocr_status": "needs_review" if needs_review else "extracted",
+        "app_parse_seconds": round(time.perf_counter() - parse_started, 3),
+    }
+
+
 # OCR endpoint for processing report cards
 @rt("/ocr_report_card", methods=["POST"])
 async def ocr_report_card(req):
+    req.session.pop("latest_report_card_upload_id", None)
     form = await req.form()
     uploaded = form.get("report_card") or form.get("file") or form.get("image")
     if uploaded is None:
         return JSONResponse({"success": False, "message": "No report card uploaded."})
 
-    valid, result = await validate_upload(uploaded)
+    system_settings = _get_system_settings()
+    automatic_ocr_enabled = system_settings.get("automatic_ocr_enabled", True)
+    valid, result = await validate_upload(uploaded, system_settings.get("max_file_size_mb", 10))
     if not valid:
         return JSONResponse({"success": False, "message": result})
 
     file_bytes = result["file_bytes"]
+    filename = re.split(r"[\\/]", getattr(uploaded, "filename", "") or "")[-1].strip()
+    if not filename:
+        filename = f"report-card{result['extension']}"
+    content_type = {
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".png": "image/png",
+        ".webp": "image/webp",
+    }[result["extension"]]
+    upload_id = None
+    user_id = req.session.get("user_id")
+    if user_id:
+        conn = _db_conn()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO report_card_uploads (user_id, original_filename, content_type, file_data, ocr_status)
+            VALUES (?, ?, ?, ?, ?)
+            RETURNING id
+            """,
+            (user_id, filename, content_type, file_bytes, "processing" if automatic_ocr_enabled else "needs_review"),
+        )
+        upload_id = cursor.fetchone()[0]
+        req.session["latest_report_card_upload_id"] = upload_id
+        conn.commit()
+        conn.close()
+
+    if not automatic_ocr_enabled:
+        return JSONResponse({
+            "success": True,
+            "message": "Report card saved. Automatic OCR is disabled; enter the details manually.",
+            "automatic_ocr_disabled": True,
+            "provider": "Manual review",
+            "raw_ocr": {"table": []},
+            "parsed": {"subjects": [], "needs_review": True},
+            "structured_text": "",
+            "review_required": True,
+        })
+
     try:
-        ocr_payload = scan_report_card_docling(
-            file_bytes,
-            filename=getattr(uploaded, "filename", "report_card.pdf"),
-        )
-        raw_ocr = {
-            "raw_text": ocr_payload.get("raw_text", ""),
-            "student_info_raw": ocr_payload.get("student_info_raw", []),
-            "table": ocr_payload.get("table", []),
-            "paddle_boxes": [],
-            "image_width": 0,
-            "image_height": 0,
-        }
-        parse_started = time.perf_counter()
-        parsed = parse_report_card_structure(raw_ocr)
-        if ocr_payload.get("subjects"):
-            parsed["subjects"] = ocr_payload["subjects"]
-            parsed["gwa"] = round(
-                sum(item["grade"] for item in parsed["subjects"]) / len(parsed["subjects"]),
-                2,
+        processed = _process_report_card_bytes(file_bytes, filename)
+        ocr_payload = processed["ocr_payload"]
+        raw_ocr = processed["raw_ocr"]
+        parsed = processed["parsed"]
+        if upload_id:
+            conn = _db_conn()
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                UPDATE report_card_uploads
+                SET ocr_status = ?, student_name = ?, student_number = ?, extracted_subjects = ?,
+                    extracted_gwa = ?, ocr_error = NULL, processed_at = CURRENT_TIMESTAMP
+                WHERE id = ? AND user_id = ?
+                """,
+                (
+                    processed["ocr_status"],
+                    parsed.get("student_name") or "",
+                    parsed.get("student_no") or "",
+                    processed["structured_text"],
+                    processed["extracted_gwa"],
+                    upload_id,
+                    user_id,
+                ),
             )
-            parsed["needs_review"] = any(item.get("needs_review") for item in parsed["subjects"])
-        structured_text = "\n".join(
-            f"{item['subject_name']} - {item['grade']:g}"
-            for item in parsed.get("subjects", [])
-            if item.get("subject_name") and item.get("grade") is not None
-        )
-        app_parse_seconds = round(time.perf_counter() - parse_started, 3)
+            conn.commit()
+            conn.close()
         return JSONResponse({
             "success": True,
             "message": "Report card extraction completed using Docling.",
             "raw_ocr": raw_ocr,
             "parsed": parsed,
-            "structured_text": structured_text,
+            "structured_text": processed["structured_text"],
             "provider": "docling",
             "diagnostics": {
                 "table_rows": len(raw_ocr.get("table", [])),
@@ -2139,13 +3180,335 @@ async def ocr_report_card(req):
                 "table_preview": dumps(raw_ocr.get("table", [])[1:3], default=str)[:500],
                 "timings_seconds": {
                     **ocr_payload.get("timings_seconds", {}),
-                    "app_parse_seconds": app_parse_seconds,
+                    "app_parse_seconds": processed["app_parse_seconds"],
                 },
             },
             "review_required": parsed.get("needs_review", False),
         })
     except Exception as exc:
+        if upload_id:
+            conn = _db_conn()
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE report_card_uploads SET ocr_status = 'failed', ocr_error = ?, processed_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (str(exc)[:1000], upload_id),
+            )
+            conn.commit()
+            conn.close()
         return JSONResponse({"success": False, "message": f"Report card OCR failed: {exc}"})
+
+
+@rt("/admin/report_cards", methods=["GET"])
+def admin_list_report_cards(req):
+    if not _is_admin_session(req.session):
+        return JSONResponse({"success": False, "error": "forbidden"}, status_code=403)
+
+    conn = _db_conn()
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT uploads.id, uploads.original_filename, uploads.uploaded_at,
+               uploads.ocr_status, uploads.is_flagged, uploads.flag_note,
+               uploads.student_name, uploads.student_number, uploads.extracted_subjects,
+               uploads.extracted_gwa, uploads.ocr_error, profile.id, profile.student_number,
+               profile.first_name, profile.middle_initial, profile.last_name,
+               profile.gwa, profile.subjects, users.name, users.email
+        FROM report_card_uploads uploads
+        JOIN users ON users.id = uploads.user_id
+        LEFT JOIN LATERAL (
+            SELECT id, student_number, first_name, middle_initial, last_name,
+                   gwa, subjects
+            FROM student_profiles
+            WHERE report_card_upload_id = uploads.id
+            ORDER BY id DESC
+            LIMIT 1
+        ) profile ON TRUE
+        WHERE COALESCE(users.role, 'student') = 'student'
+        ORDER BY uploads.uploaded_at DESC, uploads.id DESC
+        """
+    )
+    rows = cursor.fetchall()
+    conn.close()
+
+    reports = []
+    for row in rows:
+        profile_name = " ".join(part for part in (
+            row[13] or "",
+            row[14] or "",
+            row[15] or "",
+        ) if part).strip()
+        reports.append({
+            "id": row[0],
+            "original_filename": row[1] or "report-card",
+            "uploaded_at": row[2].isoformat() if row[2] else "",
+            "ocr_status": row[3] or "needs_review",
+            "is_flagged": bool(row[4]),
+            "flag_note": row[5] or "",
+            "student_name": profile_name or row[6] or row[18] or "Unknown student",
+            "student_number": row[12] or row[7] or "",
+            "extracted_subjects": row[8] or row[17] or "",
+            "extracted_subject_count": len([line for line in (row[8] or row[17] or "").splitlines() if line.strip()]),
+            "extracted_gwa": row[9] or row[16] or "",
+            "ocr_error": row[10] or "",
+            "profile_id": row[11],
+            "email": row[19] or "",
+        })
+    return JSONResponse({"success": True, "reports": reports})
+
+
+@rt("/admin/report_cards/{upload_id}/edit", methods=["POST"])
+async def admin_edit_report_card(req, upload_id: str):
+    if not _is_full_admin_session(req.session):
+        return JSONResponse({"success": False, "error": "forbidden"}, status_code=403)
+    try:
+        upload_id = int(upload_id)
+    except (TypeError, ValueError):
+        return JSONResponse({"success": False, "message": "Invalid report card id"}, status_code=400)
+
+    data = await req.json()
+    input_rows = data.get("subjects")
+    if not isinstance(input_rows, list):
+        return JSONResponse({"success": False, "message": "Subject rows are required"}, status_code=400)
+    subjects = []
+    for row in input_rows:
+        if not isinstance(row, dict):
+            continue
+        subject_name = str(row.get("subject_name") or "").strip()
+        grade_value = str(row.get("grade") or "").strip()
+        if not subject_name and not grade_value:
+            continue
+        try:
+            grade = float(grade_value)
+        except (TypeError, ValueError):
+            return JSONResponse({"success": False, "message": f"Enter a numeric grade for {subject_name or 'each subject'}."}, status_code=400)
+        if not subject_name or not 0 <= grade <= 100:
+            return JSONResponse({"success": False, "message": "Each subject needs a name and a grade from 0 to 100."}, status_code=400)
+        subjects.append({"subject_name": subject_name, "grade": grade})
+    if not subjects:
+        return JSONResponse({"success": False, "message": "Add at least one subject grade before verifying this report."}, status_code=400)
+
+    subjects_text = "\n".join(f"{item['subject_name']} - {item['grade']:g}" for item in subjects)
+    grades_text = ", ".join(f"{item['grade']:g}" for item in subjects)
+    gwa = f"{_average([item['grade'] for item in subjects]):.2f}" if subjects else ""
+    conn = _db_conn()
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT profiles.id, profiles.course, profiles.strand
+        FROM report_card_uploads uploads
+        JOIN users ON users.id = uploads.user_id
+        LEFT JOIN LATERAL (
+            SELECT id, course, strand
+            FROM student_profiles
+            WHERE report_card_upload_id = uploads.id
+            ORDER BY id DESC
+            LIMIT 1
+        ) profiles ON TRUE
+        WHERE uploads.id = ? AND COALESCE(users.role, 'student') = 'student'
+        """,
+        (upload_id,),
+    )
+    report = cursor.fetchone()
+    if not report:
+        conn.close()
+        return JSONResponse({"success": False, "message": "Report card not found"}, status_code=404)
+
+    cursor.execute(
+        """
+        UPDATE report_card_uploads
+        SET extracted_subjects = ?, extracted_gwa = ?, ocr_status = 'verified',
+            ocr_error = NULL, processed_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+        """,
+        (subjects_text, gwa, upload_id),
+    )
+    if report[0]:
+        recommendation = _configured_recommendations(
+            subjects_text,
+            report[1] or "",
+            report[2] or "",
+        )
+        cursor.execute(
+            """
+            UPDATE student_profiles
+            SET gwa = ?, grades = ?, subjects = ?, recommendation = ?
+            WHERE id = ?
+            """,
+            (gwa, grades_text, subjects_text, json.dumps(recommendation), report[0]),
+        )
+        if recommendation:
+            cursor.execute(
+                "INSERT INTO course_recommendation_history (profile_id, recommendations) VALUES (?, ?)",
+                (report[0], json.dumps(recommendation)),
+            )
+    conn.commit()
+    conn.close()
+    _record_admin_activity(req.session, "report_card_grades_verified", target_label=f"report-card:{upload_id}", details=f"subject_count={len(subjects)}")
+    return JSONResponse({"success": True, "message": "Extracted grades saved and verified."})
+
+
+@rt("/admin/report_cards/{upload_id}/flag", methods=["POST"])
+async def admin_flag_report_card(req, upload_id: str):
+    if not _is_full_admin_session(req.session):
+        return JSONResponse({"success": False, "error": "forbidden"}, status_code=403)
+    try:
+        upload_id = int(upload_id)
+    except (TypeError, ValueError):
+        return JSONResponse({"success": False, "message": "Invalid report card id"}, status_code=400)
+
+    data = await req.json()
+    is_flagged = data.get("is_flagged") is True
+    note = str(data.get("note") or "").strip()[:500] if is_flagged else ""
+    conn = _db_conn()
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        UPDATE report_card_uploads uploads
+        SET is_flagged = ?, flag_note = ?
+        WHERE id = ? AND EXISTS (
+            SELECT 1 FROM users
+            WHERE users.id = uploads.user_id AND COALESCE(users.role, 'student') = 'student'
+        )
+        RETURNING id
+        """,
+        (is_flagged, note or None, upload_id),
+    )
+    updated = cursor.fetchone()
+    conn.commit()
+    conn.close()
+    if not updated:
+        return JSONResponse({"success": False, "message": "Report card not found"}, status_code=404)
+    _record_admin_activity(req.session, "report_card_flagged" if is_flagged else "report_card_flag_cleared", target_label=f"report-card:{upload_id}", details=note)
+    return JSONResponse({"success": True, "is_flagged": is_flagged})
+
+
+@rt("/admin/report_cards/{upload_id}/reprocess", methods=["POST"])
+def admin_reprocess_report_card(req, upload_id: str):
+    if not _is_full_admin_session(req.session):
+        return JSONResponse({"success": False, "error": "forbidden"}, status_code=403)
+    try:
+        upload_id = int(upload_id)
+    except (TypeError, ValueError):
+        return JSONResponse({"success": False, "message": "Invalid report card id"}, status_code=400)
+
+    conn = _db_conn()
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT uploads.file_data, uploads.original_filename
+        FROM report_card_uploads uploads
+        JOIN users ON users.id = uploads.user_id
+        WHERE uploads.id = ? AND COALESCE(users.role, 'student') = 'student'
+        """,
+        (upload_id,),
+    )
+    row = cursor.fetchone()
+    conn.close()
+    if not row:
+        return JSONResponse({"success": False, "message": "Report card not found"}, status_code=404)
+
+    try:
+        processed = _process_report_card_bytes(row[0], row[1])
+    except Exception as exc:
+        conn = _db_conn()
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE report_card_uploads SET ocr_status = 'failed', ocr_error = ?, processed_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (str(exc)[:1000], upload_id),
+        )
+        conn.commit()
+        conn.close()
+        _record_admin_activity(req.session, "report_card_reprocess_failed", target_label=f"report-card:{upload_id}", details=str(exc)[:500])
+        return JSONResponse({"success": False, "message": f"OCR reprocessing failed: {exc}"}, status_code=500)
+
+    parsed = processed["parsed"]
+    conn = _db_conn()
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        UPDATE report_card_uploads
+        SET ocr_status = ?, student_name = ?, student_number = ?, extracted_subjects = ?,
+            extracted_gwa = ?, ocr_error = NULL, processed_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+        """,
+        (
+            processed["ocr_status"],
+            parsed.get("student_name") or "",
+            parsed.get("student_no") or "",
+            processed["structured_text"],
+            processed["extracted_gwa"],
+            upload_id,
+        ),
+    )
+    conn.commit()
+    conn.close()
+    _record_admin_activity(req.session, "report_card_reprocessed", target_label=f"report-card:{upload_id}", details=f"ocr_status={processed['ocr_status']}")
+    return JSONResponse({"success": True, "message": "Report card reprocessed.", "ocr_status": processed["ocr_status"]})
+
+
+@rt("/admin/report_cards/{upload_id}", methods=["DELETE"])
+def admin_delete_report_card(req, upload_id: str):
+    if not _is_full_admin_session(req.session):
+        return JSONResponse({"success": False, "error": "forbidden"}, status_code=403)
+    try:
+        upload_id = int(upload_id)
+    except (TypeError, ValueError):
+        return JSONResponse({"success": False, "message": "Invalid report card id"}, status_code=400)
+
+    conn = _db_conn()
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        DELETE FROM report_card_uploads uploads
+        WHERE id = ? AND EXISTS (
+            SELECT 1 FROM users
+            WHERE users.id = uploads.user_id AND COALESCE(users.role, 'student') = 'student'
+        )
+        RETURNING id
+        """,
+        (upload_id,),
+    )
+    deleted = cursor.fetchone()
+    conn.commit()
+    conn.close()
+    if not deleted:
+        return JSONResponse({"success": False, "message": "Report card not found"}, status_code=404)
+    _record_admin_activity(req.session, "report_card_deleted", target_label=f"report-card:{upload_id}")
+    return JSONResponse({"success": True, "message": "Report card deleted."})
+
+
+@rt("/admin/report_cards/{upload_id}", methods=["GET"])
+def admin_get_report_card(req, upload_id: str):
+    if not _is_admin_session(req.session):
+        return JSONResponse({"success": False, "error": "unauthorized"}, status_code=401)
+    try:
+        upload_id = int(upload_id)
+    except (TypeError, ValueError):
+        return JSONResponse({"success": False, "message": "Invalid report card id"}, status_code=400)
+
+    conn = _db_conn()
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT uploads.content_type, uploads.file_data
+        FROM report_card_uploads uploads
+        JOIN users ON users.id = uploads.user_id
+        WHERE uploads.id = ? AND COALESCE(users.role, 'student') = 'student'
+        """,
+        (upload_id,),
+    )
+    row = cursor.fetchone()
+    conn.close()
+    if not row:
+        return JSONResponse({"success": False, "message": "Report card not found"}, status_code=404)
+
+    _record_admin_activity(req.session, "report_card_viewed", target_label=f"report-card:{upload_id}")
+    content_type = row[0] if row[0] in {"image/jpeg", "image/png", "image/webp"} else "application/octet-stream"
+    return Response(
+        content=row[1],
+        media_type=content_type,
+        headers={"Content-Disposition": "inline", "X-Content-Type-Options": "nosniff"},
+    )
 
 # Main entry point for the FastHTML application
 def main():

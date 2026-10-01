@@ -1,6 +1,7 @@
 /* ocr */
 let students = [];
 let selectedStudent = null;
+let configuredAcademicStrands = ['STEM', 'ABM', 'HUMSS', 'GAS', 'TVL', 'SPORTS', 'ARTS_DESIGN'];
  
 
 function addStudent() {
@@ -1077,7 +1078,7 @@ function splitOcrStudentName(value){
 function normalizeOcrStrand(value){
     const text = String(value || '').replace(/\s+/g, ' ').trim();
     const upper = text.toUpperCase();
-    const known = ['STEM', 'ABM', 'HUMSS', 'GAS', 'TVL', 'SPORTS', 'ARTS_DESIGN'];
+    const known = configuredAcademicStrands;
     const match = known.find(item => upper.includes(item.replace('_', ' ')) || upper.includes(item));
     return match || text;
 }
@@ -1656,7 +1657,9 @@ function clearInputs() {
                 : [];
             const structuredText = String(data.structured_text || '').trim();
             window.latestDoclingRawText = structuredText;
-            if(!structuredText){
+            if(data.automatic_ocr_disabled){
+                window.latestAutomaticOcrDisabled = true;
+            }else if(!structuredText){
                 const diagnostics = data.diagnostics || {};
                 throw new Error(
                     `Docling returned no subject rows (table rows: ${diagnostics.table_rows || 0}, `
@@ -1743,6 +1746,16 @@ function clearInputs() {
     document.addEventListener('DOMContentLoaded', async ()=>{
         const input = document.getElementById('image-input');
         if(!input) return;
+
+        try{
+            const settingsResponse = await fetch('/system-settings/public');
+            const settingsData = await settingsResponse.json();
+            if(settingsData.success && Array.isArray(settingsData.settings?.available_strands) && settingsData.settings.available_strands.length){
+                configuredAcademicStrands = settingsData.settings.available_strands;
+            }
+        }catch(error){
+            console.warn('Unable to load configured academic strands.', error);
+        }
 
         const isGuest = document.body.dataset.guest === 'true';
 
@@ -2550,6 +2563,7 @@ function clearInputs() {
                 window.latestDoclingTable = [];
                 window.latestStudentMetadata = {...savedIdentity};
                 window.latestOcrReviewRequired = false;
+                window.latestAutomaticOcrDisabled = false;
 
                 for (let i = 0; i < files.length; i++) {
                     const file = files[i];
@@ -2564,6 +2578,10 @@ function clearInputs() {
                         : fileName.endsWith('.docx')
                             ? await extractTextFromDocx(file)
                             : await imageBlobToText(file);
+                    if(window.latestAutomaticOcrDisabled){
+                        processedCount += 1;
+                        continue;
+                    }
                     if(!rawText || !rawText.trim()){
                         throw new Error(`No readable text was found in ${file.name}.`);
                     }
@@ -2609,7 +2627,9 @@ function clearInputs() {
                         grades: combinedGrades.join(', '),
                         subjects: [...new Set(combinedSubjects)].join('\n')
                     });
-                    setProgress(100, `Processed ${processedCount}/${total} file${total > 1 ? 's' : ''} with high-accuracy OCR. Review and save.`);
+                    setProgress(100, window.latestAutomaticOcrDisabled
+                        ? 'Automatic OCR is disabled. Enter the report details manually, then save.'
+                        : `Processed ${processedCount}/${total} file${total > 1 ? 's' : ''} with high-accuracy OCR. Review and save.`);
                 }else{
                     setProgress(0, 'No report cards could be parsed.');
                     setUploadMessage('No readable subject and grade rows were found. Try a clearer image or another file.', 'error');
