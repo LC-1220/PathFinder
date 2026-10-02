@@ -77,63 +77,9 @@ CATEGORY_NAMES = ["math", "science", "english", "technology", "business", "socia
 _NEAREST_NEIGHBOR_MODEL = None
 _COURSE_TRAINING_DATA_CACHE = None
 
-UNIVERSITY_COURSES = (
-    ("BS in Medical Technology", "Medical Technology"),
-    ("BS in Nursing", "Nursing"),
-    ("BS in Occupational Therapy", "Occupational Therapy"),
-    ("BS in Pharmacy", "Pharmacy"),
-    ("BS in Physical Therapy", "Physical Therapy"),
-    ("BS in Radiologic Technology", "Radiologic Technology"),
-    ("BS in Respiratory Therapy", "Respiratory Therapy"),
-    ("BS in Architecture", "Architecture"),
-    ("Bachelor of Arts in Communication", "Communication"),
-    ("Bachelor of Arts major in Political Science", "Political Science"),
-    ("Bachelor of Arts in Psychology", "Psychology"),
-    ("Bachelor of Arts in Multimedia Arts", "Multimedia Arts"),
-    ("Bachelor of Science in Psychology", "Psychology"),
-    ("BS in Aircraft Maintenance and Technology", "Mechanical Engineering"),
-    ("BS in Aviation Electronics Technology", "Electrical Engineering"),
-    ("Aircraft Maintenance Technology", "Mechanical Engineering"),
-    ("Aviation Electronics Technology", "Electrical Engineering"),
-    ("BS in Accountancy", "Accountancy"),
-    ("BS in Business Administration", "Business Administration"),
-    ("BS in Business Administration major in Human Resource Management", "Human Resource Management"),
-    ("BS in Business Administration major in Marketing Management", "Marketing Management"),
-    ("BS in Entrepreneurship", "Entrepreneurship"),
-    ("BS in Criminology", "Criminology"),
-    ("BS in Aeronautical Engineering", "Aerospace Engineering"),
-    ("BS in Civil Engineering", "Civil Engineering"),
-    ("BS in Mechanical Engineering", "Mechanical Engineering"),
-    ("BS in Computer Engineering", "Computer Engineering"),
-    ("BS in Digital Engineering", "Data Engineering"),
-    ("BS in Electrical Engineering", "Electrical Engineering"),
-    ("BS in Electronics Engineering major in Biomedical Engineering", "Biomedical Engineering"),
-    ("BS in Industrial Engineering", "Industrial Engineering"),
-    ("BS in Information Technology with Specialization in Game Development", "Game Development"),
-    ("BS in Computer Science with Specialization in Data Science", "Data Science"),
-    ("Bachelor of Library and Information Science", "Library and Information Science"),
-    ("BS in Tourism Management", "Tourism Management"),
-    ("BS in Hospitality Management", "Hospitality Management"),
-    ("BS in Marine Transportation", "Marine Transportation"),
-    ("BS in Marine Engineering", "Marine Engineering"),
-    ("BS in Naval Architecture and Marine Engineering", "Naval Architecture"),
-    ("Bachelor of Early Childhood Education", "Early Childhood Education"),
-    ("Bachelor of Elementary Education", "Early Childhood Education"),
-    ("Bachelor of Physical Education", "Physical Education"),
-    ("Bachelor of Secondary Education", "Secondary Education - Mathematics"),
-    ("Bachelor of Special Needs Education", "Special Needs Education"),
-)
 
-COURSE_DESCRIPTION_OVERRIDES = {
-    "BS in Aircraft Maintenance and Technology": "Study aircraft inspection, maintenance, and repair for safe aviation operations.",
-    "Aircraft Maintenance Technology": "Study aircraft inspection, maintenance, and repair for safe aviation operations.",
-    "BS in Aviation Electronics Technology": "Study aircraft electrical systems, avionics, and aviation electronics maintenance.",
-    "Aviation Electronics Technology": "Study aircraft electrical systems, avionics, and aviation electronics maintenance.",
-    "Bachelor of Elementary Education": "Prepare to teach and support learners across elementary school subjects.",
-    "Bachelor of Secondary Education": "Prepare to teach and support learners at the secondary school level.",
-    "BS in Digital Engineering": "Apply digital tools, data, and engineering methods to design technical systems.",
-    "BS in Naval Architecture and Marine Engineering": "Study ship design, vessel structures, and marine engineering systems.",
-}
+class CourseCatalogSchemaMissing(RuntimeError):
+    pass
 
 #Template Environment Setup
 def _template_env():
@@ -296,25 +242,41 @@ def _validate_system_settings(data):
     }
 
 
-#Course Training Data Retrieval (from the database)
+# University course catalog retrieval
 def _course_training_data():
     global _COURSE_TRAINING_DATA_CACHE
     if _COURSE_TRAINING_DATA_CACHE is not None:
         return _COURSE_TRAINING_DATA_CACHE
 
     conn = _db_conn()
-    cursor = conn.cursor()
-    cursor.execute("SELECT course, features, description FROM course_training_data ORDER BY id")
-    rows = cursor.fetchall()
-    conn.close()
-    profiles = {row[0]: {"features": row[1], "description": row[2]} for row in rows}
-    catalog = []
-    for name, source in UNIVERSITY_COURSES:
-        profile = profiles.get(name) or profiles.get(source)
-        if profile:
-            catalog.append({"course": name, "features": profile["features"],
-                            "description": COURSE_DESCRIPTION_OVERRIDES.get(name, profile["description"])})
-    _COURSE_TRAINING_DATA_CACHE = catalog
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT courses.course, courses.features, courses.description,
+                   COALESCE(
+                       ARRAY_AGG(DISTINCT course_strands.strand_code)
+                           FILTER (WHERE course_strands.strand_code IS NOT NULL),
+                       ARRAY[]::TEXT[]
+                   )
+            FROM university_courses courses
+            LEFT JOIN university_course_strands course_strands
+                ON course_strands.course = courses.course
+            GROUP BY courses.id, courses.course, courses.features, courses.description
+            ORDER BY courses.id
+            """
+        )
+        rows = cursor.fetchall()
+    except psycopg.errors.UndefinedTable as exc:
+        raise CourseCatalogSchemaMissing(
+            "The recommendation catalog is not installed. Apply supabase_schema.sql to the configured database."
+        ) from exc
+    finally:
+        conn.close()
+    _COURSE_TRAINING_DATA_CACHE = [
+        {"course": row[0], "features": row[1], "description": row[2], "strands": row[3] or []}
+        for row in rows
+    ]
     return _COURSE_TRAINING_DATA_CACHE
 
 #Password Hashing and Verification
@@ -407,7 +369,7 @@ def _extract_subject_scores(subjects_text):
             score_map["math"].append(grade)
         elif any(token in lowered for token in ["science", "physics", "chemistry", "biology", "environment", "agriculture", "health", "anatomy", "physiology", "botany", "zoology", "geology", "astronomy", "ecology", "biochemistry", "microbiology", "meteorology", "oceanography", "earth science", "life science", "natural science"]):
             score_map["science"].append(grade)
-        elif any(token in lowered for token in ["english", "communication", "speech", "writing", "literature", "oral", "reading"]):
+        elif any(token in lowered for token in ["english", "communication", "speech", "writing", "literature", "oral", "reading", "nihongo", "japanese", "chinese", "korean", "spanish", "french", "german", "foreign language"]):
             score_map["english"].append(grade)
         elif any(token in lowered for token in ["program", "computer", "ict", "information", "technology", "software", "database", "digital", "web", "network", "coding"]):
             score_map["technology"].append(grade)
@@ -440,8 +402,19 @@ def _extract_subject_field_scores(subjects_text):
         "physical_education": [],
         "environmental_sciences": [],
         "technology": [],
+        "biology": [],
+        "chemistry": [],
+        "physics": [],
+        "foreign_languages": [],
+        "math_algebra": [],
+        "math_calculus": [],
+        "math_geometry": [],
+        "math_trigonometry": [],
+        "math_statistics": [],
+        "math_general": [],
         "communication": [],
         "business": [],
+        "tourism_hospitality": [],
         "social_humanities": [],
         "arts_humanities": [],
     }
@@ -455,8 +428,19 @@ def _extract_subject_field_scores(subjects_text):
         "health_studies": ("health", "nursing", "medical", "patient care", "first aid", "nutrition"),
         "environmental_sciences": ("environment", "agriculture", "fisheries", "ecology", "ecosystem", "forestry", "crop", "soil"),
         "technology": ("technology", "computer", "programming", "coding", "software", "ict", "database", "network", "engineering", "electronics", "robotics"),
-        "communication": ("english", "filipino", "language", "communication", "speech", "writing", "literature", "reading", "oral"),
+        "biology": ("biology", "biological", "life science"),
+        "chemistry": ("chemistry", "chemical", "biochemistry"),
+        "physics": ("physics",),
+        "foreign_languages": ("nihongo", "japanese", "chinese", "korean", "spanish", "french", "german", "foreign language"),
+        "math_algebra": ("algebra", "equation"),
+        "math_calculus": ("calculus",),
+        "math_geometry": ("geometry",),
+        "math_trigonometry": ("trigonometry",),
+        "math_statistics": ("statistics", "probability"),
+        "math_general": ("general mathematics", "mathematics in the modern world", "mathematics", "math"),
+        "communication": ("english", "filipino", "language", "communication", "speech", "writing", "literature", "reading", "oral", "nihongo", "japanese", "chinese", "korean", "spanish", "french", "german"),
         "business": ("business", "accounting", "management", "marketing", "economics", "entrepreneur", "finance", "tourism", "hospitality"),
+        "tourism_hospitality": ("tourism", "hospitality", "tour operations", "tour guiding", "travel services"),
         "social_humanities": ("history", "sociology", "psychology", "political", "social", "criminology", "education", "philosophy", "governance", "culture", "humanities", "religion"),
         "arts_humanities": ("art", "design", "music", "media", "creative", "visual", "performing"),
     }
@@ -497,6 +481,7 @@ def _course_subject_field_evidence(category, field_scores):
         "physical_education": "Physical education and fitness",
         "environmental_sciences": "Environmental sciences",
         "technology": "Technology subjects",
+        "foreign_languages": "Foreign languages",
         "communication": "Communication and languages",
         "business": "Business subjects",
         "social_humanities": "Social sciences and humanities",
@@ -526,7 +511,8 @@ def _course_subject_field_evidence(category, field_scores):
             "physical_education": "supporting",
         },
         "Hospitality & Tourism": {
-            "business": "major", "communication": "major", "arts_humanities": "supporting",
+            "business": "major", "communication": "major", "foreign_languages": "major",
+            "arts_humanities": "supporting",
         },
         "Public Service & Governance": {
             "social_humanities": "major", "communication": "supporting", "business": "supporting",
@@ -558,11 +544,18 @@ def _course_subject_field_fit(category, field_scores):
     total_weight = sum(weights[item["priority"]] for item in evidence)
     return sum(item["grade"] * weights[item["priority"]] for item in evidence) / total_weight
 
+
+def _relative_subject_strength(subject_average, overall_average):
+    if subject_average is None or overall_average is None:
+        return 0.0
+    return max(-10.0, min(10.0, (subject_average - overall_average) * 0.5))
+
 #Cleaning Subjects for Recommendation (removes instructor names and irrelevant text)
 def _clean_subjects_for_recommendation(subjects_text):
     subject_terms = {
         "math", "mathematics", "science", "communication", "education", "technology",
-        "health", "english", "filipino", "literature", "person", "research", "entrepreneur",
+        "health", "english", "filipino", "nihongo", "japanese", "chinese", "korean",
+        "spanish", "french", "german", "literature", "person", "research", "entrepreneur",
         "services", "programming", "computer", "physical", "statistics", "biology",
     }
     # Helper function to determine if a value looks like an instructor's name
@@ -805,6 +798,18 @@ def _vector_distance(a, b):
 
 
 CORE_FEATURE_WEIGHTS = (3.0, 3.0, 3.0, 1.0, 1.0, 1.0)
+ENGINEERING_SUBJECT_FOCUS = {
+    "BS in Aeronautical Engineering": {"math_calculus", "math_geometry", "math_trigonometry", "physics"},
+    "BS in Civil Engineering": {"math_algebra", "math_calculus", "math_geometry", "math_trigonometry", "math_general"},
+    "BS in Mechanical Engineering": {"math_algebra", "math_calculus", "math_trigonometry", "math_general", "physics"},
+    "BS in Electrical Engineering": {"math_algebra", "math_calculus", "math_trigonometry", "math_general", "physics"},
+    "BS in Industrial Engineering": {"math_algebra", "math_statistics", "math_general"},
+    "BS in Computer Engineering": {"math_algebra", "math_calculus", "math_general", "physics"},
+    "BS in Digital Engineering": {"math_algebra", "math_statistics", "math_general"},
+    "BS in Electronics Engineering major in Biomedical Engineering": {"math_algebra", "math_calculus", "math_general", "physics"},
+    "BS in Marine Engineering": {"math_calculus", "math_trigonometry", "math_general", "physics"},
+    "BS in Naval Architecture and Marine Engineering": {"math_calculus", "math_geometry", "math_trigonometry", "math_general", "physics"},
+}
 
 #Core Feature Weights for Weighted Calculations
 def _weighted_features(features):
@@ -858,12 +863,12 @@ def categorize_course(course_name, description=""):
         return "Engineering"
     if any(tok in name for tok in ("agriculture", "fisheries", "farm", "crop", "soil", "environmental science", "ecosystem", "sustainability", "forest")) or any(tok in desc for tok in ("agriculture", "fisheries", "farm", "crop", "soil", "environmental science", "ecosystem", "sustainability", "forest")):
         return "Agriculture"
+    if any(tok in name for tok in ("tourism", "hotel", "hospitality", "travel", "culinary")) or any(tok in desc for tok in ("tourism", "hospitality", "travel", "service")):
+        return "Hospitality & Tourism"
     if any(tok in name for tok in ("business", "management", "account", "accounting", "marketing", "finance", "administration", "economics", "entrepreneur")) or any(tok in desc for tok in ("business", "management", "accounting", "finance", "marketing", "operations")):
         return "Business & Management"
     if any(tok in name for tok in ("education", "teacher", "teaching", "psychology", "social", "humanities", "communication")) or any(tok in desc for tok in ("education", "teaching", "psychology", "social", "communication", "humanities")):
         return "Social Sciences & Education"
-    if any(tok in name for tok in ("tourism", "hotel", "hospitality", "travel", "culinary")) or any(tok in desc for tok in ("tourism", "hospitality", "travel", "service")):
-        return "Hospitality & Tourism"
     if any(tok in name for tok in ("law", "political", "public administration", "governance", "criminology")) or any(tok in desc for tok in ("law", "public service", "governance", "politics")):
         return "Public Service & Governance"
     if any(tok in name for tok in ("art", "design", "architecture", "creative", "media")) or any(tok in desc for tok in ("design", "creative", "art", "visual")):
@@ -936,11 +941,12 @@ def _sanitize_recommendations(payload):
         return []
 
     valid = []
+    allowed_courses = {sample["course"] for sample in _course_training_data()}
     for item in decoded:
         if not isinstance(item, dict):
             continue
         course_name = item.get("course")
-        if not _valid_recommendation_course_name(course_name) or course_name not in {name for name, _ in UNIVERSITY_COURSES}:
+        if not _valid_recommendation_course_name(course_name) or course_name not in allowed_courses:
             continue
         valid.append({
             "course": course_name,
@@ -948,6 +954,7 @@ def _sanitize_recommendations(payload):
             "reason": item.get("reason") or "",
             "category": item.get("category") or categorize_course(course_name, item.get("description") or ""),
             "confidence": item.get("confidence", 0),
+            "match_score": item.get("match_score", item.get("confidence", 0)),
             "core_grade_fit": item.get("core_grade_fit", 0),
             "strand_grade_based": bool(item.get("strand_grade_based", False)),
             "field_fit": item.get("field_fit"),
@@ -980,9 +987,41 @@ def _build_course_model():
     _NEAREST_NEIGHBOR_MODEL = model
     return model
 
-# Recommend Courses Based on Student's Academic Profile (uses the nearest neighbor model and feature analysis to suggest suitable courses)
+def _recommendation_strand_code(strand):
+    label = str(strand or "").strip().lower()
+    tokens = set(re.findall(r"[a-z0-9]+", label))
+    if "abm" in tokens or "accountancy and business management" in label:
+        return "ABM"
+    if "stem" in tokens or "science, technology, engineering and mathematics" in label:
+        return "STEM"
+    if "humss" in tokens or "humanities and social sciences" in label:
+        return "HUMSS"
+    if "gas" in tokens or "general academic strand" in label:
+        return "GAS"
+    if "ict" in tokens or "information and communications technology" in label:
+        return "TVL_ICT"
+    if "he" in tokens or "home economics" in label:
+        return "TVL_HE"
+    if "ia" in tokens or "industrial arts" in label:
+        return "TVL_IA"
+    if "arts_design" in label or "arts and design" in label or "media arts" in label:
+        return "ARTS_DESIGN"
+    if "sports" in tokens or "physical education" in label:
+        return "SPORTS"
+    if "tvl" in tokens or ("technical" in tokens and "vocational" in tokens):
+        return "TVL"
+    return ""
+
+
+# Recommend only courses cataloged for the student's strand.
 def recommend_course(subjects_text, current_course="", strand=""):
     training_data = _course_training_data()
+    strand_text = str(strand or "").strip()
+    strand_key = _recommendation_strand_code(strand)
+    missing_strand_values = {"other", "unknown", "not detected", "not available", "not specified", "n/a", "na", "none"}
+    if strand_text and not strand_key and strand_text.casefold() not in missing_strand_values:
+        return []
+
     subject_scores = _extract_subject_scores(subjects_text)
     features = _build_feature_vector(subjects_text)
     if not any(subject_scores.values()):
@@ -990,75 +1029,95 @@ def recommend_course(subjects_text, current_course="", strand=""):
 
     strongest = _infer_strengths_from_features(features)
     field_scores = _extract_subject_field_scores(subjects_text)
-    strand_groups = {
-        "stem": {"Engineering", "Allied Health"},
-        "ict": {"Computer Studies"},
-        "abm": {"Business & Management", "Hospitality & Tourism"},
-        "humss": {"Social Sciences & Education", "Public Service & Governance", "Arts & Design"},
-        "tvl": {"Computer Studies", "Allied Health", "Hospitality & Tourism", "Agriculture"},
-        "gas": {"Social Sciences & Education", "Business & Management", "Hospitality & Tourism", "Arts & Design"},
-        "sports": {"Sports & Physical Education"},
-        "arts_design": {"Arts & Design"},
+    tourism_average = _average(field_scores["tourism_hospitality"])
+    foreign_language_average = _average(field_scores["foreign_languages"]) if field_scores["foreign_languages"] else None
+    observed_category_averages = [
+        _average(subject_scores[category])
+        for category in CATEGORY_NAMES
+        if subject_scores[category]
+    ]
+    overall_grade_average = _average(observed_category_averages) if observed_category_averages else None
+    biology_average = _average(field_scores["biology"]) if field_scores["biology"] else None
+    chemistry_average = _average(field_scores["chemistry"]) if field_scores["chemistry"] else None
+    biology_strength = _relative_subject_strength(biology_average, overall_grade_average)
+    chemistry_strength = _relative_subject_strength(chemistry_average, overall_grade_average)
+    foreign_language_strength = _relative_subject_strength(foreign_language_average, overall_grade_average)
+    math_subject_labels = {
+        "math_algebra": "Algebra",
+        "math_calculus": "Calculus",
+        "math_geometry": "Geometry",
+        "math_trigonometry": "Trigonometry",
+        "math_statistics": "Statistics",
+        "math_general": "General Mathematics",
+        "physics": "Physics",
     }
-    strand_key = (strand or "").strip().lower()
-    preferred_groups = strand_groups.get(strand_key, set())
-    strand_course_terms = {
-        "stem": ("engineering", "science", "biology", "medical", "pharmacy", "technology"),
-        "ict": ("computer", "information", "technology", "it"),
-        "abm": ("business", "account", "marketing", "management", "finance", "economics", "entrepreneur", "hospitality", "tourism"),
-        "humss": ("psychology", "education", "communication", "political", "criminology", "public administration", "social", "legal", "tourism"),
-        "tvl": ("technology", "computer", "nursing", "medical", "pharmacy", "hospitality", "tourism", "agriculture", "fisheries"),
-        "gas": ("communication", "business", "education", "hospitality", "tourism", "arts", "psychology"),
-        "sports": ("sports", "sport science", "physical education", "athletic", "fitness", "exercise", "kinesiology"),
-        "arts_design": ("arts", "design", "creative", "media", "architecture", "multimedia", "visual"),
+    observed_math_subjects = {
+        field: _average(field_scores[field])
+        for field in math_subject_labels
+        if field_scores[field]
     }
-    preferred_terms = strand_course_terms.get(strand_key, ())
-    strand_is_active = strand_key in strand_groups
-    strand_is_supported = bool(preferred_groups or preferred_terms)
-
-    def matches_strand(item):
-        course_text = f"{item['course']} {item.get('description', '')}".lower()
-        return (
-            (preferred_groups and item["category"] in preferred_groups)
-            or (preferred_terms and any(re.search(rf"\b{re.escape(term)}\b", course_text) for term in preferred_terms))
-        )
-
+    highest_math_subject = max(observed_math_subjects, key=observed_math_subjects.get) if observed_math_subjects else None
+    highest_math_grade = observed_math_subjects.get(highest_math_subject) if highest_math_subject else None
+    math_subject_strength = _relative_subject_strength(highest_math_grade, overall_grade_average)
     recommendations = []
     for sample in training_data:
         distance = _observed_weighted_distance(subject_scores, sample["features"])
         if distance is None:
             continue
         category = categorize_course(sample["course"], sample.get("description", ""))
-        strand_alignment = bool(strand_is_supported and matches_strand({
-            "course": sample["course"],
-            "description": sample.get("description", ""),
-            "category": category,
-        }))
-        if strand_is_active and (not strand_is_supported or not strand_alignment):
+        strand_alignment = bool(strand_key and strand_key in sample.get("strands", []))
+        if strand_key and not strand_alignment:
             continue
         field_evidence = _course_subject_field_evidence(category, field_scores)
         field_fit = _course_subject_field_fit(category, field_scores)
         grade_similarity = max(0.0, 100.0 - distance)
         confidence = grade_similarity
         reason = _course_match_reason(sample["course"], category, strongest, strand)
+        ranking_score = confidence
         if field_fit is not None:
             confidence = confidence * 0.8 + field_fit * 0.2
             reason += f" Your grades in related subject fields average {field_fit:.1f}."
+            ranking_score = confidence
+        if sample["course"] == "BS in Hospitality Management" and tourism_average >= 80:
+            tourism_priority = min(12.0, (tourism_average - 80) * 0.6)
+            ranking_score += tourism_priority
+            reason += f" Your tourism-related subject average is {tourism_average:.1f}, prioritizing this hospitality match."
+        if category == "Hospitality & Tourism" and foreign_language_average is not None and foreign_language_strength > 0:
+            ranking_score += 4.0 + foreign_language_strength
+            reason += f" Your foreign-language subject average is {foreign_language_average:.1f}, supporting this tourism and hospitality match."
+        if category == "Allied Health" and biology_average is not None:
+            ranking_score += biology_strength
+            if biology_strength:
+                direction = "above" if biology_strength > 0 else "below"
+                reason += f" Your Biology subject average of {biology_average:.1f} is {direction} your overall subject average, influencing this health-care match."
+        course_text = f"{sample['course']} {sample.get('description', '')}".lower()
+        chemistry_related_terms = ("chemistry", "chemical", "biochemistry", "pharmacy", "pharmaceutical", "medical technology")
+        is_chemistry_related = any(term in course_text for term in chemistry_related_terms)
+        if is_chemistry_related and chemistry_average is not None:
+            ranking_score += chemistry_strength
+            if chemistry_strength:
+                direction = "above" if chemistry_strength > 0 else "below"
+                reason += f" Your Chemistry subject average of {chemistry_average:.1f} is {direction} your overall subject average, influencing this chemistry-related match."
+        engineering_focus = ENGINEERING_SUBJECT_FOCUS.get(sample["course"], set())
+        if highest_math_subject in engineering_focus and math_subject_strength > 0:
+            ranking_score += 4.0 + math_subject_strength
+            reason += f" Your highest math-related subject is {math_subject_labels[highest_math_subject]} ({highest_math_grade:.1f}), supporting this engineering match."
         item = {
             "course": sample["course"],
             "description": sample.get("description", ""),
             "reason": reason,
             "category": category,
             "confidence": round(grade_similarity, 2),
+            "match_score": round(max(0.0, min(100.0, ranking_score)), 2),
             "core_grade_fit": round(_core_grade_fit(features, sample["features"]), 2),
             "field_fit": round(field_fit, 2) if field_fit is not None else None,
             "subject_field_evidence": field_evidence,
             "strand_alignment": strand_alignment,
-            "strand_label": strand.upper() if strand else "",
-            "_ranking_score": confidence,
+            "strand_label": strand_key,
+            "_ranking_score": ranking_score,
         }
-        if item["strand_alignment"]:
-            item["reason"] += f" It aligns with the {strand.upper()} strand."
+        if strand_alignment:
+            item["reason"] += f" It aligns with the {strand_key} strand."
         recommendations.append(item)
 
     recommendations.sort(
@@ -1066,9 +1125,26 @@ def recommend_course(subjects_text, current_course="", strand=""):
         reverse=True,
     )
 
-    if recommendations and strand_is_active:
-        recommendations[0]["strand_grade_based"] = True
-        recommendations[0]["reason"] += f" This result considers the {strand.upper()} strand and your recognized subject-category grades."
+    if recommendations:
+        recommendations[0]["strand_grade_based"] = bool(strand_key)
+        if strand_key:
+            recommendations[0]["reason"] += f" This result is limited to catalog courses for the {strand_key} strand."
+        else:
+            area_labels = {
+                "math": "Math", "science": "Science", "english": "English",
+                "technology": "Technology", "business": "Business", "social": "Social Studies",
+            }
+            strongest_areas = sorted(
+                (
+                    (area_labels[category], _average(subject_scores[category]))
+                    for category in CATEGORY_NAMES
+                    if subject_scores[category]
+                ),
+                key=lambda item: item[1],
+                reverse=True,
+            )[:2]
+            area_summary = " and ".join(f"{name} ({grade:.1f})" for name, grade in strongest_areas)
+            recommendations[0]["reason"] += f" No strand was detected, so this ranking uses your highest grade areas: {area_summary}."
     for item in recommendations:
         item.pop("_ranking_score", None)
     return recommendations[:5]
@@ -1807,6 +1883,7 @@ def public_system_settings(req):
             "university_name": settings["university_name"],
             "school_year": settings["school_year"],
             "available_strands": settings["available_strands"],
+            "recommendation_limit": settings["recommendation_limit"],
         },
     })
 
@@ -4125,6 +4202,11 @@ api_app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc",
 )
+
+
+@api_app.exception_handler(CourseCatalogSchemaMissing)
+async def course_catalog_schema_missing_handler(request, exc):
+    return JSONResponse({"success": False, "message": str(exc)}, status_code=503)
 
 
 def _fastapi_handler(handler, path_parameters=()):

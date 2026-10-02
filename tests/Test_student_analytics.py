@@ -1,3 +1,5 @@
+import asyncio
+import json
 import pytest
 from types import SimpleNamespace
 
@@ -168,7 +170,13 @@ def test_report_card_with_each_cell_on_its_own_line_extracts_all_subjects():
     assert extracted == expected
 
 
-def test_course_average_profile_returns_subject_averages():
+def test_course_average_profile_returns_subject_averages(monkeypatch):
+    monkeypatch.setattr(app, "_course_training_data", lambda: [{
+        "course": "BS in Computer Science with Specialization in Data Science",
+        "features": [90, 84, 80, 92, 72, 74],
+        "description": "Computer science profile",
+        "strands": ["STEM"],
+    }])
     course_data = _course_average_profile("BS in Computer Science with Specialization in Data Science")
 
     assert course_data["course"] == "BS in Computer Science with Specialization in Data Science"
@@ -177,7 +185,13 @@ def test_course_average_profile_returns_subject_averages():
     assert course_data["by_subject"]["technology"] >= 80
 
 
-def test_student_performance_analytics_computes_comparison():
+def test_student_performance_analytics_computes_comparison(monkeypatch):
+    monkeypatch.setattr(app, "_course_training_data", lambda: [{
+        "course": "BS in Computer Science with Specialization in Data Science",
+        "features": [90, 84, 80, 92, 72, 74],
+        "description": "Computer science profile",
+        "strands": ["STEM"],
+    }])
     analytics = _build_student_performance_analytics(
         "BS in Computer Science with Specialization in Data Science",
         "math - 95\nscience - 88\nenglish - 78\ntechnology - 92\nbusiness - 80\nsocial - 75",
@@ -235,21 +249,130 @@ def test_extract_subject_scores_accepts_common_ocr_variants_and_subject_names():
     assert scores["social"]
 
 
-def test_recommend_course_returns_real_courses_for_broader_subject_patterns():
+def test_recommend_course_only_returns_courses_for_the_requested_strand(monkeypatch):
+    monkeypatch.setattr(app, "_course_training_data", lambda: [
+        {"course": "BS in Computer Science with Specialization in Data Science", "features": [90, 84, 80, 92, 72, 74], "description": "Computer science", "strands": ["STEM"]},
+        {"course": "BS in Accountancy", "features": [79, 70, 78, 64, 97, 70], "description": "Accountancy", "strands": ["ABM"]},
+    ])
     recommendations = recommend_course(
-        "math 94\nscience 90\nenglish 88\ncomputer programming 96\naccounting 92\nsocial studies 86"
+        "math 94\nscience 90\nenglish 88\ncomputer programming 96\naccounting 92\nsocial studies 86",
+        strand="Science, Technology, Engineering and Mathematics (STEM)",
     )
 
     assert isinstance(recommendations, list)
     assert len(recommendations) > 0
-    assert all(item["course"] in {name for name, _ in app.UNIVERSITY_COURSES} for item in recommendations)
+    assert all(item["course"] == "BS in Computer Science with Specialization in Data Science" for item in recommendations)
+
+
+def test_missing_strand_ranks_all_courses_from_highest_grades(monkeypatch):
+    monkeypatch.setattr(app, "_course_training_data", lambda: [
+        {"course": "BS in Accountancy", "features": [80, 80, 80, 80, 96, 80], "description": "Accounting and finance", "strands": ["ABM"]},
+        {"course": "BS in Nursing", "features": [80, 96, 80, 60, 70, 80], "description": "Patient care", "strands": ["STEM"]},
+        {"course": "BS in Information Technology with Specialization in Game Development", "features": [80, 80, 80, 96, 70, 80], "description": "Computing and software", "strands": ["TVL_ICT"]},
+    ])
+    subjects = "Mathematics - 80\nScience - 80\nEnglish - 80\nComputer Programming - 80\nAccounting - 96\nSocial Studies - 80"
+
+    for missing_strand in ("", "Other", "Not detected", "N/A"):
+        recommendations = recommend_course(subjects, strand=missing_strand)
+
+        assert recommendations
+        assert recommendations[0]["course"] == "BS in Accountancy"
+        assert all(not item["strand_alignment"] for item in recommendations)
+        assert all(not item["strand_label"] for item in recommendations)
+        assert "highest grade areas" in recommendations[0]["reason"].lower()
+
+
+def test_generic_tvl_recommends_union_of_tvl_strands(monkeypatch):
+    monkeypatch.setattr(app, "_course_training_data", lambda: [
+        {"course": "BS in Information Technology", "features": [80, 80, 80, 90, 80, 80], "description": "ICT", "strands": ["TVL_ICT", "TVL"]},
+        {"course": "BS in Hospitality Management", "features": [80, 80, 80, 80, 90, 80], "description": "Home Economics", "strands": ["TVL_HE", "TVL"]},
+        {"course": "BS in Mechanical Engineering", "features": [90, 90, 80, 80, 70, 70], "description": "Industrial Arts", "strands": ["TVL_IA", "TVL"]},
+        {"course": "BS in Accountancy", "features": [80, 80, 80, 70, 95, 80], "description": "ABM", "strands": ["ABM"]},
+    ])
+    subjects = "math 85\nscience 85\nenglish 85\ntechnology 85\nbusiness 85\nsocial studies 85"
+
+    broad_tvl = recommend_course(subjects, strand="TVL Track A")
+    ict_only = recommend_course(subjects, strand="Information and Communications Technology (ICT)")
+
+    assert {item["course"] for item in broad_tvl} == {
+        "BS in Information Technology",
+        "BS in Hospitality Management",
+        "BS in Mechanical Engineering",
+    }
+    assert {item["course"] for item in ict_only} == {"BS in Information Technology"}
+
+
+def test_high_nihongo_grade_supports_tourism_courses_for_tvl_home_economics(monkeypatch):
+    profile = [80, 80, 85, 70, 88, 78]
+    monkeypatch.setattr(app, "_course_training_data", lambda: [
+        {"course": "BS in Hospitality Management", "features": profile, "description": "Hospitality and tourism services", "strands": ["TVL_HE", "TVL"]},
+        {"course": "BS in Tourism Management", "features": profile, "description": "Tourism and travel services", "strands": ["TVL_HE", "TVL"]},
+    ])
+    subjects = (
+        "Nihongo 1 - 96\nGeneral Mathematics - 80\nBiology - 80\n"
+        "English - 82\nAccounting - 80\nSocial Studies - 80"
+    )
+
+    recommendations = recommend_course(subjects, strand="Home Economics (HE)")
+    language_fields = app._extract_subject_field_scores(subjects)
+
+    assert language_fields["foreign_languages"] == [96.0]
+    assert recommendations
+    assert recommendations[0]["course"] in {"BS in Hospitality Management", "BS in Tourism Management"}
+    assert "language" in recommendations[0]["reason"].lower()
+
+
+def test_biology_and_chemistry_strengths_prioritize_related_courses(monkeypatch):
+    profile = [80, 80, 80, 80, 80, 80]
+    monkeypatch.setattr(app, "_course_training_data", lambda: [
+        {"course": "BS in Nursing", "features": profile, "description": "Patient care", "strands": ["STEM"]},
+        {"course": "BS in Pharmacy", "features": profile, "description": "Medicines and pharmaceutical chemistry", "strands": ["STEM"]},
+        {"course": "BS in Medical Technology", "features": profile, "description": "Clinical laboratory diagnostics", "strands": ["STEM"]},
+        {"course": "BS in Mechanical Engineering", "features": profile, "description": "Mechanical systems", "strands": ["STEM"]},
+    ])
+    common_grades = "Mathematics - 80\nEnglish - 80\nComputer Programming - 80\nAccounting - 80\nSocial Studies - 80"
+
+    biology_recommendations = recommend_course(
+        f"Biology - 96\nChemistry - 80\n{common_grades}", strand="STEM"
+    )
+    chemistry_recommendations = recommend_course(
+        f"Biology - 80\nChemistry - 96\n{common_grades}", strand="STEM"
+    )
+
+    assert biology_recommendations[0]["course"] == "BS in Nursing"
+    assert "biology" in biology_recommendations[0]["reason"].lower()
+    assert chemistry_recommendations[0]["course"] == "BS in Pharmacy"
+    assert "chemistry" in chemistry_recommendations[0]["reason"].lower()
+
+
+def test_high_tourism_grade_prioritizes_hospitality_management_for_tvl(monkeypatch):
+    monkeypatch.setattr(app, "_course_training_data", lambda: [
+        {"course": "BS in Hospitality Management", "features": [68, 72, 86, 63, 94, 82], "description": "Hospitality and tourism", "strands": ["TVL_HE", "TVL"]},
+        {"course": "Aircraft Maintenance Technology", "features": [91, 93, 77, 66, 61, 71], "description": "Industrial Arts", "strands": ["TVL_IA", "TVL"]},
+        {"course": "BS in Information Technology", "features": [78, 72, 78, 90, 70, 68], "description": "ICT", "strands": ["TVL_ICT", "TVL"]},
+    ])
+    subjects = (
+        "Tourism Production Services 1 - 96\n"
+        "Entrepreneurship - 93\n"
+        "Physical Education and Health 3 - 96\n"
+        "English for Academic and Professional Purposes - 92\n"
+        "Pagsulat sa Filipino sa Piling Larangan - 91\n"
+        "21st Century Literature from the Philippines and the World - 90"
+    )
+
+    recommendations = recommend_course(subjects, strand="TVL Track A")
+
+    assert recommendations[0]["course"] == "BS in Hospitality Management"
+    assert recommendations[0]["match_score"] == max(item["match_score"] for item in recommendations)
+    assert recommendations[0]["match_score"] > recommendations[0]["confidence"]
+    assert "tourism-related subject average is 96.0" in recommendations[0]["reason"]
 
 
 def test_subject_field_fit_prioritizes_biology_for_health_courses(monkeypatch):
     profile = [85, 85, 0, 0, 0, 0]
     monkeypatch.setattr(app, "_course_training_data", lambda: [
-        {"course": "BS in Civil Engineering", "features": profile, "description": "Infrastructure engineering"},
-        {"course": "BS in Nursing", "features": profile, "description": "Patient-focused healthcare"},
+        {"course": "BS in Civil Engineering", "features": profile, "description": "Infrastructure engineering", "strands": ["STEM"]},
+        {"course": "BS in Nursing", "features": profile, "description": "Patient-focused healthcare", "strands": ["STEM"]},
     ])
     monkeypatch.setattr(app, "_COURSE_TRAINING_DATA_CACHE", None)
 
@@ -264,6 +387,35 @@ def test_subject_field_fit_prioritizes_biology_for_health_courses(monkeypatch):
     assert saved_payload["strand_alignment"] is True
     assert saved_payload["strand_label"] == "STEM"
     assert any(entry["priority"] == "major" for entry in saved_payload["subject_field_evidence"])
+
+
+def test_math_subtopics_and_physics_prioritize_related_engineering(monkeypatch):
+    profile = [80, 80, 80, 80, 80, 80]
+    monkeypatch.setattr(app, "_course_training_data", lambda: [
+        {"course": "BS in Civil Engineering", "features": profile, "description": "Civil engineering", "strands": ["STEM"]},
+        {"course": "BS in Industrial Engineering", "features": profile, "description": "Industrial engineering", "strands": ["STEM"]},
+        {"course": "BS in Mechanical Engineering", "features": profile, "description": "Mechanical engineering", "strands": ["STEM"]},
+        {"course": "BS in Electrical Engineering", "features": profile, "description": "Electrical engineering", "strands": ["STEM"]},
+        {"course": "BS in Nursing", "features": profile, "description": "Healthcare", "strands": ["STEM"]},
+    ])
+    common = "General Mathematics - 80\nEnglish - 80\nComputer Programming - 80\nAccounting - 80\nSocial Studies - 80"
+
+    calculus_recommendations = recommend_course(
+        f"Calculus - 96\nGeometry - 84\nStatistics - 78\nPhysics - 80\n{common}", strand="STEM"
+    )
+    statistics_recommendations = recommend_course(
+        f"Calculus - 78\nGeometry - 80\nStatistics - 96\nPhysics - 80\n{common}", strand="STEM"
+    )
+    physics_recommendations = recommend_course(
+        f"Calculus - 78\nGeometry - 80\nStatistics - 80\nPhysics - 96\n{common}", strand="STEM"
+    )
+
+    assert calculus_recommendations[0]["course"] == "BS in Civil Engineering"
+    assert "Calculus" in calculus_recommendations[0]["reason"]
+    assert statistics_recommendations[0]["course"] == "BS in Industrial Engineering"
+    assert "Statistics" in statistics_recommendations[0]["reason"]
+    assert physics_recommendations[0]["course"] in {"BS in Mechanical Engineering", "BS in Electrical Engineering"}
+    assert "Physics" in physics_recommendations[0]["reason"]
 
 
 def test_major_subject_fields_outweigh_supporting_fields():
@@ -292,10 +444,10 @@ def test_physical_education_is_supporting_not_core_nursing_evidence():
 def test_known_strands_filter_out_non_aligned_courses(monkeypatch):
     profile = [85, 85, 85, 85, 85, 85]
     training_data = [
-        {"course": "BS in Civil Engineering", "features": profile, "description": "Infrastructure engineering"},
-        {"course": "BS in Business Administration", "features": profile, "description": "Business operations"},
-        {"course": "Bachelor of Physical Education", "features": profile, "description": "Physical education and sports instruction"},
-        {"course": "Bachelor of Arts in Multimedia Arts", "features": profile, "description": "Digital media and creative design"},
+        {"course": "BS in Civil Engineering", "features": profile, "description": "Infrastructure engineering", "strands": ["STEM"]},
+        {"course": "BS in Business Administration", "features": profile, "description": "Business operations", "strands": ["ABM"]},
+        {"course": "Bachelor of Physical Education", "features": profile, "description": "Physical education and sports instruction", "strands": ["SPORTS"]},
+        {"course": "Bachelor of Arts in Multimedia Arts", "features": profile, "description": "Digital media and creative design", "strands": ["ARTS_DESIGN"]},
     ]
     monkeypatch.setattr(app, "_course_training_data", lambda: training_data)
     subjects = "Mathematics - 85\nEnglish - 85"
@@ -318,7 +470,7 @@ def test_known_strands_filter_out_non_aligned_courses(monkeypatch):
     }
 
 
-def test_unrecognized_strand_does_not_filter_recommendations(monkeypatch):
+def test_unrecognized_strand_returns_no_recommendations(monkeypatch):
     monkeypatch.setattr(app, "_course_training_data", lambda: [{
         "course": "BS in Mechanical Engineering",
         "features": [85, 85, 85, 85, 85, 85],
@@ -327,8 +479,7 @@ def test_unrecognized_strand_does_not_filter_recommendations(monkeypatch):
 
     recommendations = recommend_course("Mathematics - 85", strand="Unrecognized track")
 
-    assert len(recommendations) == 1
-    assert recommendations[0]["strand_alignment"] is False
+    assert recommendations == []
 
 
 def test_observed_weighted_distance_ignores_missing_categories():
@@ -362,37 +513,76 @@ def test_course_comparison_excludes_categories_without_student_grades(monkeypatc
     assert science_row["status"] == "no grade available"
 
 
-def test_build_student_performance_analytics_rejects_placeholder_course_names():
+def test_build_student_performance_analytics_rejects_placeholder_course_names(monkeypatch):
+    monkeypatch.setattr(app, "_course_training_data", lambda: [{
+        "course": "BS in Computer Science with Specialization in Data Science",
+        "features": [90, 84, 80, 92, 72, 74],
+        "description": "Computer science profile",
+        "strands": ["STEM"],
+    }])
     analytics = _build_student_performance_analytics(
         "General Education",
         "math - 95\nscience - 88\nenglish - 78\ntechnology - 92\nbusiness - 80\nsocial - 75",
     )
 
     assert analytics["selected_course"] not in {"General Education", "Other", "Recommended Course"}
-    assert analytics["selected_course"] in {name for name, _ in app.UNIVERSITY_COURSES}
+    assert analytics["selected_course"] == "BS in Computer Science with Specialization in Data Science"
 
 
-def test_university_catalog_uses_legacy_profiles_and_migrated_rows(monkeypatch):
-    source_rows = [(source, [80, 80, 80, 80, 80, 80], "Source description")
-                   for source in {source for _, source in app.UNIVERSITY_COURSES}]
+def test_university_catalog_loads_course_strand_assignments(monkeypatch):
+    rows = [
+        ("BS in Computer Science with Specialization in Data Science", [80, 80, 80, 80, 80, 80], "STEM profile", ["STEM", "TVL_ICT"]),
+        ("BS in Accountancy", [80, 80, 80, 80, 80, 80], "ABM profile", ["ABM"]),
+    ]
+    executed = []
 
-    def load(rows):
-        cursor = SimpleNamespace(execute=lambda *args: None, fetchall=lambda: rows)
+    def load():
+        cursor = SimpleNamespace(execute=lambda *args: executed.append(args[0]), fetchall=lambda: rows)
         monkeypatch.setattr(app, "_db_conn", lambda: SimpleNamespace(cursor=lambda: cursor, close=lambda: None))
         monkeypatch.setattr(app, "_COURSE_TRAINING_DATA_CACHE", None)
         return app._course_training_data()
 
-    expected = [name for name, _ in app.UNIVERSITY_COURSES]
-    assert [item["course"] for item in load(source_rows)] == expected
-    migrated = [(name, [80, 80, 80, 80, 80, 80], "Migrated description") for name in expected]
-    catalog = load(migrated)
-    assert [item["course"] for item in catalog] == expected
-    assert next(item for item in catalog if item["course"] == "Aircraft Maintenance Technology")["description"] == app.COURSE_DESCRIPTION_OVERRIDES["Aircraft Maintenance Technology"]
+    catalog = load()
+    expected = [item["course"] for item in catalog]
+    assert expected == ["BS in Computer Science with Specialization in Data Science", "BS in Accountancy"]
+    assert catalog[0]["strands"] == ["STEM", "TVL_ICT"]
+    assert "FROM university_courses" in executed[0]
+    assert "university_course_strands" in executed[0]
     assert app._sanitize_recommendations([{"course": "Software Engineering"}, {"course": expected[0]}]) == [
         {"course": expected[0], "description": "", "reason": "", "category": app.categorize_course(expected[0]),
-            "confidence": 0, "core_grade_fit": 0, "strand_grade_based": False, "field_fit": None,
+            "confidence": 0, "match_score": 0, "core_grade_fit": 0, "strand_grade_based": False, "field_fit": None,
             "subject_field_evidence": [], "strand_alignment": False, "strand_label": ""}
     ]
+
+
+def test_missing_catalog_returns_actionable_json_error_and_closes_connection(monkeypatch):
+    closed = []
+
+    def fail_query(*_args):
+        raise app.psycopg.errors.UndefinedTable('relation "university_courses" does not exist')
+
+    cursor = SimpleNamespace(execute=fail_query)
+    connection = SimpleNamespace(cursor=lambda: cursor, close=lambda: closed.append(True))
+    monkeypatch.setattr(app, "_db_conn", lambda: connection)
+    monkeypatch.setattr(app, "_COURSE_TRAINING_DATA_CACHE", None)
+
+    with pytest.raises(app.CourseCatalogSchemaMissing, match="Apply supabase_schema.sql") as error:
+        app._course_training_data()
+
+    response = asyncio.run(app.course_catalog_schema_missing_handler(None, error.value))
+    assert response.status_code == 503
+    assert json.loads(response.body)["success"] is False
+    assert closed == [True]
+
+
+def test_public_settings_exposes_recommendation_limit(monkeypatch):
+    settings = {**app.SYSTEM_SETTING_DEFAULTS, "recommendation_limit": 5}
+    monkeypatch.setattr(app, "_get_system_settings", lambda: settings)
+
+    response = app.public_system_settings(SimpleNamespace())
+
+    assert response.status_code == 200
+    assert json.loads(response.body)["settings"]["recommendation_limit"] == 5
 
 
 def test_parse_report_card_handles_dynamic_student_data_and_variable_subject_count():

@@ -2,6 +2,7 @@
 let students = [];
 let selectedStudent = null;
 let configuredAcademicStrands = ['STEM', 'ABM', 'HUMSS', 'GAS', 'TVL', 'ICT', 'SPORTS', 'ARTS_DESIGN'];
+let configuredRecommendationLimit = 3;
  
 
 function addStudent() {
@@ -1648,6 +1649,19 @@ function clearInputs() {
             setProgress(90, `${data.provider || 'OCR'} extraction complete.`);
             window.latestOcrReviewRequired = Boolean(window.latestOcrReviewRequired || data.review_required);
             window.latestParsedSubjects = Array.isArray(data.parsed?.subjects) ? data.parsed.subjects : [];
+            const reviewErrorSubjects = (Array.isArray(data.parsed?.validation_errors) ? data.parsed.validation_errors : [])
+                .map(error => {
+                    const message = String(error || '');
+                    const match = message.match(/^Needs review:\s*(.+)$/i)
+                        || message.match(/^Grade rejected for\s+(.+?)(?::\s*.*)?$/i);
+                    return match ? {subject_name: match[1].trim(), needs_review: true, reason: message} : null;
+                })
+                .filter(Boolean);
+            window.latestOcrReviewSubjects = [
+                ...(Array.isArray(window.latestOcrReviewSubjects) ? window.latestOcrReviewSubjects : []),
+                ...window.latestParsedSubjects.filter(subject => subject?.needs_review),
+                ...reviewErrorSubjects,
+            ];
             if(!window.latestSavedProfile?.success){
                 window.latestStudentMetadata = studentMetadataFromOcr(data.parsed || {}, data.structured_text || '');
                 updateOcrIdentityPreview(window.latestStudentMetadata);
@@ -1752,6 +1766,10 @@ function clearInputs() {
             const settingsData = await settingsResponse.json();
             if(settingsData.success && Array.isArray(settingsData.settings?.available_strands) && settingsData.settings.available_strands.length){
                 configuredAcademicStrands = settingsData.settings.available_strands;
+            }
+            const recommendationLimit = Number(settingsData.settings?.recommendation_limit);
+            if(settingsData.success && Number.isInteger(recommendationLimit) && recommendationLimit >= 1 && recommendationLimit <= 5){
+                configuredRecommendationLimit = recommendationLimit;
             }
         }catch(error){
             console.warn('Unable to load configured academic strands.', error);
@@ -2019,7 +2037,11 @@ function clearInputs() {
                 .replace(/"/g, '&quot;');
             const items = (Array.isArray(recommendations) ? recommendations : [])
                 .slice()
-                .slice(0, 3);
+                .slice(0, configuredRecommendationLimit);
+            const resultsTitle = document.getElementById('recommendation-results-title');
+            if(resultsTitle){
+                resultsTitle.textContent = `Your top ${items.length} course match${items.length === 1 ? '' : 'es'}`;
+            }
             list.innerHTML = items.length
                 ? items.map((item, index) => `
                     <article class="inline-recommendation-card${index === 0 ? ' best-match' : ''}" data-recommendation-index="${index}">
@@ -2044,11 +2066,14 @@ function clearInputs() {
                                     ? `<div class="subject-evidence">${majorEvidence.length ? `<span>Major related subjects</span><div>${renderEvidence(majorEvidence)}</div>` : ''}${supportingEvidence.length ? `<span>Supporting subjects</span><div>${renderEvidence(supportingEvidence)}</div>` : ''}</div>`
                                     : '';
                             })()}
-                            <div class="match-meter" aria-label="${escapeHtml(item.course)} match score ${Math.round(Number(item.confidence || 0))} percent">
-                                <div class="match-meter-label"><span>Academic match</span><strong>${Math.round(Number(item.confidence || 0))}%</strong></div>
-                                <div class="match-meter-track"><span style="width:${Math.max(0, Math.min(100, Number(item.confidence || 0)))}%"></span></div>
+                            <div class="match-meter" aria-label="${escapeHtml(item.course)} recommendation match ${Math.round(Number(item.match_score ?? item.confidence ?? 0))} percent">
+                                <div class="match-meter-label"><span>Recommendation match</span><strong>${Math.round(Number(item.match_score ?? item.confidence ?? 0))}%</strong></div>
+                                <div class="match-meter-track"><span style="width:${Math.max(0, Math.min(100, Number(item.match_score ?? item.confidence ?? 0)))}%"></span></div>
                             </div>
-                            <button class="recommendation-open" type="button" aria-haspopup="dialog" aria-label="Why is ${escapeHtml(item.course)} recommended?">Why this recommendation? <i class="fa-solid fa-arrow-right" aria-hidden="true"></i></button>
+                            <div class="recommendation-actions">
+                                <button class="recommendation-open" type="button" aria-haspopup="dialog" aria-label="View academic comparison for ${escapeHtml(item.course)}">Why this recommendation? <i class="fa-solid fa-arrow-right" aria-hidden="true"></i></button>
+                                <button class="recommendation-match-explanation" type="button" aria-haspopup="dialog">${index === 0 ? 'Why this is your best match' : 'Why this course matches'} <i class="fa-solid fa-lightbulb" aria-hidden="true"></i></button>
+                            </div>
                         </div>
                     </article>
                 `).join('')
@@ -2057,6 +2082,8 @@ function clearInputs() {
             function renderSelectedCourse(index){
                 const item = items[index];
                 if(!item) return;
+                analytics.hidden = false;
+                courseAnalysis.hidden = false;
                 const comparison = comparisons[item.course] || {};
                 const rows = Array.isArray(comparison.comparison) ? comparison.comparison : [];
                 const studentAverage = Number(comparison.student_overall);
@@ -2104,8 +2131,68 @@ function clearInputs() {
                 closeButton.focus();
             }
 
+            function renderMatchExplanation(index){
+                const item = items[index];
+                if(!item) return;
+                const fieldPriorities = new Map((Array.isArray(item.subject_field_evidence) ? item.subject_field_evidence : []).map(entry => [entry.field, entry.priority]));
+                const supportingSubjects = extractSubjectEvidence(academicRecord)
+                    .map(entry => ({...entry, field: subjectFieldLabel(entry.subject), priority: fieldPriorities.get(subjectFieldLabel(entry.subject))}))
+                    .filter(entry => entry.priority)
+                    .sort((left, right) => (left.priority === right.priority ? right.grade - left.grade : left.priority === 'major' ? -1 : 1))
+                    .slice(0, 6);
+                const strandLabel = String(item.strand_label || '').trim();
+                const matchScore = Math.round(Number(item.match_score ?? item.confidence ?? 0));
+                const profileSimilarity = Math.round(Number(item.confidence || 0));
+                const subjectNames = [...new Set(supportingSubjects.slice(0, 4).map(entry => entry.subject))];
+                const subjectList = subjectNames.length === 1
+                    ? subjectNames[0]
+                    : subjectNames.length === 2
+                        ? `${subjectNames[0]} and ${subjectNames[1]}`
+                        : `${subjectNames.slice(0, -1).join(', ')}, and ${subjectNames[subjectNames.length - 1]}`;
+                const fieldFitExplanations = {
+                    'Allied Health': 'Health programs build on science knowledge, careful observation, and understanding people\'s wellbeing.',
+                    'Engineering': 'Engineering applies mathematics and physical-science problem solving to design and improve systems.',
+                    'Computer Studies': 'Computing programs use logical thinking, technology, and structured problem solving.',
+                    'Business & Management': 'Business programs use planning, communication, and financial decision-making.',
+                    'Hospitality & Tourism': 'Tourism and hospitality work draws on communication, service, and understanding visitors\' needs.',
+                    'Social Sciences & Education': 'These programs draw on communication and understanding people, communities, and learning.',
+                    'Arts & Design': 'Creative programs use visual communication, design thinking, and expressive skills.',
+                    'Sports & Physical Education': 'These programs combine physical performance, health knowledge, and instruction.',
+                };
+                const fieldExplanation = fieldFitExplanations[item.category] || 'This course overlaps with the strengths shown in your academic profile.';
+                const fitExplanation = subjectList
+                    ? `${index === 0 ? 'This is your strongest course match' : 'This course is a relevant match'} because your grades in ${subjectList} show strengths related to ${item.course}. ${fieldExplanation}${strandLabel && item.strand_alignment ? ` It is also listed for your ${strandLabel} strand.` : !strandLabel ? ' No strand was identified, so the match is based on your grade profile.' : ''}`
+                    : `${index === 0 ? 'This is currently your strongest course match' : 'This course is a relevant match'} based on how your overall grade profile compares with ${item.course}. ${fieldExplanation}${strandLabel && item.strand_alignment ? ` It is also listed for your ${strandLabel} strand.` : ''}`;
+
+                courseAnalysis.innerHTML = `
+                    <div class="course-fit-explanation">
+                        <div class="course-analysis-header">
+                            <div><span>${index === 0 ? 'Why this is your best match' : 'Why this course matches'}</span><h3>${escapeHtml(item.course)}</h3></div>
+                            <strong>${matchScore}% match</strong>
+                        </div>
+                        <p class="course-analysis-reason course-fit-narrative"><i class="fa-solid fa-lightbulb"></i>${escapeHtml(fitExplanation)}</p>
+                        <div class="course-analysis-signals" aria-label="Why this course matches">
+                            <div class="course-analysis-signal"><span>Recommendation match</span><strong>${matchScore}%</strong><small>Final ranking score, including course relevance signals.</small></div>
+                            <div class="course-analysis-signal"><span>Grade-profile similarity</span><strong>${profileSimilarity}%</strong><small>Similarity between your grades and the course reference profile.</small></div>
+                            <div class="course-analysis-signal"><span>${strandLabel ? `${escapeHtml(strandLabel)} strand` : 'Strand'}</span><strong>${strandLabel ? (item.strand_alignment ? 'Aligned' : 'Not aligned') : 'Not provided'}</strong><small>${strandLabel ? 'Only courses tagged for the selected strand are eligible.' : 'No strand was identified; matches are ranked from your strongest grades.'}</small></div>
+                        </div>
+                        <p class="course-analysis-disclaimer">This is a relative academic match, not an admission probability or eligibility decision.</p>
+                    </div>
+                `;
+                courseAnalysis.hidden = false;
+                analytics.hidden = true;
+                activeCard = list.querySelectorAll('.recommendation-match-explanation')[index];
+                dialog.dataset.previousOverflow = document.body.style.overflow;
+                dialog.hidden = false;
+                document.body.style.overflow = 'hidden';
+                closeButton.focus();
+            }
+
             list.querySelectorAll('.recommendation-open').forEach((button, index) => {
                 button.addEventListener('click', () => renderSelectedCourse(index));
+            });
+            list.querySelectorAll('.recommendation-match-explanation').forEach((button, index) => {
+                button.addEventListener('click', () => renderMatchExplanation(index));
             });
             const gradeValues = String(academicRecord?.grades || '')
                 .split(/[\s,;|]+/)
@@ -2179,6 +2266,7 @@ function clearInputs() {
             hideProgress();
             window.latestDoclingTable = [];
             window.latestParsedSubjects = [];
+            window.latestOcrReviewSubjects = [];
             window.latestOcrReviewRequired = false;
             const panel = document.getElementById('ocr-review-panel');
             const form = document.getElementById('ocr-review-form');
@@ -2355,19 +2443,83 @@ function clearInputs() {
             function initialReviewRows(){
                 const subjectLines = String(record.subjects || '').split(/\r?\n/).map(value => value.trim()).filter(Boolean);
                 const gradeValues = String(record.grades || '').split(/[\s,;|]+/).map(value => value.trim()).filter(Boolean);
-                return subjectLines.map((line, index) => {
+                const reviewSubjects = Array.isArray(record.reviewSubjects) ? record.reviewSubjects : [];
+                const normalizeSubject = value => String(value || '')
+                    .replace(/^\s*\d{3,6}\s+[A-Za-z0-9]{1,10}\s+/, '')
+                    .toLowerCase()
+                    .replace(/[^a-z0-9]+/g, ' ')
+                    .trim();
+                const matchedReviewIndexes = new Set();
+                const rows = subjectLines.map((line, index) => {
                     const combined = line.match(/^(.+?)\s*[-:|]\s*(\d{1,3}(?:\.\d+)?)\s*$/);
+                    const subject = combined ? combined[1].trim() : line;
+                    const grade = combined ? combined[2] : (gradeValues[index] || '');
+                    const normalizedSubject = normalizeSubject(subject);
+                    const review = reviewSubjects.find((item, reviewIndex) => {
+                        const normalizedReviewSubject = normalizeSubject(item.subject_name);
+                        const sameSubject = normalizedReviewSubject === normalizedSubject
+                            || normalizedReviewSubject.startsWith(`${normalizedSubject} `)
+                            || normalizedSubject.startsWith(`${normalizedReviewSubject} `);
+                        const sameGrade = item.grade === null || item.grade === undefined || !grade || Number(item.grade) === Number(grade);
+                        if(sameSubject && sameGrade) matchedReviewIndexes.add(reviewIndex);
+                        return sameSubject && sameGrade;
+                    });
                     return {
-                        subject: combined ? combined[1].trim() : line,
-                        grade: combined ? combined[2] : (gradeValues[index] || ''),
+                        subject,
+                        grade,
+                        needsReview: Boolean(review),
+                        reviewReason: review?.reason || review?.errors?.[0] || 'OCR marked this subject grade for review.',
                     };
                 });
+                const knownSubjectNames = new Set(rows.map(row => normalizeSubject(row.subject)).filter(Boolean));
+                const appendedReviewSubjects = new Set();
+                const missingReviewRows = reviewSubjects
+                    .filter((item, reviewIndex) => item?.needs_review && item.subject_name && !matchedReviewIndexes.has(reviewIndex))
+                    .filter(item => {
+                        const key = normalizeSubject(item.subject_name);
+                        if(appendedReviewSubjects.has(key)) return false;
+                        appendedReviewSubjects.add(key);
+                        return true;
+                    })
+                    .map(item => ({
+                        subject: item.subject_name,
+                        grade: item.grade === null || item.grade === undefined ? '' : String(item.grade),
+                        needsReview: true,
+                        reviewReason: item.reason || item.errors?.[0] || 'OCR marked this subject grade for review.',
+                    }));
+                missingReviewRows.forEach(row => knownSubjectNames.add(normalizeSubject(row.subject)));
+                const mergedTableReviewRows = [];
+                const rawRows = Array.isArray(record.rawTable) ? record.rawTable : [];
+                const courseCodePattern = /\b\d{3,6}\s+[A-Z0-9]{2,8}\b/gi;
+                for(const rawRow of rawRows){
+                    for(const cell of Array.isArray(rawRow?.cells) ? rawRow.cells : []){
+                        const text = String(cell?.text || '').replace(/\s+/g, ' ').trim();
+                        const courseCodes = [...text.matchAll(courseCodePattern)];
+                        if(courseCodes.length < 2) continue;
+                        for(let index = 0; index < courseCodes.length - 1; index++){
+                            const start = courseCodes[index].index + courseCodes[index][0].length;
+                            const end = courseCodes[index + 1].index;
+                            const subject = text.slice(start, end).trim();
+                            const normalizedSubject = normalizeSubject(subject);
+                            if(!subject || !/[a-z]{3}/i.test(subject) || knownSubjectNames.has(normalizedSubject)) continue;
+                            knownSubjectNames.add(normalizedSubject);
+                            mergedTableReviewRows.push({
+                                subject,
+                                grade: '',
+                                needsReview: true,
+                                reviewReason: 'This subject appeared in a merged report-card row, but its grade could not be matched. Verify it against the report card.',
+                            });
+                        }
+                    }
+                }
+                return [...rows, ...missingReviewRows, ...mergedTableReviewRows];
             }
 
             function reviewRows(){
                 return [...document.querySelectorAll('.review-subject-row')].map(row => ({
                     subject: row.querySelector('.review-subject-input')?.value.trim() || '',
                     grade: row.querySelector('.review-grade-input')?.value.trim() || '',
+                    needsReview: row.dataset.needsReview === 'true',
                 }));
             }
 
@@ -2384,7 +2536,7 @@ function clearInputs() {
                 if(output) output.textContent = average === null ? 'N/A' : average.toFixed(2);
             }
 
-            function addReviewRow(subject = '', grade = ''){
+            function addReviewRow(subject = '', grade = '', review = null){
                 const body = document.getElementById('review-subject-body');
                 if(!body) return;
                 const row = document.createElement('tr');
@@ -2394,6 +2546,14 @@ function clearInputs() {
                     <td><input class="review-grade-input" type="number" aria-label="Grade" value="${String(grade).replace(/"/g, '&quot;')}" min="0" max="100" step="0.01" placeholder="Grade"></td>
                     <td><button class="review-remove-row" type="button" aria-label="Remove subject row" title="Remove row"><i class="fa-solid fa-xmark"></i></button></td>
                 `;
+                if(review?.needsReview){
+                    row.dataset.needsReview = 'true';
+                    row.classList.add('review-subject-row-flagged');
+                    const notice = document.createElement('small');
+                    notice.className = 'review-subject-flag';
+                    notice.textContent = `Needs review: ${review.reviewReason}`;
+                    row.querySelector('td')?.appendChild(notice);
+                }
                 row.querySelectorAll('input').forEach(inputElement => inputElement.addEventListener('input', () => {
                     updateReviewAverage();
                     updateReviewWarnings();
@@ -2411,7 +2571,9 @@ function clearInputs() {
                 const grades = rows.map(row => Number.parseFloat(row.grade)).filter(Number.isFinite);
                 const subjectLines = rows.map(row => row.subject).filter(Boolean);
                 const warnings = [];
-                if(window.latestOcrReviewRequired) warnings.push('OCR marked one or more extracted rows for review.');
+                const flaggedSubjects = [...new Set(rows.filter(row => row.needsReview).map(row => row.subject).filter(Boolean))];
+                if(flaggedSubjects.length) warnings.push(`OCR marked these subjects for review: ${flaggedSubjects.join(', ')}.`);
+                else if(window.latestOcrReviewRequired) warnings.push('OCR needs review but did not identify a specific subject. Compare each extracted row with the report card.');
                 if(!subjectLines.length) warnings.push('No subject names were detected.');
                 if(!grades.length) warnings.push('No numeric grades were detected.');
                 const incompleteRows = rows.filter(row => !row.subject || !row.grade);
@@ -2457,7 +2619,7 @@ function clearInputs() {
             const saveBtn = document.getElementById('save-reviewed-record');
             const discardBtn = document.getElementById('discard-reviewed-record');
             const rows = initialReviewRows();
-            (rows.length ? rows : [{subject:'', grade:''}]).forEach(row => addReviewRow(row.subject, row.grade));
+            (rows.length ? rows : [{subject:'', grade:''}]).forEach(row => addReviewRow(row.subject, row.grade, row));
             document.getElementById('add-review-row')?.addEventListener('click', () => {
                 addReviewRow();
                 document.querySelector('.review-subject-row:last-child .review-subject-input')?.focus();
@@ -2489,7 +2651,16 @@ function clearInputs() {
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify(payload)
                     });
-                    const data = await response.json();
+                    const responseText = await response.text();
+                    let data;
+                    try {
+                        data = responseText ? JSON.parse(responseText) : {};
+                    } catch {
+                        throw new Error(`The server returned an unreadable response (HTTP ${response.status}). Check the server logs.`);
+                    }
+                    if(!response.ok){
+                        throw new Error((data && data.message) || `Request failed (HTTP ${response.status}).`);
+                    }
                     if(data && data.success){
                         setProgress(100, isGuest ? 'Recommendations ready.' : 'Report card saved and recommendations ready.');
                         renderInlineRecommendations(data.recommendation, payload, data.comparisons);
@@ -2589,6 +2760,7 @@ function clearInputs() {
                 let combinedIdentity = savedIdentity;
                 window.latestDoclingTable = [];
                 window.latestStudentMetadata = {...savedIdentity};
+                window.latestOcrReviewSubjects = [];
                 window.latestOcrReviewRequired = false;
                 window.latestAutomaticOcrDisabled = false;
 
@@ -2652,7 +2824,9 @@ function clearInputs() {
                     renderOcrReviewPanel({
                         gwa: combinedGwaCount ? (combinedGwaTotal / combinedGwaCount).toFixed(2) : '',
                         grades: combinedGrades.join(', '),
-                        subjects: [...new Set(combinedSubjects)].join('\n')
+                        subjects: [...new Set(combinedSubjects)].join('\n'),
+                        reviewSubjects: window.latestOcrReviewSubjects,
+                        rawTable: combinedTable,
                     });
                     setProgress(100, window.latestAutomaticOcrDisabled
                         ? 'Automatic OCR is disabled. Enter the report details manually, then save.'

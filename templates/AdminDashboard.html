@@ -903,11 +903,11 @@ function renderAdminAccounts(users){
     wrap.innerHTML = '<div class="records-empty">No administrator accounts found.</div>';
     return;
   }
-  wrap.innerHTML = `<table class="table-fixed admin-students-table admin-accounts-table"><thead><tr><th>Name</th><th>Username</th><th>Role</th><th>Status</th><th>Last activity</th><th>Actions</th></tr></thead><tbody>${accounts.map(user => {
+  wrap.innerHTML = `<div class="admin-accounts-table-wrap" role="region" aria-label="Admin accounts table" tabindex="0"><table class="table-fixed admin-students-table admin-accounts-table"><thead><tr><th>Name</th><th>Username</th><th>Role</th><th>Status</th><th>Last activity</th><th>Actions</th></tr></thead><tbody>${accounts.map(user => {
     const isCurrent = String(user.id) === String(currentAdminUserId);
     const roleLabel = user.role === 'admin' ? 'Super Admin' : 'Semi Admin';
     return `<tr><td>${escapeAdminHtml(user.name || 'Unnamed admin')}${isCurrent ? '<small class="admin-current-account">You</small>' : ''}</td><td>${escapeAdminHtml(user.username || '—')}</td><td><select class="admin-role-select" data-admin-role-id="${escapeAdminHtml(user.id)}" aria-label="Role for ${escapeAdminHtml(user.name)}" ${isCurrent ? 'disabled' : ''}><option value="semi_admin" ${user.role === 'semi_admin' ? 'selected' : ''}>Semi Admin</option><option value="admin" ${user.role === 'admin' ? 'selected' : ''}>Super Admin</option></select><small class="admin-role-current">${roleLabel}</small></td><td><span class="student-status ${user.is_active ? 'is-active' : 'is-inactive'}">${user.is_active ? 'Active' : 'Deactivated'}</span></td><td>${escapeAdminHtml(user.last_login_at ? formatReportDate(user.last_login_at) : 'Never signed in')}</td><td><div class="admin-account-actions"><button class="admin-save-role" type="button" data-admin-id="${escapeAdminHtml(user.id)}" ${isCurrent ? 'disabled' : ''}>Save role</button><button class="admin-remove-account" type="button" data-admin-id="${escapeAdminHtml(user.id)}" ${isCurrent ? 'disabled' : ''}>Remove</button></div></td></tr>`;
-  }).join('')}</tbody></table>`;
+  }).join('')}</tbody></table></div>`;
   wrap.querySelectorAll('.admin-save-role').forEach(button => button.addEventListener('click', () => updateAdminRole(button.dataset.adminId, wrap)));
   wrap.querySelectorAll('.admin-remove-account').forEach(button => button.addEventListener('click', () => removeAdminAccount(button.dataset.adminId)));
 }
@@ -989,7 +989,7 @@ async function loadAdminActivity(){
     const result = await fetchJsonOrThrow('/admin/activity');
     const activity = result.activity || [];
     wrap.innerHTML = activity.length
-      ? `<table class="table-fixed admin-students-table admin-activity-table"><thead><tr><th>When</th><th>Administrator</th><th>Action</th><th>Target</th><th>Session IP</th><th>Details</th></tr></thead><tbody>${activity.map(item => `<tr data-activity-category="${getAdminActivityCategory(item.action)}"><td>${escapeAdminHtml(formatReportDate(item.created_at))}</td><td>${escapeAdminHtml(item.actor_name)}<small class="admin-current-account">${escapeAdminHtml(item.actor_email)}</small></td><td>${escapeAdminHtml(item.action.replaceAll('_', ' '))}</td><td>${escapeAdminHtml(item.target_label || '—')}</td><td>${escapeAdminHtml(item.session_ip || '—')}</td><td>${escapeAdminHtml(item.details || '—')}</td></tr>`).join('')}<tr class="admin-activity-filter-empty" hidden><td colspan="6">No activity in this category.</td></tr></tbody></table>`
+      ? `<div class="admin-activity-table-wrap" role="region" aria-label="Admin activity records" tabindex="0"><table class="table-fixed admin-students-table admin-activity-table"><thead><tr><th>When</th><th>Administrator</th><th>Action</th><th>Target</th><th>Session IP</th><th>Details</th></tr></thead><tbody>${activity.map(item => `<tr data-activity-category="${getAdminActivityCategory(item.action)}"><td>${escapeAdminHtml(formatReportDate(item.created_at))}</td><td>${escapeAdminHtml(item.actor_name)}<small class="admin-current-account">${escapeAdminHtml(item.actor_email)}</small></td><td>${escapeAdminHtml(item.action.replaceAll('_', ' '))}</td><td>${escapeAdminHtml(item.target_label || '—')}</td><td>${escapeAdminHtml(item.session_ip || '—')}</td><td>${escapeAdminHtml(item.details || '—')}</td></tr>`).join('')}<tr class="admin-activity-filter-empty" hidden><td colspan="6">No activity in this category.</td></tr></tbody></table></div>`
       : '<div class="records-empty">No admin activity recorded yet.</div>';
     filterAdminActivity();
   }catch(error){
@@ -1078,10 +1078,10 @@ function renderReportCards(){
     wrap.innerHTML = `<div class="records-empty">${adminReports.length ? 'No report cards match your search.' : 'No uploaded report cards found.'}</div>`;
     return;
   }
-  wrap.innerHTML = `<table class="table-fixed admin-students-table admin-report-table"><thead><tr><th>Uploaded</th><th>Student</th><th>Student number</th><th>OCR status</th><th>Grades</th><th>Flag</th><th></th></tr></thead><tbody>${filtered.map(report => {
+  wrap.innerHTML = `<div class="admin-report-table-wrap" role="region" aria-label="Report card records" tabindex="0"><table class="table-fixed admin-students-table admin-report-table"><thead><tr><th>Uploaded</th><th>Student</th><th>Student number</th><th>OCR status</th><th>Grades</th><th>Flag</th><th></th></tr></thead><tbody>${filtered.map(report => {
     const statusClass = report.is_flagged ? 'is-inactive' : (report.ocr_status === 'verified' ? 'is-active' : 'is-review');
     return `<tr><td>${escapeAdminHtml(formatReportDate(report.uploaded_at))}</td><td>${escapeAdminHtml(report.student_name || 'Unknown student')}</td><td>${escapeAdminHtml(report.student_number || '—')}</td><td><span class="student-status ${statusClass}">${escapeAdminHtml(reportStatusLabel(report))}</span></td><td>${report.extracted_subject_count} subjects${report.extracted_gwa ? ` · GWA ${escapeAdminHtml(report.extracted_gwa)}` : ''}</td><td>${report.is_flagged ? escapeAdminHtml(report.flag_note || 'Flagged') : '—'}</td><td><button class="report-review-open" type="button" data-report-id="${report.id}"><i class="fa-solid fa-clipboard-check" aria-hidden="true"></i><span>Review</span></button></td></tr>`;
-  }).join('')}</tbody></table>`;
+  }).join('')}</tbody></table></div>`;
   wrap.querySelectorAll('.report-review-open').forEach(button => button.addEventListener('click', () => openReportReview(button.dataset.reportId)));
 }
 

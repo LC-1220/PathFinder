@@ -22,9 +22,9 @@ FastHTML serves the website pages and templates. FastAPI provides the versioned 
       postgresql://postgres.[project-ref]:[password]@[pooler-host]:6543/postgres
 
    Apply `supabase_schema.sql` in the Supabase SQL Editor before the first run.
-   For an existing database, reapply the schema to replace the old 200-course
-   catalog with the 44 university programs. Existing student grades and profiles
-   remain in place; legacy course matches are refreshed from saved grades.
+   For an existing database, reapply the schema to replace the old recommendation
+   catalog with 44 university programs and their strand categories. The obsolete
+   course-training table is removed; student grades and profiles remain in place.
 
    python fastapi_app.py
 

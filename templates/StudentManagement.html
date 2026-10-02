@@ -12,7 +12,7 @@
 <body data-home-mode="{{ 'true' if home_mode|default(false) else 'false' }}" data-guest="{{ 'true' if is_guest|default(false) else 'false' }}">
         {% if home_mode|default(false) %}
         <header class="focus-header">
-            <a href="/home" class="focus-brand"><img src="{{ url_for('static', filename='images/PathFinder2.png') }}" alt="" width="25" height="25"><span>PathFinder</span></a>
+            <a href="/home" class="focus-brand"><img src="{{ url_for('static', filename='images/PathFinder2.png') }}" alt="" width="36" height="36"><span>PathFinder</span></a>
             <div class="focus-account">
                 <span>{{ 'Anonymous guest' if is_guest|default(false) else name }}</span>
                 <button id="profile-menu-trigger" class="focus-profile-trigger" type="button" aria-label="Open account menu" aria-haspopup="true" aria-expanded="false">
@@ -211,7 +211,7 @@
                     <section id="inline-recommendations" class="inline-recommendations" style="display:none;" aria-live="polite">
                         <div class="recommendation-heading">
                             <span>Based on your grades</span>
-                            <h2>Your top 3 course matches</h2>
+                            <h2 id="recommendation-results-title">Your top 3 course matches</h2>
                         </div>
                         <div id="inline-recommendation-list" class="inline-recommendation-list"></div>
                         <div id="recommendation-dialog" class="recommendation-dialog" role="dialog" aria-modal="true" aria-label="Course recommendation details" hidden>
