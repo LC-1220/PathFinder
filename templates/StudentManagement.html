@@ -12,7 +12,7 @@
 <body data-home-mode="{{ 'true' if home_mode|default(false) else 'false' }}" data-guest="{{ 'true' if is_guest|default(false) else 'false' }}">
         {% if home_mode|default(false) %}
         <header class="focus-header">
-            <a href="/home" class="focus-brand"><i class="fa-brands fa-google-scholar"></i><span>PathFinder</span></a>
+            <a href="/home" class="focus-brand"><img src="{{ url_for('static', filename='images/PathFinder2.png') }}" alt="" width="25" height="25"><span>PathFinder</span></a>
             <div class="focus-account">
                 <span>{{ 'Anonymous guest' if is_guest|default(false) else name }}</span>
                 <button id="profile-menu-trigger" class="focus-profile-trigger" type="button" aria-label="Open account menu" aria-haspopup="true" aria-expanded="false">
@@ -38,7 +38,7 @@
        <ul>
             <li>
                 <a href="/home" class="logo">
-                    <span class="picture" ><i class="fa-brands fa-google-scholar" ></i></span>
+                    <span class="picture"><img src="{{ url_for('static', filename='images/PathFinder2.png') }}" alt="" width="46" height="46"></span>
                     <span class="textlogo">PathFinder</span>
                 </a>
             </li>

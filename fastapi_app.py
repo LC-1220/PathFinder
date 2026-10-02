@@ -352,6 +352,7 @@ def _normalize_grade(value):
 def _average(values):
     return sum(values) / len(values) if values else 0.0
 
+
 #Subject Scores Extraction from Text(using docling OCR)
 def _extract_subject_scores(subjects_text):
     score_map = {name: [] for name in CATEGORY_NAMES}
@@ -428,6 +429,134 @@ def _build_feature_vector(subjects_text):
         _average(scores["business"]),
         _average(scores["social"]),
     ]
+
+
+def _extract_subject_field_scores(subjects_text):
+    fields = {
+        "quantitative": [],
+        "physical_sciences": [],
+        "life_sciences": [],
+        "health_studies": [],
+        "physical_education": [],
+        "environmental_sciences": [],
+        "technology": [],
+        "communication": [],
+        "business": [],
+        "social_humanities": [],
+        "arts_humanities": [],
+    }
+    source_text = str(subjects_text or "")
+    cleaned_text = _clean_subjects_for_recommendation(source_text)
+    lines = list(dict.fromkeys(cleaned_text.splitlines() + source_text.splitlines()))
+    field_terms = {
+        "quantitative": ("math", "algebra", "calculus", "statistics", "trigonometry", "geometry", "probability"),
+        "physical_sciences": ("physics", "chemistry", "earth science", "physical science", "geology", "astronomy"),
+        "life_sciences": ("biology", "biological", "life science", "anatomy", "physiology", "botany", "zoology", "microbiology", "biochemistry"),
+        "health_studies": ("health", "nursing", "medical", "patient care", "first aid", "nutrition"),
+        "environmental_sciences": ("environment", "agriculture", "fisheries", "ecology", "ecosystem", "forestry", "crop", "soil"),
+        "technology": ("technology", "computer", "programming", "coding", "software", "ict", "database", "network", "engineering", "electronics", "robotics"),
+        "communication": ("english", "filipino", "language", "communication", "speech", "writing", "literature", "reading", "oral"),
+        "business": ("business", "accounting", "management", "marketing", "economics", "entrepreneur", "finance", "tourism", "hospitality"),
+        "social_humanities": ("history", "sociology", "psychology", "political", "social", "criminology", "education", "philosophy", "governance", "culture", "humanities", "religion"),
+        "arts_humanities": ("art", "design", "music", "media", "creative", "visual", "performing"),
+    }
+    seen = set()
+    for raw_line in lines:
+        line = re.sub(r"\s+", " ", raw_line.strip())
+        match = re.match(
+            r"^(?P<label>.*?)(?:\s*[-–:|/]\s*|\s+)(?P<grade>\d{1,3}(?:\.\d+)?)\s*(?:passed|failed|remarks|inc|withdrawn|conditional)?\s*$",
+            line,
+            flags=re.IGNORECASE,
+        )
+        if not match:
+            continue
+        label = match.group("label").strip(" -:|/()[]{}").lower()
+        grade = _normalize_grade(match.group("grade"))
+        key = (label, grade)
+        if not label or grade <= 0 or key in seen:
+            continue
+        seen.add(key)
+        matched_fields = []
+        for field, terms in field_terms.items():
+            if any(term in label for term in terms):
+                matched_fields.append(field)
+        if "physical education" in label:
+            matched_fields = [field for field in matched_fields if field != "health_studies"]
+            matched_fields.append("physical_education")
+        for field in matched_fields:
+            fields[field].append(grade)
+    return fields
+
+
+def _course_subject_field_evidence(category, field_scores):
+    field_labels = {
+        "quantitative": "Math and quantitative subjects",
+        "physical_sciences": "Physics and physical sciences",
+        "life_sciences": "Biology and life sciences",
+        "health_studies": "Health studies",
+        "physical_education": "Physical education and fitness",
+        "environmental_sciences": "Environmental sciences",
+        "technology": "Technology subjects",
+        "communication": "Communication and languages",
+        "business": "Business subjects",
+        "social_humanities": "Social sciences and humanities",
+        "arts_humanities": "Arts and creative subjects",
+    }
+    field_priorities = {
+        "Engineering": {
+            "quantitative": "major", "physical_sciences": "major",
+            "technology": "supporting", "environmental_sciences": "supporting",
+        },
+        "Allied Health": {
+            "life_sciences": "major", "health_studies": "major", "physical_sciences": "major",
+            "communication": "supporting", "physical_education": "supporting",
+        },
+        "Agriculture": {
+            "life_sciences": "major", "environmental_sciences": "major",
+            "physical_sciences": "supporting", "quantitative": "supporting",
+        },
+        "Computer Studies": {
+            "technology": "major", "quantitative": "major", "communication": "supporting",
+        },
+        "Business & Management": {
+            "business": "major", "quantitative": "supporting", "communication": "supporting",
+        },
+        "Social Sciences & Education": {
+            "social_humanities": "major", "communication": "major",
+            "physical_education": "supporting",
+        },
+        "Hospitality & Tourism": {
+            "business": "major", "communication": "major", "arts_humanities": "supporting",
+        },
+        "Public Service & Governance": {
+            "social_humanities": "major", "communication": "supporting", "business": "supporting",
+        },
+        "Arts & Design": {
+            "arts_humanities": "major", "technology": "major", "communication": "supporting",
+        },
+        "Sports & Physical Education": {
+            "physical_education": "major", "life_sciences": "supporting",
+            "health_studies": "supporting", "communication": "supporting",
+        },
+    }.get(category, {})
+    return [
+        {
+            "field": field_labels[field],
+            "grade": round(_average(field_scores[field]), 2),
+            "priority": priority,
+        }
+        for field, priority in field_priorities.items()
+        if field_scores.get(field)
+    ]
+
+
+def _course_subject_field_fit(category, field_scores):
+    evidence = _course_subject_field_evidence(category, field_scores)
+    if not evidence:
+        return None
+    weights = {"major": 3.0, "supporting": 1.0}
+    total_weight = sum(weights[item["priority"]] for item in evidence)
+    return sum(item["grade"] * weights[item["priority"]] for item in evidence) / total_weight
 
 #Cleaning Subjects for Recommendation (removes instructor names and irrelevant text)
 def _clean_subjects_for_recommendation(subjects_text):
@@ -688,6 +817,22 @@ def _weighted_vector_distance(a, b):
     )
 
 
+def _observed_weighted_distance(subject_scores, course_features):
+    weighted_squared_error = 0.0
+    observed_weight = 0.0
+    for index, category in enumerate(CATEGORY_NAMES):
+        grades = subject_scores.get(category, [])
+        if not grades:
+            continue
+        weight = CORE_FEATURE_WEIGHTS[index]
+        difference = _average(grades) - course_features[index]
+        weighted_squared_error += weight * difference ** 2
+        observed_weight += weight
+    if not observed_weight:
+        return None
+    return math.sqrt(weighted_squared_error / observed_weight)
+
+
 #Core Grade Fit Calculation (compares student's core feature grades with course core features)
 def _core_grade_fit(student_features, course_features):
     observed = [value for value in student_features[:3] if value > 0]
@@ -707,6 +852,8 @@ def categorize_course(course_name, description=""):
         return "Allied Health"
     if any(tok in name for tok in ("computer", "information technology", "software", "ict", "bsit", "bscs", "data", "systems", "programming", "digital")) or any(tok in desc for tok in ("computer", "software", "programming", "information technology", "ict", "systems", "database", "digital")):
         return "Computer Studies"
+    if any(tok in name for tok in ("sports", "sport science", "physical education", "athletic", "fitness", "exercise", "kinesiology")) or any(tok in desc for tok in ("sports science", "athletic conditioning", "physical education", "fitness instruction", "kinesiology")):
+        return "Sports & Physical Education"
     if any(tok in name for tok in ("engineer", "civil", "mechanical", "electrical", "chemical", "architecture", "construction")) or any(tok in desc for tok in ("engineering", "infrastructure", "construction", "architecture")):
         return "Engineering"
     if any(tok in name for tok in ("agriculture", "fisheries", "farm", "crop", "soil", "environmental science", "ecosystem", "sustainability", "forest")) or any(tok in desc for tok in ("agriculture", "fisheries", "farm", "crop", "soil", "environmental science", "ecosystem", "sustainability", "forest")):
@@ -803,6 +950,18 @@ def _sanitize_recommendations(payload):
             "confidence": item.get("confidence", 0),
             "core_grade_fit": item.get("core_grade_fit", 0),
             "strand_grade_based": bool(item.get("strand_grade_based", False)),
+            "field_fit": item.get("field_fit"),
+            "subject_field_evidence": [
+                {"field": entry["field"], "grade": entry["grade"], "priority": entry.get("priority", "supporting")}
+                for entry in item.get("subject_field_evidence", [])
+                if isinstance(entry, dict)
+                and isinstance(entry.get("field"), str)
+                and isinstance(entry.get("grade"), (int, float))
+                and 0 <= entry["grade"] <= 100
+                and entry.get("priority", "supporting") in {"major", "supporting"}
+            ],
+            "strand_alignment": bool(item.get("strand_alignment", False)),
+            "strand_label": item.get("strand_label") or "",
         })
     return valid
 
@@ -824,53 +983,13 @@ def _build_course_model():
 # Recommend Courses Based on Student's Academic Profile (uses the nearest neighbor model and feature analysis to suggest suitable courses)
 def recommend_course(subjects_text, current_course="", strand=""):
     training_data = _course_training_data()
+    subject_scores = _extract_subject_scores(subjects_text)
     features = _build_feature_vector(subjects_text)
-    if not any(feature > 0 for feature in features):
+    if not any(subject_scores.values()):
         return []
 
     strongest = _infer_strengths_from_features(features)
-    reason = "Your grades show a balanced academic profile, which fits the most similar historical pattern." if not strongest else f"Your strongest areas are {', '.join(strongest)}."
-    
-    # Build the course recommendation model and generate recommendations based on the student's features
-    model = _build_course_model()
-    recommendations = []
-    if model is not None:
-        try:
-            distances, indices = model.kneighbors(np.asarray([_weighted_features(features)], dtype=float), n_neighbors=min(8, len(training_data)))
-            for distance, index in zip(distances[0], indices[0]):
-                sample = training_data[int(index)]
-                category = categorize_course(sample["course"], sample.get("description", ""))
-                confidence = max(1.0, 100.0 - (distance * 10.0))
-                recommendations.append({
-                    "course": sample["course"],
-                    "description": sample.get("description", ""),
-                    "reason": _course_match_reason(sample["course"], category, strongest, strand),
-                    "category": category,
-                    "confidence": round(confidence, 2),
-                    "core_grade_fit": round(_core_grade_fit(features, sample["features"]), 2),
-                })
-        except Exception:
-            pass
-    # If an exception occurs during model-based recommendation, it is silently ignored.
-    if not recommendations:
-        distances = []
-        for sample in training_data:
-            distance = _weighted_vector_distance(features, sample["features"])
-            distances.append((distance, sample["course"], sample.get("description", ""), sample["features"]))
-        # Sort the distances to find the nearest courses
-        nearest = sorted(distances, key=lambda item: item[0])[:8]
-        for distance, course_name, description, course_features in nearest:
-            category = categorize_course(course_name, description)
-            confidence = max(1.0, 100.0 - distance)
-            recommendations.append({
-                "course": course_name,
-                "description": description,
-                "reason": _course_match_reason(course_name, category, strongest, strand),
-                "category": category,
-                "confidence": round(confidence, 2),
-                "core_grade_fit": round(_core_grade_fit(features, course_features), 2),
-            })
-    # Group the recommended courses by strand and adjust confidence based on strand fit
+    field_scores = _extract_subject_field_scores(subjects_text)
     strand_groups = {
         "stem": {"Engineering", "Allied Health"},
         "ict": {"Computer Studies"},
@@ -878,6 +997,8 @@ def recommend_course(subjects_text, current_course="", strand=""):
         "humss": {"Social Sciences & Education", "Public Service & Governance", "Arts & Design"},
         "tvl": {"Computer Studies", "Allied Health", "Hospitality & Tourism", "Agriculture"},
         "gas": {"Social Sciences & Education", "Business & Management", "Hospitality & Tourism", "Arts & Design"},
+        "sports": {"Sports & Physical Education"},
+        "arts_design": {"Arts & Design"},
     }
     strand_key = (strand or "").strip().lower()
     preferred_groups = strand_groups.get(strand_key, set())
@@ -888,69 +1009,68 @@ def recommend_course(subjects_text, current_course="", strand=""):
         "humss": ("psychology", "education", "communication", "political", "criminology", "public administration", "social", "legal", "tourism"),
         "tvl": ("technology", "computer", "nursing", "medical", "pharmacy", "hospitality", "tourism", "agriculture", "fisheries"),
         "gas": ("communication", "business", "education", "hospitality", "tourism", "arts", "psychology"),
+        "sports": ("sports", "sport science", "physical education", "athletic", "fitness", "exercise", "kinesiology"),
+        "arts_design": ("arts", "design", "creative", "media", "architecture", "multimedia", "visual"),
     }
     preferred_terms = strand_course_terms.get(strand_key, ())
+    strand_is_active = strand_key in strand_groups
+    strand_is_supported = bool(preferred_groups or preferred_terms)
 
     def matches_strand(item):
         course_text = f"{item['course']} {item.get('description', '')}".lower()
         return (
             (preferred_groups and item["category"] in preferred_groups)
-            or (preferred_terms and any(term in course_text for term in preferred_terms))
+            or (preferred_terms and any(re.search(rf"\b{re.escape(term)}\b", course_text) for term in preferred_terms))
         )
 
-    # Ensure the final results contain a strand-aligned course even when it is
-    # outside the nearest-neighbor sample selected by the grade profile.
-    if strand_key and preferred_groups and not any(matches_strand(item) for item in recommendations):
-        strand_candidates = [sample for sample in training_data if matches_strand({
+    recommendations = []
+    for sample in training_data:
+        distance = _observed_weighted_distance(subject_scores, sample["features"])
+        if distance is None:
+            continue
+        category = categorize_course(sample["course"], sample.get("description", ""))
+        strand_alignment = bool(strand_is_supported and matches_strand({
             "course": sample["course"],
             "description": sample.get("description", ""),
-            "category": categorize_course(sample["course"], sample.get("description", "")),
-        })]
-        if strand_candidates:
-            sample = min(strand_candidates, key=lambda item: _weighted_vector_distance(features, item["features"]))
-            category = categorize_course(sample["course"], sample.get("description", ""))
-            distance = _weighted_vector_distance(features, sample["features"])
-            recommendations.append({
-                "course": sample["course"],
-                "description": sample.get("description", ""),
-                "reason": _course_match_reason(sample["course"], category, strongest, strand),
-                "category": category,
-                "confidence": round(max(1.0, 100.0 - distance), 2),
-                "core_grade_fit": round(_core_grade_fit(features, sample["features"]), 2),
-            })
+            "category": category,
+        }))
+        if strand_is_active and (not strand_is_supported or not strand_alignment):
+            continue
+        field_evidence = _course_subject_field_evidence(category, field_scores)
+        field_fit = _course_subject_field_fit(category, field_scores)
+        grade_similarity = max(0.0, 100.0 - distance)
+        confidence = grade_similarity
+        reason = _course_match_reason(sample["course"], category, strongest, strand)
+        if field_fit is not None:
+            confidence = confidence * 0.8 + field_fit * 0.2
+            reason += f" Your grades in related subject fields average {field_fit:.1f}."
+        item = {
+            "course": sample["course"],
+            "description": sample.get("description", ""),
+            "reason": reason,
+            "category": category,
+            "confidence": round(grade_similarity, 2),
+            "core_grade_fit": round(_core_grade_fit(features, sample["features"]), 2),
+            "field_fit": round(field_fit, 2) if field_fit is not None else None,
+            "subject_field_evidence": field_evidence,
+            "strand_alignment": strand_alignment,
+            "strand_label": strand.upper() if strand else "",
+            "_ranking_score": confidence,
+        }
+        if item["strand_alignment"]:
+            item["reason"] += f" It aligns with the {strand.upper()} strand."
+        recommendations.append(item)
 
-    for item in recommendations:
-        course_text = f"{item['course']} {item.get('description', '')}".lower()
-        strand_fit = 0
-        if preferred_groups and item["category"] in preferred_groups:
-            item["confidence"] += 12
-            strand_fit = 1
-            item["reason"] += f" It also aligns with the {strand.upper()} strand."
-        if preferred_terms and any(term in course_text for term in preferred_terms):
-            item["confidence"] += 8
-            strand_fit = 1
-            if "aligns with" not in item["reason"]:
-                item["reason"] += f" It is closely related to the {strand.upper()} strand."
-        item["strand_grade_score"] = round(
-            (item.get("core_grade_fit", 0) * 0.7) + (100.0 if strand_fit else 0.0) * 0.3,
-            2,
-        )
-        item["confidence"] += item["core_grade_fit"] * 0.15
-        item["confidence"] = round(min(100.0, item["confidence"]), 2)
-    recommendations = sorted(
-        recommendations,
-        key=lambda item: (item.get("strand_grade_score", 0), item["confidence"]),
+    recommendations.sort(
+        key=lambda item: (item["_ranking_score"], item["confidence"]),
         reverse=True,
     )
-    if strand_key and preferred_groups:
-        strand_match = next((item for item in recommendations if matches_strand(item)), None)
-        if strand_match and not any(matches_strand(item) for item in recommendations[:5]):
-            recommendations = recommendations[:4] + [strand_match]
-            strand_match["strand_grade_based"] = True
 
-    if recommendations and strand:
+    if recommendations and strand_is_active:
         recommendations[0]["strand_grade_based"] = True
-        recommendations[0]["reason"] += f" This top match combines your {strand.upper()} strand with your Math, Science, and English grade profile."
+        recommendations[0]["reason"] += f" This result considers the {strand.upper()} strand and your recognized subject-category grades."
+    for item in recommendations:
+        item.pop("_ranking_score", None)
     return recommendations[:5]
 
 
@@ -1016,10 +1136,10 @@ def _build_student_performance_analytics(course_name, subjects_text):
 
     subject_breakdown = []
     for subject in CATEGORY_NAMES:
-        student_value = round(_average(student_scores.get(subject, [])), 2) if student_scores.get(subject) else 0.0
+        student_value = round(_average(student_scores.get(subject, [])), 2) if student_scores.get(subject) else None
         course_value = course_profile["by_subject"].get(subject, 0.0)
-        delta = round(student_value - course_value, 2)
-        status = "above average" if delta >= 0 else "below average"
+        delta = round(student_value - course_value, 2) if student_value is not None else None
+        status = "no grade available" if delta is None else "above reference" if delta >= 0 else "below reference"
         subject_breakdown.append({
             "subject": subject,
             "student": student_value,
@@ -1028,9 +1148,10 @@ def _build_student_performance_analytics(course_name, subjects_text):
             "status": status,
         })
 
-    student_overall = round(_average([item["student"] for item in subject_breakdown]), 2) if subject_breakdown else 0.0
-    course_overall = course_profile["overall_average"]
-    overall_gap = round(student_overall - course_overall, 2)
+    observed_comparisons = [item for item in subject_breakdown if item["student"] is not None]
+    student_overall = round(_average([item["student"] for item in observed_comparisons]), 2) if observed_comparisons else None
+    course_overall = round(_average([item["course"] for item in observed_comparisons]), 2) if observed_comparisons else None
+    overall_gap = round(student_overall - course_overall, 2) if student_overall is not None and course_overall is not None else None
     comparison = [
         {
             "subject": item["subject"],
@@ -1042,11 +1163,12 @@ def _build_student_performance_analytics(course_name, subjects_text):
         for item in subject_breakdown
     ]
 
-    narrative = (
-        "You are above the recommended course average overall."
-        if overall_gap >= 0
-        else "You are below the recommended course average overall."
-    )
+    if overall_gap is None:
+        narrative = "There are no recognized subject grades to compare with this course reference profile."
+    else:
+        narrative = (
+            f"Across subjects with grades, your average is {student_overall:.2f}; the course reference is {course_overall:.2f}."
+        )
 
     return {
         "selected_course": selected_course,
@@ -1057,6 +1179,7 @@ def _build_student_performance_analytics(course_name, subjects_text):
         "narrative": narrative,
         "comparison": comparison,
         "subject_breakdown": subject_breakdown,
+        "compared_subject_count": len(observed_comparisons),
     }
 
 # Retrieve the latest profile of a user from the database

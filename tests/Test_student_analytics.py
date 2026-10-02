@@ -245,6 +245,123 @@ def test_recommend_course_returns_real_courses_for_broader_subject_patterns():
     assert all(item["course"] in {name for name, _ in app.UNIVERSITY_COURSES} for item in recommendations)
 
 
+def test_subject_field_fit_prioritizes_biology_for_health_courses(monkeypatch):
+    profile = [85, 85, 0, 0, 0, 0]
+    monkeypatch.setattr(app, "_course_training_data", lambda: [
+        {"course": "BS in Civil Engineering", "features": profile, "description": "Infrastructure engineering"},
+        {"course": "BS in Nursing", "features": profile, "description": "Patient-focused healthcare"},
+    ])
+    monkeypatch.setattr(app, "_COURSE_TRAINING_DATA_CACHE", None)
+
+    recommendations = recommend_course("Biology - 100\nPhysics - 70\nMathematics - 85", strand="STEM")
+
+    assert recommendations[0]["course"] == "BS in Nursing"
+    assert recommendations[0]["confidence"] == recommendations[1]["confidence"]
+    assert "related subject fields" in recommendations[0]["reason"]
+    saved_payload = app._sanitize_recommendations([recommendations[0]])[0]
+    assert saved_payload["field_fit"] is not None
+    assert saved_payload["subject_field_evidence"]
+    assert saved_payload["strand_alignment"] is True
+    assert saved_payload["strand_label"] == "STEM"
+    assert any(entry["priority"] == "major" for entry in saved_payload["subject_field_evidence"])
+
+
+def test_major_subject_fields_outweigh_supporting_fields():
+    field_scores = {field: [] for field in app._extract_subject_field_scores("")}
+    field_scores["life_sciences"] = [60]
+    field_scores["health_studies"] = [80]
+    field_scores["physical_sciences"] = [70]
+    field_scores["communication"] = [100]
+
+    evidence = app._course_subject_field_evidence("Allied Health", field_scores)
+
+    assert app._course_subject_field_fit("Allied Health", field_scores) == 73
+    assert all(entry["priority"] == "major" for entry in evidence if entry["field"] != "Communication and languages")
+    assert next(entry for entry in evidence if entry["field"] == "Communication and languages")["priority"] == "supporting"
+
+
+def test_physical_education_is_supporting_not_core_nursing_evidence():
+    field_scores = app._extract_subject_field_scores("Physical Education and Health 3 - 96")
+    evidence = app._course_subject_field_evidence("Allied Health", field_scores)
+
+    assert field_scores["physical_education"] == [96]
+    assert field_scores["health_studies"] == []
+    assert next(entry for entry in evidence if entry["field"] == "Physical education and fitness")["priority"] == "supporting"
+
+
+def test_known_strands_filter_out_non_aligned_courses(monkeypatch):
+    profile = [85, 85, 85, 85, 85, 85]
+    training_data = [
+        {"course": "BS in Civil Engineering", "features": profile, "description": "Infrastructure engineering"},
+        {"course": "BS in Business Administration", "features": profile, "description": "Business operations"},
+        {"course": "Bachelor of Physical Education", "features": profile, "description": "Physical education and sports instruction"},
+        {"course": "Bachelor of Arts in Multimedia Arts", "features": profile, "description": "Digital media and creative design"},
+    ]
+    monkeypatch.setattr(app, "_course_training_data", lambda: training_data)
+    subjects = "Mathematics - 85\nEnglish - 85"
+
+    for strand, expected in [
+        ("STEM", "BS in Civil Engineering"),
+        ("SPORTS", "Bachelor of Physical Education"),
+        ("ARTS_DESIGN", "Bachelor of Arts in Multimedia Arts"),
+    ]:
+        recommendations = recommend_course(subjects, strand=strand)
+        assert recommendations
+        assert all(item["strand_alignment"] for item in recommendations)
+        assert recommendations[0]["course"] == expected
+
+    sports_fields = app._extract_subject_field_scores("Physical Education and Health 3 - 96")
+    sports_evidence = app._course_subject_field_evidence("Sports & Physical Education", sports_fields)
+    assert app.categorize_course("Bachelor of Physical Education") == "Sports & Physical Education"
+    assert sports_evidence[0] == {
+        "field": "Physical education and fitness", "grade": 96.0, "priority": "major"
+    }
+
+
+def test_unrecognized_strand_does_not_filter_recommendations(monkeypatch):
+    monkeypatch.setattr(app, "_course_training_data", lambda: [{
+        "course": "BS in Mechanical Engineering",
+        "features": [85, 85, 85, 85, 85, 85],
+        "description": "Engineering course",
+    }])
+
+    recommendations = recommend_course("Mathematics - 85", strand="Unrecognized track")
+
+    assert len(recommendations) == 1
+    assert recommendations[0]["strand_alignment"] is False
+
+
+def test_observed_weighted_distance_ignores_missing_categories():
+    subject_scores = {name: [] for name in app.CATEGORY_NAMES}
+    subject_scores["math"] = [90]
+    first_profile = [90, 0, 0, 0, 0, 0]
+    second_profile = [90, 100, 100, 100, 100, 100]
+
+    assert app._observed_weighted_distance(subject_scores, first_profile) == 0
+    assert app._observed_weighted_distance(subject_scores, second_profile) == 0
+
+
+def test_course_comparison_excludes_categories_without_student_grades(monkeypatch):
+    monkeypatch.setattr(app, "_course_training_data", lambda: [{
+        "course": "BS in Mechanical Engineering",
+        "features": [80, 90, 70, 60, 50, 40],
+        "description": "Machines and manufacturing systems",
+    }])
+
+    analytics = app._build_student_performance_analytics("BS in Mechanical Engineering", "Mathematics - 90")
+
+    math_row = next(row for row in analytics["comparison"] if row["subject"] == "math")
+    science_row = next(row for row in analytics["comparison"] if row["subject"] == "science")
+    assert analytics["student_overall"] == 90
+    assert analytics["course_average"] == 80
+    assert analytics["overall_gap"] == 10
+    assert analytics["compared_subject_count"] == 1
+    assert math_row["difference"] == 10
+    assert science_row["student"] is None
+    assert science_row["difference"] is None
+    assert science_row["status"] == "no grade available"
+
+
 def test_build_student_performance_analytics_rejects_placeholder_course_names():
     analytics = _build_student_performance_analytics(
         "General Education",
@@ -273,7 +390,8 @@ def test_university_catalog_uses_legacy_profiles_and_migrated_rows(monkeypatch):
     assert next(item for item in catalog if item["course"] == "Aircraft Maintenance Technology")["description"] == app.COURSE_DESCRIPTION_OVERRIDES["Aircraft Maintenance Technology"]
     assert app._sanitize_recommendations([{"course": "Software Engineering"}, {"course": expected[0]}]) == [
         {"course": expected[0], "description": "", "reason": "", "category": app.categorize_course(expected[0]),
-         "confidence": 0, "core_grade_fit": 0, "strand_grade_based": False}
+            "confidence": 0, "core_grade_fit": 0, "strand_grade_based": False, "field_fit": None,
+            "subject_field_evidence": [], "strand_alignment": False, "strand_label": ""}
     ]
 
 

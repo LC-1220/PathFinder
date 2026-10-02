@@ -1957,12 +1957,29 @@ function clearInputs() {
                 const match = line.match(/^(.+?)\s*[-:|]\s*(\d{1,3}(?:\.\d+)?)\s*$/);
                 if(!match) continue;
                 const grade = Number.parseFloat(match[2]);
-                const category = majorSubjectCategory(match[1]);
-                if(Number.isFinite(grade) && grade >= 0 && grade <= 100 && category){
-                    evidence.push({subject: category, grade});
+                if(Number.isFinite(grade) && grade >= 0 && grade <= 100){
+                    evidence.push({subject: match[1].trim(), grade});
                 }
             }
-            return strongestMajorSubjectRows(evidence).map(row => ({subject: row.label, grade: row.grade}));
+            return evidence;
+        }
+
+        function subjectFieldLabel(subject){
+            const label = String(subject || '').toLowerCase();
+            const fields = [
+                ['Math and quantitative subjects', ['math', 'algebra', 'calculus', 'statistics', 'trigonometry', 'geometry', 'probability']],
+                ['Physics and physical sciences', ['physics', 'chemistry', 'earth science', 'physical science', 'geology', 'astronomy']],
+                ['Biology and life sciences', ['biology', 'biological', 'life science', 'anatomy', 'physiology', 'botany', 'zoology', 'microbiology', 'biochemistry']],
+                ['Physical education and fitness', ['physical education']],
+                ['Health studies', ['health', 'nursing', 'medical', 'patient care', 'first aid', 'nutrition']],
+                ['Environmental sciences', ['environment', 'agriculture', 'fisheries', 'ecology', 'ecosystem', 'forestry', 'crop', 'soil']],
+                ['Technology subjects', ['technology', 'computer', 'programming', 'coding', 'software', 'ict', 'database', 'network', 'engineering', 'electronics', 'robotics']],
+                ['Communication and languages', ['english', 'filipino', 'language', 'communication', 'speech', 'writing', 'literature', 'reading', 'oral']],
+                ['Business subjects', ['business', 'accounting', 'management', 'marketing', 'economics', 'entrepreneur', 'finance', 'tourism', 'hospitality']],
+                ['Social sciences and humanities', ['history', 'sociology', 'psychology', 'political', 'social', 'criminology', 'education', 'philosophy', 'governance', 'culture', 'humanities', 'religion']],
+                ['Arts and creative subjects', ['art', 'design', 'music', 'media', 'creative', 'visual', 'physical education', 'performing']],
+            ];
+            return fields.find(([, terms]) => terms.some(term => label.includes(term)))?.[0] || '';
         }
 
         function renderInlineRecommendations(recommendations, academicRecord, comparisons = {}, shouldScroll = true){
@@ -2002,15 +2019,10 @@ function clearInputs() {
                 .replace(/"/g, '&quot;');
             const items = (Array.isArray(recommendations) ? recommendations : [])
                 .slice()
-                .sort((left, right) => Number(right.confidence || 0) - Number(left.confidence || 0))
-                .slice(0, 3);
-            const subjectEvidence = extractSubjectEvidence(academicRecord)
-                .map(entry => ({...entry, subject: majorSubjectCategory(entry.subject) || entry.subject}))
-                .filter((entry, index, entries) => entries.findIndex(candidate => candidate.subject === entry.subject) === index)
                 .slice(0, 3);
             list.innerHTML = items.length
                 ? items.map((item, index) => `
-                    <article class="inline-recommendation-card${index === 0 ? ' best-match' : ''}" data-recommendation-index="${index}" role="button" tabindex="0" aria-haspopup="dialog">
+                    <article class="inline-recommendation-card${index === 0 ? ' best-match' : ''}" data-recommendation-index="${index}">
                         <div class="recommendation-rank">${String(index + 1).padStart(2, '0')}</div>
                         <div class="recommendation-detail">
                             <div class="recommendation-title-row">
@@ -2019,12 +2031,24 @@ function clearInputs() {
                             </div>
                             <p>${escapeHtml(item.description || item.reason)}</p>
                             ${item.reason ? `<small>${escapeHtml(item.reason)}</small>` : ''}
-                            ${subjectEvidence.length ? `<div class="subject-evidence"><span>Strongest grade evidence</span><div>${subjectEvidence.map(entry => `<b>${escapeHtml(entry.subject)} <em>${entry.grade.toFixed(0)}</em></b>`).join('')}</div></div>` : ''}
+                            ${(() => {
+                                const fieldPriorities = new Map((Array.isArray(item.subject_field_evidence) ? item.subject_field_evidence : []).map(entry => [entry.field, entry.priority]));
+                                const courseEvidence = extractSubjectEvidence(academicRecord)
+                                    .map(entry => ({...entry, field: subjectFieldLabel(entry.subject)}))
+                                    .filter(entry => fieldPriorities.has(entry.field))
+                                    .map(entry => ({...entry, priority: fieldPriorities.get(entry.field)}));
+                                const majorEvidence = courseEvidence.filter(entry => entry.priority === 'major').sort((left, right) => right.grade - left.grade).slice(0, 3);
+                                const supportingEvidence = courseEvidence.filter(entry => entry.priority === 'supporting').sort((left, right) => right.grade - left.grade).slice(0, 3);
+                                const renderEvidence = entries => entries.map(entry => `<b>${escapeHtml(entry.subject)} <em>${entry.grade.toFixed(0)}</em></b>`).join('');
+                                return majorEvidence.length || supportingEvidence.length
+                                    ? `<div class="subject-evidence">${majorEvidence.length ? `<span>Major related subjects</span><div>${renderEvidence(majorEvidence)}</div>` : ''}${supportingEvidence.length ? `<span>Supporting subjects</span><div>${renderEvidence(supportingEvidence)}</div>` : ''}</div>`
+                                    : '';
+                            })()}
                             <div class="match-meter" aria-label="${escapeHtml(item.course)} match score ${Math.round(Number(item.confidence || 0))} percent">
                                 <div class="match-meter-label"><span>Academic match</span><strong>${Math.round(Number(item.confidence || 0))}%</strong></div>
                                 <div class="match-meter-track"><span style="width:${Math.max(0, Math.min(100, Number(item.confidence || 0)))}%"></span></div>
                             </div>
-                            <span class="recommendation-open">Why this course? <i class="fa-solid fa-arrow-right"></i></span>
+                            <button class="recommendation-open" type="button" aria-haspopup="dialog" aria-label="Why is ${escapeHtml(item.course)} recommended?">Why this recommendation? <i class="fa-solid fa-arrow-right" aria-hidden="true"></i></button>
                         </div>
                     </article>
                 `).join('')
@@ -2034,51 +2058,54 @@ function clearInputs() {
                 const item = items[index];
                 if(!item) return;
                 const comparison = comparisons[item.course] || {};
-                const rows = (Array.isArray(comparison.comparison) ? comparison.comparison : [])
-                    .filter(row => /math|science|english/i.test(String(row.subject || '')) && Number(row.student || 0) > 0)
-                    .sort((left, right) => Number(right.student || 0) - Number(left.student || 0))
-                    .slice(0, 3);
+                const rows = Array.isArray(comparison.comparison) ? comparison.comparison : [];
                 const studentAverage = Number(comparison.student_overall);
                 const courseAverage = Number(comparison.course_average);
                 const difference = Number(comparison.overall_gap);
+                const hasStudentAverage = comparison.student_overall !== null && Number.isFinite(studentAverage);
+                const hasCourseAverage = comparison.course_average !== null && Number.isFinite(courseAverage);
+                const hasDifference = comparison.overall_gap !== null && Number.isFinite(difference);
+                const fieldEvidence = Array.isArray(item.subject_field_evidence) ? item.subject_field_evidence : [];
+                const fieldAverage = item.field_fit === null || item.field_fit === undefined ? null : Number(item.field_fit);
+                const strandLabel = String(item.strand_label || '').trim();
                 courseAnalysis.innerHTML = `
                     <div class="course-analysis-header">
                         <div><span>${index === 0 ? 'Your best match' : 'Recommended course'}</span><h3>${escapeHtml(item.course)}</h3></div>
-                        <strong>${Math.round(Number(item.confidence || 0))}% match</strong>
+                        <strong>${Math.round(Number(item.confidence || 0))}% profile similarity</strong>
                     </div>
                     <p class="course-analysis-reason"><i class="fa-solid fa-lightbulb"></i>${escapeHtml(item.reason || 'This program matches your academic profile and subject strengths.')}</p>
                     <p class="course-analysis-description">${escapeHtml(item.description || 'Course description is not available.')}</p>
+                    <div class="course-analysis-signals" aria-label="Recommendation signals">
+                        <div class="course-analysis-signal"><span>Grade-profile similarity</span><strong>${Math.round(Number(item.confidence || 0))}%</strong><small>Based on graded subject categories compared with this course profile.</small></div>
+                        <div class="course-analysis-signal"><span>Related-field grades</span><strong>${fieldAverage !== null && Number.isFinite(fieldAverage) ? fieldAverage.toFixed(1) : 'Not available'}</strong><small>${fieldEvidence.length ? fieldEvidence.map(entry => `${escapeHtml(entry.field)} ${Number(entry.grade).toFixed(1)}`).join(' · ') : 'No recognized related-field grades.'}</small></div>
+                        <div class="course-analysis-signal"><span>${strandLabel ? `${escapeHtml(strandLabel)} strand` : 'Strand'}</span><strong>${strandLabel ? (item.strand_alignment ? 'Aligned' : 'Not aligned') : 'Not provided'}</strong><small>Strand alignment helps prioritize results; it does not replace grade evidence.</small></div>
+                    </div>
                     <div class="course-analysis-summary">
-                        <div><span>Your academic average</span><strong>${Number.isFinite(studentAverage) ? studentAverage.toFixed(2) : 'N/A'}</strong></div>
-                        <div><span>Course benchmark</span><strong>${Number.isFinite(courseAverage) ? courseAverage.toFixed(2) : 'N/A'}</strong></div>
-                        <div><span>Difference</span><strong class="${difference >= 0 ? 'analysis-up' : 'analysis-down'}">${Number.isFinite(difference) ? `${difference >= 0 ? '+' : ''}${difference.toFixed(2)}` : 'N/A'}</strong></div>
+                        <div><span>Your average (graded categories)</span><strong>${hasStudentAverage ? studentAverage.toFixed(2) : 'N/A'}</strong></div>
+                        <div><span>Course reference (same categories)</span><strong>${hasCourseAverage ? courseAverage.toFixed(2) : 'N/A'}</strong></div>
+                        <div><span>Difference</span><strong class="${hasDifference && difference >= 0 ? 'analysis-up' : 'analysis-down'}">${hasDifference ? `${difference >= 0 ? '+' : ''}${difference.toFixed(2)}` : 'N/A'}</strong></div>
                     </div>
                     <div class="course-analysis-bars">
                         ${rows.map(row => `
                             <div class="analysis-subject">
                                 <strong>${escapeHtml(String(row.subject || '').replace(/^./, letter => letter.toUpperCase()))}</strong>
-                                <div class="analysis-series"><span>Your score</span><div><i class="student-score" style="width:${Math.max(0, Math.min(100, Number(row.student || 0)))}%"></i></div><b>${Number(row.student || 0).toFixed(1)}</b></div>
-                                <div class="analysis-series"><span>Course avg.</span><div><i class="course-score" style="width:${Math.max(0, Math.min(100, Number(row.course || 0)))}%"></i></div><b>${Number(row.course || 0).toFixed(1)}</b></div>
+                                ${row.student === null || row.student === undefined ? '<p class="analysis-missing-grade">No grade available; excluded from the overall comparison.</p>' : `<div class="analysis-series"><span>Your grade</span><div><i class="student-score" style="width:${Math.max(0, Math.min(100, Number(row.student)))}%"></i></div><b>${Number(row.student).toFixed(1)}</b></div>`}
+                                <div class="analysis-series"><span>Reference</span><div><i class="course-score" style="width:${Math.max(0, Math.min(100, Number(row.course || 0)))}%"></i></div><b>${Number(row.course || 0).toFixed(1)}</b></div>
                             </div>
                         `).join('')}
                     </div>
-                    <p class="course-analysis-note">${escapeHtml(comparison.narrative || 'Compare your subject strengths with this course benchmark.')}</p>
+                    <p class="course-analysis-note">${escapeHtml(comparison.narrative || 'Course reference profiles are guidance, not actual student averages or admission requirements.')}</p>
+                    <p class="course-analysis-disclaimer">These similarity estimates are guidance, not admission probabilities. Course reference profiles are not actual student averages or admission requirements.</p>
                 `;
-                activeCard = list.querySelectorAll('.inline-recommendation-card')[index];
+                activeCard = list.querySelectorAll('.recommendation-open')[index];
                 dialog.dataset.previousOverflow = document.body.style.overflow;
                 dialog.hidden = false;
                 document.body.style.overflow = 'hidden';
                 closeButton.focus();
             }
 
-            list.querySelectorAll('.inline-recommendation-card').forEach((card, index) => {
-                card.addEventListener('click', () => renderSelectedCourse(index));
-                card.addEventListener('keydown', event => {
-                    if(event.key === 'Enter' || event.key === ' '){
-                        event.preventDefault();
-                        renderSelectedCourse(index);
-                    }
-                });
+            list.querySelectorAll('.recommendation-open').forEach((button, index) => {
+                button.addEventListener('click', () => renderSelectedCourse(index));
             });
             const gradeValues = String(academicRecord?.grades || '')
                 .split(/[\s,;|]+/)
