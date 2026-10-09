@@ -1426,13 +1426,15 @@ function renderAdminGeneratedReport(report){
   const title = document.createElement('h2');
   title.textContent = report.title;
   const generated = document.createElement('p');
-  generated.textContent = `Generated ${new Date(report.generated_at).toLocaleString()}`;
+  generated.textContent = `Generated ${new Date(report.generated_at).toLocaleString(undefined, {dateStyle: 'medium', timeStyle: 'short'})}`;
   header.append(brandRow, title, generated);
   output.append(header);
 
   const filterLine = document.createElement('p');
   filterLine.className = 'admin-generated-report-filters';
-  filterLine.textContent = `Strand: ${report.filters.strand} | Dates: ${report.filters.from_date} to ${report.filters.to_date}`;
+  const {from_date: fromDate, to_date: toDate} = report.filters;
+  const dateRange = fromDate === 'Any' && toDate === 'Any' ? 'All dates' : `${fromDate === 'Any' ? 'Beginning' : fromDate} to ${toDate === 'Any' ? 'Today' : toDate}`;
+  filterLine.textContent = `Strand: ${report.filters.strand} | Dates: ${dateRange}`;
   output.append(filterLine);
   (report.sections || [report]).forEach(section => {
     const container = document.createElement('section');
@@ -1501,17 +1503,10 @@ function renderAdminReportBody(report, output){
 }
 
 const adminReportForm = document.getElementById('admin-report-form');
-const adminReportType = adminReportForm?.elements.report_type;
-const adminReportDateFilters = document.querySelector('.admin-report-date-filters');
 let generatedAdminReportPayload = null;
-adminReportType?.addEventListener('change', () => {
-  const showDateFilters = ['report_cards', 'recommendations'].includes(adminReportType.value);
-  adminReportDateFilters.hidden = !showDateFilters;
-  ['from_date', 'to_date'].forEach(name => {
-    adminReportForm.elements[name].disabled = !showDateFilters;
-    if(!showDateFilters) adminReportForm.elements[name].value = '';
-  });
-});
+// Keep the two date inputs from forming an impossible range.
+adminReportForm?.elements.from_date?.addEventListener('change', () => { adminReportForm.elements.to_date.min = adminReportForm.elements.from_date.value; });
+adminReportForm?.elements.to_date?.addEventListener('change', () => { adminReportForm.elements.from_date.max = adminReportForm.elements.to_date.value; });
 adminReportForm?.addEventListener('submit', async event => {
   event.preventDefault();
   const submitButton = adminReportForm.querySelector('button[type="submit"]');

@@ -10,8 +10,9 @@ import tempfile
 import threading
 import time
 from json import dumps
-from datetime import datetime
+from datetime import datetime, time as dt_time, timedelta, timezone
 from difflib import SequenceMatcher
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 # Standard Library Imports
 import cv2
@@ -36,6 +37,22 @@ from starlette.middleware import Middleware
 from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
 load_dotenv()
+
+# Railway runs in UTC, so report timestamps use the school's local time explicitly.
+try:
+    APP_TIMEZONE = ZoneInfo(os.getenv("APP_TIMEZONE", "Asia/Manila"))
+except (ZoneInfoNotFoundError, ValueError):
+    APP_TIMEZONE = timezone(timedelta(hours=8), "PHT")
+
+
+def _app_now():
+    return datetime.now(APP_TIMEZONE)
+
+
+def _app_local(value):
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(APP_TIMEZONE)
 
 from ocr import scan_report_card_docling
 from ocr.docling_service import _subjects_from_table
@@ -2957,6 +2974,9 @@ async def admin_generate_report(req, data=None):
         return JSONResponse({"success": False, "message": date_error}, status_code=400)
     if from_date and to_date and from_date > to_date:
         return JSONResponse({"success": False, "message": "Start date must be on or before end date."}, status_code=400)
+    # Inclusive local-day range expressed as [start, end) instants.
+    from_instant = datetime.combine(from_date, dt_time.min, APP_TIMEZONE) if from_date else None
+    to_instant = datetime.combine(to_date + timedelta(days=1), dt_time.min, APP_TIMEZONE) if to_date else None
 
     filters = {
         "strand": strand or "All strands",
@@ -2975,7 +2995,7 @@ async def admin_generate_report(req, data=None):
             "report": {
                 "type": report_type,
                 "title": report_titles[report_type],
-                "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+                "generated_at": _app_now().isoformat(timespec="seconds"),
                 "filters": filters,
                 "sections": sections,
             },
@@ -2992,6 +3012,17 @@ async def admin_generate_report(req, data=None):
         if strand:
             conditions.append("COALESCE(NULLIF(BTRIM(profile.strand), ''), 'Unspecified') = ?")
             params.append(strand)
+        # upload_date is stored as naive UTC ISO text.
+        profile_saved_at = (
+            "(CASE WHEN profile.upload_date ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}' "
+            "THEN profile.upload_date::timestamp AT TIME ZONE 'UTC' END)"
+        )
+        if from_instant:
+            conditions.append(f"{profile_saved_at} >= ?")
+            params.append(from_instant)
+        if to_instant:
+            conditions.append(f"{profile_saved_at} < ?")
+            params.append(to_instant)
         cursor.execute(
             f"""
             SELECT COALESCE(NULLIF(BTRIM(profile.strand), ''), 'Unspecified') AS strand,
@@ -3003,7 +3034,7 @@ async def admin_generate_report(req, data=None):
                    COUNT(*) FILTER (WHERE NOT COALESCE(users.is_active, TRUE))
             FROM users
             LEFT JOIN LATERAL (
-                SELECT id, strand, gwa
+                SELECT id, strand, gwa, upload_date
                 FROM student_profiles
                 WHERE user_id = users.id
                 ORDER BY id DESC
@@ -3050,12 +3081,12 @@ async def admin_generate_report(req, data=None):
     elif report_type == "report_cards":
         conditions = ["COALESCE(users.role, 'student') = 'student'"]
         params = []
-        if from_date:
-            conditions.append("uploads.uploaded_at::date >= ?")
-            params.append(from_date)
-        if to_date:
-            conditions.append("uploads.uploaded_at::date <= ?")
-            params.append(to_date)
+        if from_instant:
+            conditions.append("uploads.uploaded_at >= ?")
+            params.append(from_instant)
+        if to_instant:
+            conditions.append("uploads.uploaded_at < ?")
+            params.append(to_instant)
         if strand:
             conditions.append(
                 "EXISTS (SELECT 1 FROM student_profiles profile WHERE profile.user_id = users.id "
@@ -3093,7 +3124,7 @@ async def admin_generate_report(req, data=None):
         rows = [
             {
                 "status": row[0], "uploads": row[1], "flagged": row[2],
-                "latest_upload": row[3].astimezone().strftime("%b %d, %Y %I:%M %p") if row[3] else "—",
+                "latest_upload": _app_local(row[3]).strftime("%b %d, %Y %I:%M %p") if row[3] else "—",
             }
             for row in data_rows
         ]
@@ -3101,12 +3132,12 @@ async def admin_generate_report(req, data=None):
     else:
         conditions = ["COALESCE(users.role, 'student') = 'student'"]
         params = []
-        if from_date:
-            conditions.append("history.generated_at::date >= ?")
-            params.append(from_date)
-        if to_date:
-            conditions.append("history.generated_at::date <= ?")
-            params.append(to_date)
+        if from_instant:
+            conditions.append("history.generated_at >= ?")
+            params.append(from_instant)
+        if to_instant:
+            conditions.append("history.generated_at < ?")
+            params.append(to_instant)
         if strand:
             conditions.append("COALESCE(NULLIF(BTRIM(profiles.strand), ''), 'Unspecified') = ?")
             params.append(strand)
@@ -3159,7 +3190,7 @@ async def admin_generate_report(req, data=None):
         "report": {
             "type": report_type,
             "title": report_titles[report_type],
-            "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+            "generated_at": _app_now().isoformat(timespec="seconds"),
             "filters": filters,
             "summary": summary,
             "columns": columns,
@@ -3271,7 +3302,14 @@ def _admin_report_pdf(report):
         canvas.line(left, A4[1] - 116, right, A4[1] - 116)
         canvas.setFont("Helvetica", 8)
         canvas.setFillColor(muted)
-        canvas.drawString(left, A4[1] - 133, f"Strand: {filters['strand']}  |  Dates: {filters['from_date']} to {filters['to_date']}")
+        if filters["from_date"] == "Any" and filters["to_date"] == "Any":
+            date_range = "All dates"
+        else:
+            date_range = (
+                f"{'Beginning' if filters['from_date'] == 'Any' else filters['from_date']} to "
+                f"{'Today' if filters['to_date'] == 'Any' else filters['to_date']}"
+            )
+        canvas.drawString(left, A4[1] - 133, f"Strand: {filters['strand']}  |  Dates: {date_range}")
         canvas.drawRightString(right, 25, f"Page {doc.page}")
         canvas.restoreState()
 

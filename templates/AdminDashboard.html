@@ -193,7 +193,7 @@
       <form id="admin-report-form" class="admin-report-controls">
         <label>Report type<select name="report_type"><option value="all_reports">All reports</option><option value="student_summary" selected>Student summary</option><option value="report_cards">Report-card status</option><option value="recommendations">Recommendation frequency</option></select></label>
         <label>Academic strand<select name="strand"><option value="">All strands</option>{% for strand in system_settings.available_strands %}<option value="{{ strand }}">{{ 'Arts & Design' if strand == 'ARTS_DESIGN' else strand }}</option>{% endfor %}<option value="Unspecified">Unspecified</option></select></label>
-        <div class="admin-report-date-filters" hidden>
+        <div class="admin-report-date-filters">
           <label>From date<input name="from_date" type="date"></label>
           <label>To date<input name="to_date" type="date"></label>
         </div>
