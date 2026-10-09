@@ -24,7 +24,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, Request as FastAPIRequest
 from fasthtml.common import fast_app, serve
 from jinja2 import Environment, FileSystemLoader, select_autoescape
-from PIL import Image as PILImage
+from PIL import Image as PILImage, ImageOps
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_RIGHT
 from reportlab.lib.pagesizes import A4
@@ -122,12 +122,93 @@ def _profile_image_from_value(value):
     if lowered in ("default.jpg", "default.png", "default.svg", "none", "null"):
         return _default_profile_image_url()
 
+    stored = _parse_profile_image_db_value(text)
+    if stored:
+        return f"/api/v1/profile-image/{stored[0]}/{stored[1]}"
+    if lowered.startswith(PROFILE_IMAGE_DB_PREFIX):
+        return _default_profile_image_url()
+
     return f"/static/profile_pictures/{text}"
 
 #Session Profile Image Handling
 def _set_session_profile_image(sess, profile_picture_value):
     sess["profile_picture"] = (profile_picture_value or "").strip()
     sess["profile_image"] = _profile_image_from_value(profile_picture_value)
+
+
+# Profile images are stored in the database so they survive restarts and redeploys.
+# users.profile_picture holds "db:<user_id>:<version>"; the version busts browser caches.
+PROFILE_IMAGE_DB_PREFIX = "db:"
+PROFILE_IMAGE_MAX_UPLOAD_BYTES = 5 * 1024 * 1024
+PROFILE_IMAGE_MAX_DIMENSION = 512
+_DEFAULT_PROFILE_VALUES = ("", "default.jpg", "default.png", "default.svg", "none", "null")
+
+
+def _parse_profile_image_db_value(value):
+    match = re.fullmatch(r"db:(\d+):(\w+)", (value or "").strip())
+    return (int(match.group(1)), match.group(2)) if match else None
+
+
+def _normalize_profile_image(data):
+    if not data:
+        raise ValueError("The selected file is empty.")
+    if len(data) > PROFILE_IMAGE_MAX_UPLOAD_BYTES:
+        raise ValueError("Profile pictures must be 5 MB or smaller.")
+    try:
+        with PILImage.open(BytesIO(data)) as source:
+            source.load()
+            image = ImageOps.exif_transpose(source)
+            image = image.convert("RGBA" if image.mode in ("RGBA", "LA", "P", "PA") else "RGB")
+    except (OSError, PILImage.DecompressionBombError) as exc:
+        raise ValueError("Upload a valid JPG, PNG, WEBP, or GIF image.") from exc
+    image.thumbnail((PROFILE_IMAGE_MAX_DIMENSION, PROFILE_IMAGE_MAX_DIMENSION))
+    output = BytesIO()
+    image.save(output, "WEBP", quality=88, method=4)
+    return output.getvalue(), "image/webp"
+
+
+def _store_profile_image(cursor, user_id, data, source):
+    image_bytes, content_type = _normalize_profile_image(data)
+    cursor.execute(
+        """
+        INSERT INTO profile_images (user_id, content_type, image_data, source, updated_at)
+        VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT (user_id) DO UPDATE SET
+            content_type = EXCLUDED.content_type,
+            image_data = EXCLUDED.image_data,
+            source = EXCLUDED.source,
+            updated_at = CURRENT_TIMESTAMP
+        """,
+        (user_id, content_type, image_bytes, source),
+    )
+    value = f"{PROFILE_IMAGE_DB_PREFIX}{user_id}:{int(time.time() * 1000)}"
+    cursor.execute("UPDATE users SET profile_picture = ? WHERE id = ?", (value, user_id))
+    return value
+
+
+def _profile_image_source(cursor, user_id):
+    cursor.execute("SELECT source FROM profile_images WHERE user_id = ?", (user_id,))
+    row = cursor.fetchone()
+    return row[0] if row else None
+
+
+async def _download_google_picture(url):
+    url = (url or "").strip()
+    if not url.lower().startswith("https://"):
+        return None
+    # Google avatar URLs end with a size suffix such as "=s96-c"; request a sharper copy.
+    url = re.sub(r"=s\d+(-c)?$", "=s256-c", url)
+    try:
+        async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as client:
+            response = await client.get(url)
+    except httpx.HTTPError:
+        return None
+    content_type = response.headers.get("content-type", "")
+    if response.status_code != 200 or not content_type.startswith("image/"):
+        return None
+    if len(response.content) > PROFILE_IMAGE_MAX_UPLOAD_BYTES:
+        return None
+    return response.content
 
 #Postgres Database Connection Handling (SUPABASE)
 class _PostgresCursor:
@@ -157,6 +238,9 @@ class _PostgresConnection:
 
     def commit(self):
         self._connection.commit()
+
+    def rollback(self):
+        self._connection.rollback()
 
     def close(self):
         self._connection.close()
@@ -1478,6 +1562,35 @@ def init_database():
             username = f"{base}.{user_id}"
         cursor.execute("UPDATE users SET username = ? WHERE id = ?", (username, user_id))
     conn.commit()
+
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS profile_images (
+            user_id BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+            content_type TEXT NOT NULL,
+            image_data BYTEA NOT NULL,
+            source TEXT NOT NULL DEFAULT 'upload',
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    conn.commit()
+    # Move legacy uploads that only lived on the local disk into the database.
+    cursor.execute("SELECT id, profile_picture FROM users WHERE profile_picture IS NOT NULL")
+    for user_id, picture in cursor.fetchall():
+        picture = (picture or "").strip()
+        lowered = picture.lower()
+        if lowered in _DEFAULT_PROFILE_VALUES or lowered.startswith(("http://", "https://", PROFILE_IMAGE_DB_PREFIX)):
+            continue
+        image_path = os.path.join(UPLOAD_FOLDER, os.path.basename(picture))
+        if not os.path.isfile(image_path):
+            continue
+        try:
+            with open(image_path, "rb") as image_file:
+                _store_profile_image(cursor, user_id, image_file.read(), "upload")
+            conn.commit()
+        except (OSError, ValueError):
+            conn.rollback()
     conn.close()
 # Check if the current session belongs to an admin user
 def _is_admin_session(sess, allow_password_change=False):
@@ -1623,7 +1736,7 @@ class _FirstLoginPasswordChangeMiddleware:
                 "/admin/logout",
                 "/logout",
             }
-            if session.get("must_change_password") and path not in allowed_paths and not path.startswith("/static/"):
+            if session.get("must_change_password") and path not in allowed_paths and not path.startswith(("/static/", "/api/v1/profile-image/")):
                 headers = {key.lower(): value for key, value in scope.get("headers", [])}
                 if b"text/html" in headers.get(b"accept", b""):
                     response = RedirectResponse("/admin/dashboard", status_code=303)
@@ -3548,26 +3661,50 @@ async def upload_profile_picture(req):
 
     filename_in = getattr(up_file, "filename", "") or ""
     if not filename_in:
-        return JSONResponse({"success": False})
+        return JSONResponse({"success": False, "message": "Choose an image to upload."})
 
-    _, ext = os.path.splitext(filename_in)
-    filename = f"user_{sess['user_id']}{ext}"
-    filepath = os.path.join(UPLOAD_FOLDER, filename)
+    file_bytes = await up_file.read(PROFILE_IMAGE_MAX_UPLOAD_BYTES + 1)
+    conn = _db_conn()
+    cursor = conn.cursor()
+    try:
+        stored_value = _store_profile_image(cursor, sess["user_id"], file_bytes, "upload")
+        conn.commit()
+    except ValueError as exc:
+        conn.rollback()
+        conn.close()
+        return JSONResponse({"success": False, "message": str(exc)}, status_code=400)
+    except psycopg.Error:
+        conn.rollback()
+        conn.close()
+        return JSONResponse({"success": False, "message": "Unable to save the picture. Try again."}, status_code=500)
+    conn.close()
 
-    file_bytes = await up_file.read()
-    with open(filepath, "wb") as f:
-        f.write(file_bytes)
+    _set_session_profile_image(sess, stored_value)
+    if sess.get("role") in (ROLE_ADMIN, ROLE_SEMI_ADMIN):
+        _record_admin_activity(sess, "profile_picture_changed", target_label=sess.get("email", ""))
+    return JSONResponse({"success": True, "picture": stored_value, "profile_image": _profile_image_from_value(stored_value)})
+
+
+def get_profile_image(req, user_id: str, version: str = ""):
+    if "user_id" not in req.session:
+        return Response(status_code=401)
+    try:
+        requested_id = int(user_id)
+    except (TypeError, ValueError):
+        return Response(status_code=404)
 
     conn = _db_conn()
     cursor = conn.cursor()
-    cursor.execute("UPDATE users SET profile_picture = ? WHERE id = ?", (filename, sess["user_id"]))
-    conn.commit()
+    cursor.execute("SELECT content_type, image_data FROM profile_images WHERE user_id = ?", (requested_id,))
+    row = cursor.fetchone()
     conn.close()
-
-    _set_session_profile_image(sess, filename)
-    if sess.get("role") in (ROLE_ADMIN, ROLE_SEMI_ADMIN):
-        _record_admin_activity(sess, "profile_picture_changed", target_label=sess.get("email", ""))
-    return JSONResponse({"success": True, "picture": filename, "profile_image": _profile_image_from_value(filename)})
+    if not row:
+        return RedirectResponse(_default_profile_image_url(), status_code=302)
+    return Response(
+        bytes(row[1]),
+        media_type=row[0],
+        headers={"Cache-Control": "private, max-age=31536000, immutable", "X-Content-Type-Options": "nosniff"},
+    )
 
 
 # Define the route for fetching the profile picture 
@@ -3624,17 +3761,13 @@ async def google_authorize(req):
         role = existing_user[2] or "student"
         must_change_password = bool(existing_user[4])
         username = existing_user[5] or ""
-        if google_picture and (not current_picture or current_picture.lower() in ("default.jpg", "default.png", "default.svg")):
-            cursor.execute("UPDATE users SET profile_picture = ? WHERE id = ?", (google_picture, user_id))
-            conn.commit()
-            current_picture = google_picture
     else:
         cursor.execute(
             """
             INSERT INTO users (name, email, password_hash, profile_picture, role)
             VALUES (?, ?, ?, ?, ?)
             """,
-            (name, email, "GOOGLE_ACCOUNT", google_picture or "default.svg", "student"),
+            (name, email, "GOOGLE_ACCOUNT", "default.svg", "student"),
         )
         conn.commit()
         cursor.execute(
@@ -3650,6 +3783,34 @@ async def google_authorize(req):
         role = inserted[2] or "student"
         must_change_password = bool(inserted[4])
         username = inserted[5] or ""
+
+    # Cache the Google avatar in the database unless the user uploaded their own picture.
+    lowered_picture = current_picture.lower()
+    stored_picture = _parse_profile_image_db_value(current_picture)
+    legacy_file_missing = (
+        lowered_picture not in _DEFAULT_PROFILE_VALUES
+        and not lowered_picture.startswith(("http://", "https://", PROFILE_IMAGE_DB_PREFIX))
+        and not os.path.isfile(os.path.join(UPLOAD_FOLDER, os.path.basename(current_picture)))
+    )
+    uses_google_picture = (
+        lowered_picture in _DEFAULT_PROFILE_VALUES
+        or lowered_picture.startswith(("http://", "https://"))
+        or legacy_file_missing
+        or (stored_picture is not None and _profile_image_source(cursor, user_id) == "google")
+    )
+    if google_picture and uses_google_picture:
+        picture_bytes = await _download_google_picture(google_picture)
+        try:
+            if not picture_bytes:
+                raise ValueError("Google picture unavailable")
+            current_picture = _store_profile_image(cursor, user_id, picture_bytes, "google")
+            conn.commit()
+        except (ValueError, psycopg.Error):
+            conn.rollback()
+            if stored_picture is None:
+                cursor.execute("UPDATE users SET profile_picture = ? WHERE id = ?", (google_picture, user_id))
+                conn.commit()
+                current_picture = google_picture
 
     cursor.execute("UPDATE users SET last_login_at = CURRENT_TIMESTAMP WHERE id = ?", (user_id,))
     conn.commit()
@@ -4274,6 +4435,7 @@ _FASTAPI_ENDPOINTS = (
     ("/get_profile", ["GET"], get_profile, ()),
     ("/upload_profile_picture", ["POST"], upload_profile_picture, ()),
     ("/get_profile_picture", ["GET"], get_profile_picture, ()),
+    ("/profile-image/{user_id}/{version}", ["GET"], get_profile_image, ("user_id", "version")),
     ("/ocr_report_card", ["POST"], ocr_report_card, ()),
     ("/admin/report_cards", ["GET"], admin_list_report_cards, ()),
     ("/admin/report_cards/{upload_id}/edit", ["POST"], admin_edit_report_card, ("upload_id",)),

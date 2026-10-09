@@ -47,7 +47,7 @@
   <header class="admin-topbar">
     <div class="admin-topbar-brand"><a href="#dashboard"><img src="{{ url_for('static', filename='images/PathFinder2.png') }}" alt="" width="36" height="36"><strong>PathFinder</strong></a></div>
     <div class="admin-account-wrap">
-      <button id="admin-account-trigger" class="admin-account-trigger" type="button" aria-expanded="false"><span>{{ admin }}</span><img src="{{ profile_image }}" alt="{{ admin }} profile picture"></button>
+      <button id="admin-account-trigger" class="admin-account-trigger" type="button" aria-expanded="false"><span>{{ admin }}</span><img src="{{ profile_image }}" referrerpolicy="no-referrer" onerror="this.onerror=null;this.src='/static/profile_pictures/default.svg'" alt="{{ admin }} profile picture"></button>
       <div id="admin-profile-menu" class="admin-profile-menu" hidden>
         <button type="button" data-admin-settings><i class="fa-solid fa-user-gear"></i> Account settings</button>
         <button id="admin-theme-toggle" type="button" aria-pressed="false"><i class="fa-solid fa-moon" aria-hidden="true"></i><span>Dark mode</span></button>
@@ -213,7 +213,7 @@
       <section class="admin-settings-content">
         <div class="admin-settings-heading"><span>Account settings</span><button id="close-admin-settings" type="button" aria-label="Close settings"><i class="fa-solid fa-xmark"></i></button></div>
         <section id="admin-settings-profile" class="admin-settings-tab-panel" role="tabpanel" aria-labelledby="admin-settings-tab-profile" data-settings-panel="profile">
-          <div class="admin-settings-picture"><img id="admin-settings-picture" src="{{ profile_image }}" alt="{{ admin }} profile picture"><label for="admin-picture-input" class="admin-picture-button"><i class="fa-solid fa-camera"></i> Change picture</label><input id="admin-picture-input" type="file" accept="image/*" hidden><span id="admin-picture-status" role="status"></span></div>
+          <div class="admin-settings-picture"><img id="admin-settings-picture" src="{{ profile_image }}" referrerpolicy="no-referrer" onerror="this.onerror=null;this.src='/static/profile_pictures/default.svg'" alt="{{ admin }} profile picture"><label for="admin-picture-input" class="admin-picture-button"><i class="fa-solid fa-camera"></i> Change picture</label><input id="admin-picture-input" type="file" accept="image/*" hidden><span id="admin-picture-status" role="status"></span></div>
           <h3>{{ admin }}</h3>
           <p>{{ 'Super Admin' if account_role == 'admin' else 'Semi Admin' if account_role == 'semi_admin' else 'Administrator' }} account</p>
           <form id="admin-name-form" class="admin-name-form"><label for="admin-name-input">Display name</label><div><input id="admin-name-input" name="name" type="text" value="{{ admin }}" required><button type="submit">Save name</button></div><span id="admin-name-status" role="status"></span></form>
@@ -1000,6 +1000,8 @@ async function loadAdminActivity(){
 function adminProfileImageUrl(value){
   const image = String(value || '').trim();
   if(/^https?:\/\//i.test(image)) return image;
+  const stored = image.match(/^db:(\d+):(\w+)$/);
+  if(stored) return `/api/v1/profile-image/${stored[1]}/${stored[2]}`;
   const filename = image.split(/[\\/]/).pop();
   if(!filename || ['default.jpg', 'default.png', 'default.svg'].includes(filename.toLowerCase())){
     return '/static/profile_pictures/default.svg';

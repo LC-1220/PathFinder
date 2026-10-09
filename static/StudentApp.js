@@ -2071,7 +2071,6 @@ function clearInputs() {
                                 <div class="match-meter-track"><span style="width:${Math.max(0, Math.min(100, Number(item.match_score ?? item.confidence ?? 0)))}%"></span></div>
                             </div>
                             <div class="recommendation-actions">
-                                <button class="recommendation-open" type="button" aria-haspopup="dialog" aria-label="View academic comparison for ${escapeHtml(item.course)}">Why this recommendation? <i class="fa-solid fa-arrow-right" aria-hidden="true"></i></button>
                                 <button class="recommendation-match-explanation" type="button" aria-haspopup="dialog">${index === 0 ? 'Why this is your best match' : 'Why this course matches'} <i class="fa-solid fa-lightbulb" aria-hidden="true"></i></button>
                             </div>
                         </div>
@@ -2124,7 +2123,7 @@ function clearInputs() {
                     <p class="course-analysis-note">${escapeHtml(comparison.narrative || 'Course reference profiles are guidance, not actual student averages or admission requirements.')}</p>
                     <p class="course-analysis-disclaimer">These similarity estimates are guidance, not admission probabilities. Course reference profiles are not actual student averages or admission requirements.</p>
                 `;
-                activeCard = list.querySelectorAll('.recommendation-open')[index];
+                activeCard = list.querySelectorAll('.inline-recommendation-card')[index];
                 dialog.dataset.previousOverflow = document.body.style.overflow;
                 dialog.hidden = false;
                 document.body.style.overflow = 'hidden';
@@ -2188,11 +2187,23 @@ function clearInputs() {
                 closeButton.focus();
             }
 
-            list.querySelectorAll('.recommendation-open').forEach((button, index) => {
-                button.addEventListener('click', () => renderSelectedCourse(index));
-            });
             list.querySelectorAll('.recommendation-match-explanation').forEach((button, index) => {
                 button.addEventListener('click', () => renderMatchExplanation(index));
+            });
+            list.querySelectorAll('.inline-recommendation-card').forEach((card, index) => {
+                card.tabIndex = 0;
+                card.setAttribute('role', 'button');
+                card.setAttribute('aria-haspopup', 'dialog');
+                card.setAttribute('aria-label', `View academic comparison for ${items[index]?.course || 'this course'}`);
+                card.addEventListener('click', event => {
+                    if(event.target.closest('button, a')) return;
+                    renderSelectedCourse(index);
+                });
+                card.addEventListener('keydown', event => {
+                    if(event.target !== card || (event.key !== 'Enter' && event.key !== ' ')) return;
+                    event.preventDefault();
+                    renderSelectedCourse(index);
+                });
             });
             const gradeValues = String(academicRecord?.grades || '')
                 .split(/[\s,;|]+/)

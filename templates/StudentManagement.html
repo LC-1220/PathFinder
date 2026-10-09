@@ -6,6 +6,7 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='Student.css') }}">
 <link href="https://fonts.googleapis.com/css2?family=Nunito:ital,wght@0,200..1000;1,200..1000&family=Roboto:ital,wght@0,100..900;1,100..900&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/7.0.1/css/all.min.css" integrity="sha512-2SwdPD6INVrV/lHTZbO2nodKhrnDdJK9/kg2XD1r9uGqPo1cUbujc+IYdlYdEErWNu69gVcYgdxlmVmzTWnetw==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+    <script>try { document.documentElement.classList.toggle('student-dark', localStorage.getItem('pathfinder-student-theme') === 'dark'); } catch (error) {}</script>
     <title>PathFinder</title>
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='images/PathFinder2.png') }}">
 </head>
@@ -16,7 +17,7 @@
             <div class="focus-account">
                 <span>{{ 'Anonymous guest' if is_guest|default(false) else name }}</span>
                 <button id="profile-menu-trigger" class="focus-profile-trigger" type="button" aria-label="Open account menu" aria-haspopup="true" aria-expanded="false">
-                    {% if is_guest|default(false) %}<img src="/static/profile_pictures/default.svg" alt="Guest profile picture">{% else %}<img src="{{ profile_image }}" alt="{{ name }} profile picture">{% endif %}
+                    {% if is_guest|default(false) %}<img src="/static/profile_pictures/default.svg" alt="Guest profile picture">{% else %}<img src="{{ profile_image }}" referrerpolicy="no-referrer" onerror="this.onerror=null;this.src='/static/profile_pictures/default.svg'" alt="{{ name }} profile picture">{% endif %}
                 </button>
                 <div id="profile-menu" class="profile-menu" hidden>
                     <div class="profile-menu-header"><strong>{{ 'Guest' if is_guest|default(false) else name }}</strong><span>{{ 'Anonymous session' if is_guest|default(false) else email }}</span></div>
@@ -28,6 +29,7 @@
                     <button type="button" class="profile-menu-action" data-show-upload><i class="fa-solid fa-cloud-arrow-up"></i> Upload another report</button>
                     <button type="button" class="profile-menu-action" data-open-settings><i class="fa-solid fa-user-gear"></i> Profile settings</button>
                     {% endif %}
+                    <button id="student-theme-toggle" class="profile-menu-theme" type="button" aria-pressed="false"><i class="fa-solid fa-moon" aria-hidden="true"></i><span>Dark mode</span></button>
                     <a href="/logout" class="profile-menu-logout"><i class="fa-solid fa-right-from-bracket"></i> Log out</a>
                 </div>
             </div>
@@ -112,7 +114,7 @@
  
         <div class="usercontainer">
             <div class="user">
-                <img id="profilePicture" src="{{ profile_image }}" alt="Profile Picture">
+                <img id="profilePicture" src="{{ profile_image }}" referrerpolicy="no-referrer" onerror="this.onerror=null;this.src='/static/profile_pictures/default.svg'" alt="Profile Picture">
                 <span class="tooltip">StudentPathFinder Account<br>{{name}}<br>{{email}}</span>
             </div>
          </div>
@@ -246,7 +248,7 @@
                     <div class="settings-panel-body">
                         <div class="settings-tab-panel active" data-settings-panel="profile">
                             <div class="settings-avatar-row">
-                                <img id="settings-preview-image" src="{{ profile_image }}" alt="{{ name }} profile picture">
+                                <img id="settings-preview-image" src="{{ profile_image }}" referrerpolicy="no-referrer" onerror="this.onerror=null;this.src='/static/profile_pictures/default.svg'" alt="{{ name }} profile picture">
                                 <div><h3>Profile picture</h3><p>Use a clear image so your account is easy to recognize.</p><label for="settings-picture-input" class="settings-upload-button"><i class="fa-solid fa-camera"></i> Choose image</label><input id="settings-picture-input" type="file" accept="image/*" hidden><span id="settings-picture-status" class="settings-status"></span></div>
                             </div>
                             <form id="account-name-form" class="settings-form">
@@ -379,6 +381,24 @@
         </div>
 
     
+        <script>
+            (() => {
+                const toggle = document.getElementById('student-theme-toggle');
+                if (!toggle) return;
+                const sync = () => {
+                    const dark = document.documentElement.classList.contains('student-dark');
+                    toggle.setAttribute('aria-pressed', String(dark));
+                    toggle.querySelector('span').textContent = dark ? 'Light mode' : 'Dark mode';
+                    toggle.querySelector('i').className = dark ? 'fa-solid fa-sun' : 'fa-solid fa-moon';
+                };
+                sync();
+                toggle.addEventListener('click', () => {
+                    const dark = document.documentElement.classList.toggle('student-dark');
+                    try { localStorage.setItem('pathfinder-student-theme', dark ? 'dark' : 'light'); } catch (error) {}
+                    sync();
+                });
+            })();
+        </script>
         <script src="{{ url_for('static', filename='StudentApp.js') }}"></script>
         <script src="{{ url_for('static', filename='Logout.js') }}"></script>
     </body>
