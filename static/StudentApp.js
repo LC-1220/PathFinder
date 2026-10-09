@@ -1633,6 +1633,7 @@ function clearInputs() {
             setProgress(null, 'Running Docling OCR and TableFormer...');
             const formData = new FormData();
             formData.append('report_card', blob, blob.name || 'report-card.png');
+            if(window.currentReportCardBatch) formData.append('upload_batch', window.currentReportCardBatch);
 
             const response = await fetch('/api/v1/ocr_report_card', { method: 'POST', body: formData });
             let data;
@@ -1649,12 +1650,22 @@ function clearInputs() {
             setProgress(90, `${data.provider || 'OCR'} extraction complete.`);
             window.latestOcrReviewRequired = Boolean(window.latestOcrReviewRequired || data.review_required);
             window.latestParsedSubjects = Array.isArray(data.parsed?.subjects) ? data.parsed.subjects : [];
+            const normalizeReviewText = value => ` ${String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()} `;
+            const parsedSubjectKeys = window.latestParsedSubjects
+                .filter(subject => subject && !subject.needs_review && subject.subject_name && subject.grade !== null && subject.grade !== undefined && subject.grade !== '')
+                .map(subject => normalizeReviewText(subject.subject_name))
+                .filter(key => key.trim());
             const reviewErrorSubjects = (Array.isArray(data.parsed?.validation_errors) ? data.parsed.validation_errors : [])
                 .map(error => {
                     const message = String(error || '');
                     const match = message.match(/^Needs review:\s*(.+)$/i)
                         || message.match(/^Grade rejected for\s+(.+?)(?::\s*.*)?$/i);
-                    return match ? {subject_name: match[1].trim(), needs_review: true, reason: message} : null;
+                    if(!match) return null;
+                    const subjectText = match[1].trim();
+                    if(!/[a-z]{3,}/i.test(subjectText)) return null;
+                    const subjectKey = normalizeReviewText(subjectText);
+                    if(parsedSubjectKeys.some(key => subjectKey.includes(key))) return null;
+                    return {subject_name: subjectText, needs_review: true, reason: message};
                 })
                 .filter(Boolean);
             window.latestOcrReviewSubjects = [
@@ -2849,6 +2860,7 @@ function clearInputs() {
                 window.latestOcrReviewSubjects = [];
                 window.latestOcrReviewRequired = false;
                 window.latestAutomaticOcrDisabled = false;
+                window.currentReportCardBatch = `b${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
 
                 for (let i = 0; i < files.length; i++) {
                     const file = files[i];

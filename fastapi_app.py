@@ -1484,6 +1484,7 @@ def init_database():
     cursor.execute("ALTER TABLE report_card_uploads ADD COLUMN IF NOT EXISTS extracted_gwa TEXT NOT NULL DEFAULT ''")
     cursor.execute("ALTER TABLE report_card_uploads ADD COLUMN IF NOT EXISTS ocr_error TEXT")
     cursor.execute("ALTER TABLE report_card_uploads ADD COLUMN IF NOT EXISTS processed_at TIMESTAMPTZ")
+    cursor.execute("ALTER TABLE report_card_uploads ADD COLUMN IF NOT EXISTS upload_batch TEXT")
     cursor.execute(
         """
         ALTER TABLE student_profiles
@@ -2585,6 +2586,22 @@ def admin_get_student_detail(req, user_id: str):
         (requested_user_id,),
     )
     row = cursor.fetchone()
+    report_card_upload_ids = []
+    if row and row[16]:
+        cursor.execute(
+            """
+            SELECT uploads.id
+            FROM report_card_uploads linked
+            JOIN report_card_uploads uploads
+              ON uploads.user_id = linked.user_id
+             AND (uploads.id = linked.id
+                  OR (linked.upload_batch IS NOT NULL AND uploads.upload_batch = linked.upload_batch))
+            WHERE linked.id = ?
+            ORDER BY uploads.id
+            """,
+            (row[16],),
+        )
+        report_card_upload_ids = [item[0] for item in cursor.fetchall()]
     conn.close()
     if not row:
         return JSONResponse({"success": False, "message": "Student account not found"}, status_code=404)
@@ -2622,6 +2639,7 @@ def admin_get_student_detail(req, user_id: str):
             "strand": row[14] or "",
             "upload_date": row[15] or "",
             "report_card_upload_id": row[16],
+            "report_card_upload_ids": report_card_upload_ids,
         },
     })
 
@@ -3402,6 +3420,20 @@ async def save_profile(req):
                 user_id,
             ),
         )
+        batch_upload_ids = [
+            upload_id for upload_id in (req.session.get("latest_report_card_upload_ids") or [])
+            if isinstance(upload_id, int) and upload_id != pending_upload_id
+        ]
+        for batch_upload_id in batch_upload_ids:
+            cursor.execute(
+                """
+                UPDATE report_card_uploads
+                SET ocr_status = 'verified', student_name = ?, student_number = ?,
+                    ocr_error = NULL, processed_at = CURRENT_TIMESTAMP
+                WHERE id = ? AND user_id = ?
+                """,
+                (student_name, (data.get("studentNumber") or "").strip(), batch_upload_id, user_id),
+            )
 
     target_student = None
     if existing_profile:
@@ -3493,6 +3525,8 @@ async def save_profile(req):
     conn.commit()
     conn.close()
     sess.pop("latest_report_card_upload_id", None)
+    sess.pop("latest_report_card_upload_ids", None)
+    sess.pop("latest_report_card_batch", None)
     # Build the comparisons for the top 3 recommended courses based on student performance analytics
     comparisons = {
         item["course"]: _build_student_performance_analytics(item["course"], subjects_text)
@@ -3885,7 +3919,25 @@ def _process_report_card_bytes(file_bytes, filename):
     parsed = parse_report_card_structure(raw_ocr)
     if ocr_payload.get("subjects"):
         parsed["subjects"] = ocr_payload["subjects"]
-        parsed["needs_review"] = bool(parsed.get("needs_review")) or any(
+
+        def _review_key(value):
+            return f" {' '.join(re.findall(r'[a-z0-9]+', str(value or '').lower()))} "
+
+        parsed_keys = [
+            _review_key(item.get("subject_name"))
+            for item in parsed["subjects"]
+            if item.get("subject_name") and not item.get("needs_review") and item.get("grade") is not None
+        ]
+        remaining_errors = []
+        for error in parsed.get("validation_errors") or []:
+            match = re.match(r"^(?:Needs review:\s*|Grade rejected for\s+)(.+)$", str(error or ""), re.I)
+            if match:
+                error_key = _review_key(match.group(1))
+                if not re.search(r"[a-z]{3,}", error_key) or any(key.strip() and key in error_key for key in parsed_keys):
+                    continue
+            remaining_errors.append(error)
+        parsed["validation_errors"] = remaining_errors
+        parsed["needs_review"] = bool(remaining_errors) or any(
             item.get("needs_review") for item in parsed["subjects"]
         )
 
@@ -3916,8 +3968,14 @@ def _process_report_card_bytes(file_bytes, filename):
 # OCR endpoint for processing report cards
 @fastapi_route("/ocr_report_card", methods=["POST"])
 async def ocr_report_card(req):
-    req.session.pop("latest_report_card_upload_id", None)
     form = await req.form()
+    upload_batch = str(form.get("upload_batch") or "").strip()
+    if not re.fullmatch(r"[A-Za-z0-9_-]{8,64}", upload_batch):
+        upload_batch = ""
+    if not upload_batch or req.session.get("latest_report_card_batch") != upload_batch:
+        req.session.pop("latest_report_card_upload_id", None)
+        req.session["latest_report_card_upload_ids"] = []
+        req.session["latest_report_card_batch"] = upload_batch
     uploaded = form.get("report_card") or form.get("file") or form.get("image")
     if uploaded is None:
         return JSONResponse({"success": False, "message": "No report card uploaded."})
@@ -3945,14 +4003,16 @@ async def ocr_report_card(req):
         cursor = conn.cursor()
         cursor.execute(
             """
-            INSERT INTO report_card_uploads (user_id, original_filename, content_type, file_data, ocr_status)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO report_card_uploads (user_id, original_filename, content_type, file_data, ocr_status, upload_batch)
+            VALUES (?, ?, ?, ?, ?, ?)
             RETURNING id
             """,
-            (user_id, filename, content_type, file_bytes, "processing" if automatic_ocr_enabled else "needs_review"),
+            (user_id, filename, content_type, file_bytes, "processing" if automatic_ocr_enabled else "needs_review", upload_batch or None),
         )
         upload_id = cursor.fetchone()[0]
-        req.session["latest_report_card_upload_id"] = upload_id
+        batch_upload_ids = [*(req.session.get("latest_report_card_upload_ids") or []), upload_id]
+        req.session["latest_report_card_upload_ids"] = batch_upload_ids
+        req.session["latest_report_card_upload_id"] = batch_upload_ids[0]
         conn.commit()
         conn.close()
 

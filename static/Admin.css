@@ -2769,7 +2769,33 @@ body.logout-confirm-open {
   font-size: 12px;
   font-weight: 700;
 }
-.admin-page .admin-report-preview p,
+.admin-page .admin-report-pages {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 2px 0 4px;
+}
+.admin-page .admin-report-pages button {
+  min-height: 28px;
+  padding: 4px 12px;
+  border: 1px solid var(--admin-line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--admin-ink);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background .18s ease, color .18s ease, border-color .18s ease;
+}
+.admin-page .admin-report-pages button:hover {
+  border-color: var(--admin-green);
+  color: var(--admin-green);
+}
+.admin-page .admin-report-pages button.is-active {
+  border-color: var(--admin-green);
+  background: var(--admin-green);
+  color: #fff;
+}.admin-page .admin-report-preview p,
 .admin-page .student-detail-empty {
   margin: 6px 0;
   color: var(--admin-muted);

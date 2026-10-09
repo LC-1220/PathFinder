@@ -274,7 +274,7 @@
         <label>Academic strand<input name="strand" type="text"></label>
         <label>GWA<input name="gwa" type="text"></label>
         <div class="editor-wide"><div class="editor-table-heading">Subject grades</div><table class="admin-editor-grade-table"><thead><tr><th>Subject</th><th>Grade</th><th>Action</th></tr></thead><tbody id="student-editor-grade-body"></tbody></table><input name="subjects" type="hidden"><input name="grades" type="hidden"></div>
-        <section class="editor-wide admin-report-preview"><div class="editor-table-heading">Uploaded report card</div><a id="student-report-card-link" target="_blank" rel="noopener" hidden>Open original upload</a><img id="student-report-card-image" alt="Uploaded student report card" hidden><p id="student-report-card-empty">No original report card upload is available for this profile.</p></section>
+        <section class="editor-wide admin-report-preview"><div class="editor-table-heading">Uploaded report card</div><a id="student-report-card-link" target="_blank" rel="noopener" hidden>Open original upload</a><div id="student-report-card-pages" class="admin-report-pages" hidden></div><img id="student-report-card-image" alt="Uploaded student report card" hidden><p id="student-report-card-empty">No original report card upload is available for this profile.</p></section>
         <section class="editor-wide admin-student-recommendations"><div class="editor-table-heading">Recommended courses</div><div id="student-editor-recommendations"></div></section>
         <div class="editor-actions"><span id="student-editor-status" role="status"></span><div><button id="deactivate-student-account" class="btn btn-danger" type="button" hidden>Deactivate account</button><button id="delete-student-profile" class="btn btn-secondary" type="button" hidden>Remove profile</button><button id="edit-student-record" class="btn btn-secondary" type="button">Edit</button><button class="btn btn-primary" type="submit" disabled>Save changes</button></div></div>
       </form>
@@ -524,7 +524,7 @@ function renderStrandPie(ctxElem, labels, values){
   const total = values.reduce((sum, value) => sum + Number(value || 0), 0);
   chartStrand = new Chart(ctxElem, {
     type: 'pie',
-    data: { labels, datasets: [{ data: values, backgroundColor: colors, borderColor: '#ffffff', borderWidth: 2, hoverOffset: 4 }] },
+    data: { labels, datasets: [{ data: values, backgroundColor: colors, borderWidth: 0, hoverBorderWidth: 0, hoverOffset: 4 }] },
     options: {
       responsive: true,
       maintainAspectRatio: false,
@@ -1357,7 +1357,27 @@ async function openStudentEditor(studentId){
     const reportImage = document.getElementById('student-report-card-image');
     const reportLink = document.getElementById('student-report-card-link');
     const reportEmpty = document.getElementById('student-report-card-empty');
-    const hasReport = Boolean(student.report_card_upload_id);
+    const reportPages = document.getElementById('student-report-card-pages');
+    const reportIds = (student.report_card_upload_ids?.length ? student.report_card_upload_ids : [student.report_card_upload_id]).filter(Boolean);
+    const hasReport = reportIds.length > 0;
+    const showReportPage = index => {
+      const reportUrl = `/api/v1/admin/report_cards/${encodeURIComponent(reportIds[index])}`;
+      reportImage.hidden = false;
+      reportLink.hidden = false;
+      reportEmpty.hidden = true;
+      reportImage.src = reportUrl;
+      reportLink.href = reportUrl;
+      reportLink.textContent = reportIds.length > 1 ? `Open image ${index + 1} of ${reportIds.length}` : 'Open original upload';
+      reportPages.querySelectorAll('button').forEach((button, buttonIndex) => {
+        button.classList.toggle('is-active', buttonIndex === index);
+        button.setAttribute('aria-pressed', String(buttonIndex === index));
+      });
+    };
+    reportPages.innerHTML = reportIds.length > 1
+      ? reportIds.map((_, index) => `<button type="button" aria-pressed="false">Image ${index + 1}</button>`).join('')
+      : '';
+    reportPages.hidden = reportIds.length < 2;
+    reportPages.querySelectorAll('button').forEach((button, index) => button.addEventListener('click', () => showReportPage(index)));
     reportImage.onerror = () => {
       reportImage.hidden = true;
       reportLink.hidden = true;
@@ -1368,9 +1388,8 @@ async function openStudentEditor(studentId){
     reportLink.hidden = !hasReport;
     reportEmpty.hidden = hasReport;
     if(hasReport){
-      const reportUrl = `/api/v1/admin/report_cards/${encodeURIComponent(student.report_card_upload_id)}`;
-      reportImage.src = reportUrl;
-      reportLink.href = reportUrl;
+      reportEmpty.textContent = 'No original report card upload is available for this profile.';
+      showReportPage(0);
     }else{
       reportImage.removeAttribute('src');
       reportLink.removeAttribute('href');
