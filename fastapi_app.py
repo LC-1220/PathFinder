@@ -7,6 +7,7 @@ import math
 import os
 import re
 import tempfile
+import threading
 import time
 from json import dumps
 from datetime import datetime
@@ -4006,6 +4007,7 @@ async def ocr_report_card(req):
                 "docling_subjects": len(ocr_payload.get("subjects", [])),
                 "parsed_subjects": len(parsed.get("subjects", [])),
                 "raw_text_characters": len(raw_ocr.get("raw_text", "")),
+                "ocr_engine": ocr_payload.get("ocr_engine"),
                 "table_preview": dumps(raw_ocr.get("table", [])[1:3], default=str)[:500],
                 "timings_seconds": {
                     **ocr_payload.get("timings_seconds", {}),
@@ -4457,15 +4459,25 @@ for api_path, methods, handler, path_parameters in _FASTAPI_ENDPOINTS:
 app.mount("/api/v1", api_app)
 app.middleware_stack = None
 
+def _ocr_startup_self_test():
+    try:
+        from ocr.docling_service import run_ocr_self_test
+        result = run_ocr_self_test()
+        status = "OK" if result["ok"] else "FAILED (OCR read no text)"
+        print(
+            f"[OCR] Self-test {status}: engine={result['engine']}, "
+            f"characters={result['characters']}, seconds={result['seconds']}",
+            flush=True,
+        )
+    except Exception as exc:
+        print(f"[OCR] Self-test FAILED: {exc}", flush=True)
+
+
 # Main entry point for the FastHTML frontend and mounted FastAPI backend.
 def main():
     os.makedirs(UPLOAD_FOLDER, exist_ok=True)
     init_database()
-    try:
-        from ocr.docling_service import _get_docling_converter
-        _get_docling_converter()
-    except Exception as exc:
-        print(f"Docling warm-up skipped: {exc}")
+    threading.Thread(target=_ocr_startup_self_test, name="ocr-self-test", daemon=True).start()
     port = int(os.getenv("PORT", "5000"))
     serve(port=port, reload=False, proxy_headers=True, forwarded_allow_ips="*")
 

@@ -1,7 +1,10 @@
+import io
 import os
 import re
 import tempfile
+import threading
 import time
+import traceback
 
 
 def _markdown_table_rows(markdown):
@@ -95,7 +98,7 @@ def _document_table_rows(document):
     rows = []
     for table in getattr(document, "tables", []) or []:
         try:
-            dataframe = table.export_to_dataframe()
+            dataframe = table.export_to_dataframe(doc=document)
             header = [str(value).strip() for value in dataframe.columns]
             rows.append({
                 "row": 0,
@@ -114,7 +117,7 @@ def _document_table_rows(document):
         except Exception:
             rows = []
         try:
-            table_markdown = table.export_to_markdown()
+            table_markdown = table.export_to_markdown(doc=document)
         except Exception:
             continue
         rows.extend(_markdown_table_rows(table_markdown))
@@ -265,6 +268,41 @@ def _split_merged_subjects(subjects):
 
 
 _DOCLING_CONVERTER = None
+_DOCLING_CONVERTER_LOCK = threading.Lock()
+OCR_ENGINE_INFO = {"engine": None, "error": None}
+
+
+def _rapidocr_import_error(backend):
+    try:
+        if backend == "onnxruntime":
+            import onnxruntime  # noqa: F401
+        else:
+            import torch  # noqa: F401
+        from rapidocr import EngineType, RapidOCR  # noqa: F401
+    except Exception as exc:
+        print(f"[OCR] rapidocr ({backend}) unavailable:\n{traceback.format_exc()}", flush=True)
+        return f"{type(exc).__name__}: {exc}"
+    return None
+
+
+def _select_ocr_options():
+    """Pick the OCR engine explicitly; Docling's auto mode silently disables OCR when no engine imports."""
+    from docling.datamodel.pipeline_options import OcrAutoOptions, RapidOcrOptions
+
+    auto_defaults = OcrAutoOptions()
+    requested = os.getenv("DOCLING_OCR_BACKEND", "").strip().lower()
+    candidates = [requested] if requested in {"torch", "onnxruntime"} else ["torch", "onnxruntime"]
+    errors = []
+    for backend in candidates:
+        error = _rapidocr_import_error(backend)
+        if error is None:
+            OCR_ENGINE_INFO.update(engine=f"rapidocr ({backend})", error=None)
+            print(f"[OCR] Using rapidocr with {backend} backend.", flush=True)
+            return RapidOcrOptions(backend=backend, lang=auto_defaults.lang, mode=auto_defaults.mode)
+        errors.append(f"rapidocr ({backend}): {error}")
+    message = "No OCR engine is available on the server. " + "; ".join(errors)
+    OCR_ENGINE_INFO.update(engine=None, error=message)
+    raise RuntimeError(message)
 
 
 def _get_docling_converter():
@@ -272,6 +310,13 @@ def _get_docling_converter():
     global _DOCLING_CONVERTER
     if _DOCLING_CONVERTER is not None:
         return _DOCLING_CONVERTER
+    with _DOCLING_CONVERTER_LOCK:
+        if _DOCLING_CONVERTER is None:
+            _DOCLING_CONVERTER = _build_docling_converter()
+    return _DOCLING_CONVERTER
+
+
+def _build_docling_converter():
 
     from docling.datamodel.base_models import InputFormat
     from docling.datamodel.pipeline_options import PdfPipelineOptions, TableFormerMode
@@ -287,9 +332,10 @@ def _get_docling_converter():
         do_table_structure=True,
         images_scale=float(os.getenv("DOCLING_IMAGES_SCALE", "1.5")),
     )
+    pipeline_options.ocr_options = _select_ocr_options()
     pipeline_options.table_structure_options.mode = TableFormerMode.FAST
     pipeline_options.table_structure_options.do_cell_matching = True
-    _DOCLING_CONVERTER = DocumentConverter(
+    return DocumentConverter(
         format_options={
             InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options),
             InputFormat.IMAGE: ImageFormatOption(
@@ -298,7 +344,32 @@ def _get_docling_converter():
             ),
         }
     )
-    return _DOCLING_CONVERTER
+
+
+def run_ocr_self_test():
+    """Run OCR on a generated image so missing engines or model downloads show up in the deploy logs."""
+    from PIL import Image, ImageDraw, ImageFont
+
+    image = Image.new("RGB", (1000, 300), "white")
+    draw = ImageDraw.Draw(image)
+    try:
+        font = ImageFont.load_default(size=56)
+    except TypeError:
+        font = ImageFont.load_default()
+    draw.text((40, 50), "General Mathematics 95", fill="black", font=font)
+    draw.text((40, 170), "Earth Science 91", fill="black", font=font)
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+
+    started = time.perf_counter()
+    payload = scan_report_card_docling(buffer.getvalue(), "ocr-self-test.png")
+    text = payload.get("raw_text", "")
+    return {
+        "ok": "95" in text or "Mathematics" in text,
+        "engine": OCR_ENGINE_INFO.get("engine"),
+        "characters": len(text),
+        "seconds": round(time.perf_counter() - started, 2),
+    }
 
 
 def scan_report_card_docling(file_bytes, filename="report_card.pdf"):
@@ -365,5 +436,6 @@ def scan_report_card_docling(file_bytes, filename="report_card.pdf"):
         "table": output_table,
         "subjects": output_subjects,
         "provider": "docling",
+        "ocr_engine": OCR_ENGINE_INFO.get("engine"),
         "timings_seconds": timings,
     }

@@ -2451,7 +2451,25 @@ function clearInputs() {
                 subjects: ''
             };
 
+            const reviewedStorageKey = (() => {
+                const source = `${record.subjects || ''}|${record.grades || ''}`;
+                let hash = 0;
+                for(let index = 0; index < source.length; index++) hash = (hash * 31 + source.charCodeAt(index)) | 0;
+                return `pathfinder-reviewed-grades:${hash}`;
+            })();
+
+            function savedReviewRows(){
+                try{
+                    const saved = JSON.parse(sessionStorage.getItem(reviewedStorageKey) || 'null');
+                    return Array.isArray(saved) && saved.length ? saved : null;
+                }catch{
+                    return null;
+                }
+            }
+
             function initialReviewRows(){
+                const savedRows = savedReviewRows();
+                if(savedRows) return savedRows.map(row => ({subject: String(row.subject || ''), grade: String(row.grade ?? ''), needsReview: false}));
                 const subjectLines = String(record.subjects || '').split(/\r?\n/).map(value => value.trim()).filter(Boolean);
                 const gradeValues = String(record.grades || '').split(/[\s,;|]+/).map(value => value.trim()).filter(Boolean);
                 const reviewSubjects = Array.isArray(record.reviewSubjects) ? record.reviewSubjects : [];
@@ -2566,15 +2584,68 @@ function clearInputs() {
                     row.querySelector('td')?.appendChild(notice);
                 }
                 row.querySelectorAll('input').forEach(inputElement => inputElement.addEventListener('input', () => {
+                    row.classList.remove('review-subject-row-invalid');
+                    markReviewUnsaved();
                     updateReviewAverage();
                     updateReviewWarnings();
                 }));
                 row.querySelector('.review-remove-row')?.addEventListener('click', () => {
                     row.remove();
+                    markReviewUnsaved();
                     updateReviewAverage();
                     updateReviewWarnings();
                 });
                 body.appendChild(row);
+            }
+
+            function markReviewUnsaved(){
+                const button = document.getElementById('save-review-grades');
+                if(!button || !button.classList.contains('is-saved')) return;
+                button.classList.remove('is-saved');
+                button.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> Save grades';
+            }
+
+            function saveReviewGrades(){
+                const button = document.getElementById('save-review-grades');
+                const warningBox = document.getElementById('review-quality-warning');
+                const rowElements = [...document.querySelectorAll('.review-subject-row')];
+                const invalidRows = [];
+                const savedRows = [];
+                rowElements.forEach(row => {
+                    const subject = row.querySelector('.review-subject-input')?.value.trim() || '';
+                    const gradeText = row.querySelector('.review-grade-input')?.value.trim() || '';
+                    if(!subject && !gradeText) return;
+                    const grade = Number.parseFloat(gradeText);
+                    const valid = subject && gradeText && Number.isFinite(grade) && grade >= 0 && grade <= 100;
+                    row.classList.toggle('review-subject-row-invalid', !valid);
+                    if(valid) savedRows.push({subject, grade: gradeText});
+                    else invalidRows.push(row);
+                });
+                if(invalidRows.length || !savedRows.length){
+                    if(warningBox){
+                        warningBox.classList.remove('review-quality-ok');
+                        warningBox.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i><div><strong>Grades not saved</strong><p>${savedRows.length ? `Fix the ${invalidRows.length} highlighted row${invalidRows.length === 1 ? '' : 's'}: each subject needs a name and a grade from 0 to 100.` : 'Add at least one subject with a grade before saving.'}</p></div>`;
+                    }
+                    invalidRows[0]?.querySelector('input')?.focus();
+                    return;
+                }
+                try{
+                    sessionStorage.setItem(reviewedStorageKey, JSON.stringify(savedRows));
+                }catch(error){
+                    console.warn('Could not persist reviewed grades', error);
+                }
+                rowElements.forEach(row => {
+                    delete row.dataset.needsReview;
+                    row.classList.remove('review-subject-row-flagged');
+                    row.querySelector('.review-subject-flag')?.remove();
+                });
+                window.latestOcrReviewRequired = false;
+                updateReviewAverage();
+                updateReviewWarnings();
+                if(button){
+                    button.classList.add('is-saved');
+                    button.innerHTML = '<i class="fa-solid fa-check"></i> Grades saved';
+                }
             }
 
             function reviewWarnings(){
@@ -2622,6 +2693,7 @@ function clearInputs() {
                     <button id="add-review-row" type="button" class="add-review-row"><i class="fa-solid fa-plus"></i> Add subject</button>
                     <div class="review-actions">
                         <button id="save-reviewed-record" type="button" class="review-primary-btn"><i class="fa-solid fa-wand-magic-sparkles"></i> ${isGuest ? 'Show recommendations' : 'Save and show recommendations'}</button>
+                        <button id="save-review-grades" type="button" class="review-save-btn${savedReviewRows() ? ' is-saved' : ''}">${savedReviewRows() ? '<i class="fa-solid fa-check"></i> Grades saved' : '<i class="fa-solid fa-floppy-disk"></i> Save grades'}</button>
                         <button id="discard-reviewed-record" type="button" class="review-secondary-btn">Discard</button>
                     </div>
                 </div>
@@ -2633,9 +2705,11 @@ function clearInputs() {
             (rows.length ? rows : [{subject:'', grade:''}]).forEach(row => addReviewRow(row.subject, row.grade, row));
             document.getElementById('add-review-row')?.addEventListener('click', () => {
                 addReviewRow();
+                markReviewUnsaved();
                 document.querySelector('.review-subject-row:last-child .review-subject-input')?.focus();
                 updateReviewWarnings();
             });
+            document.getElementById('save-review-grades')?.addEventListener('click', saveReviewGrades);
             updateReviewAverage();
             updateReviewWarnings();
 
@@ -2691,6 +2765,7 @@ function clearInputs() {
             });
 
             discardBtn && (discardBtn.onclick = () => {
+                try{ sessionStorage.removeItem(reviewedStorageKey); }catch{}
                 panel.style.display = 'none';
                 form.innerHTML = '';
             });

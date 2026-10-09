@@ -908,6 +908,17 @@ button:hover{
     color: #34415b;
 }
 
+.review-save-btn{
+    border: 1px solid #b9c1f1;
+    background: #f0f2ff;
+    color: #3548d4;
+    transition: background-color .2s ease, border-color .2s ease, color .2s ease;
+}
+.review-save-btn:hover{border-color:#8e99ee;background:#e5e9ff;}
+.review-save-btn.is-saved{border-color:#9fd8b8;background:#ecfaf2;color:#17804a;}
+.review-subject-row-invalid td{background:#fff1f1;}
+.review-subject-row-invalid input{border-color:#e07a7a;}
+
 .review-quality-warning{display:flex;align-items:flex-start;gap:11px;padding:14px;border:1px solid #efcf9e;border-radius:7px;background:#fff8eb;color:#805617;font-size:12px;line-height:1.45;}
 .review-quality-warning i{margin-top:2px;}
 .review-quality-warning ul{margin:5px 0 0;padding-left:18px;}
@@ -1669,6 +1680,11 @@ html.student-dark .review-subject-table{background:#171c2b;}
 html.student-dark .review-subject-table th{background:#1f2537;color:#c4cae0;}
 html.student-dark .review-subject-table td{border-color:#2a3247;}
 html.student-dark .review-subject-row-flagged td:first-child{background:#2a2213;}
+html.student-dark .review-save-btn{border-color:#3d4677;background:#1f2540;color:#b9c2ff;}
+html.student-dark .review-save-btn:hover{border-color:#5865d8;background:#262d50;}
+html.student-dark .review-save-btn.is-saved{border-color:#2f6b4b;background:#15291f;color:#7ee0a8;}
+html.student-dark .review-subject-row-invalid td{background:#2e1719;}
+html.student-dark .review-subject-row-invalid input{border-color:#c25a5a;}
 html.student-dark .review-subject-flag{color:#f2c98a;}
 html.student-dark .review-remove-row{color:#ff9b9b;}
 html.student-dark .add-review-row{color:#a9b5ff;}

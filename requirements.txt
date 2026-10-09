@@ -9,6 +9,13 @@ python-dotenv
 jinja2
 scikit-learn
 opencv-python-headless
-docling
+# OCR stack pinned to the versions verified locally; unpinned installs can leave Docling without an OCR engine.
+docling==2.130.0
+docling-core==2.98.0
+docling-ibm-models==4.0.3
+docling-parse==7.21.0
+rapidocr==3.9.2
+torch==2.14.0
+torchvision==0.29.0
 pytest
 reportlab
