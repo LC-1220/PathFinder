@@ -94,7 +94,7 @@
       <div id="adminAccountsWrap">Loading admin accounts...</div>
     </section>
     <section id="admin-activity" class="admin-students-section" style="margin-top:22px">
-      <div class="admin-student-list-heading"><div><span class="admin-panel-kicker">AUDIT TRAIL</span><h3>Admin activity</h3></div><div class="admin-activity-toolbar"><label class="admin-activity-filter" for="adminActivityCategory"><span>Category</span><select id="adminActivityCategory" onchange="filterAdminActivity()"><option value="all">All activity</option><option value="student">Student activity</option><option value="admin">Admin activity</option></select></label><button id="refresh-admin-activity" class="report-secondary-action" type="button"><i class="fa-solid fa-rotate" aria-hidden="true"></i><span>Refresh</span></button></div></div>
+      <div class="admin-student-list-heading"><div><span class="admin-panel-kicker">AUDIT TRAIL</span><h3>Activity log</h3></div><div class="admin-activity-toolbar"><label class="admin-activity-filter" for="adminActivityCategory"><span>Category</span><select id="adminActivityCategory" onchange="filterAdminActivity()"><option value="all">All activity</option><option value="student">Student activity</option><option value="admin">Admin activity</option></select></label><label class="admin-activity-filter admin-activity-date" for="adminActivityFrom"><span>From</span><input id="adminActivityFrom" type="datetime-local" onchange="filterAdminActivity()"></label><label class="admin-activity-filter admin-activity-date" for="adminActivityTo"><span>To</span><input id="adminActivityTo" type="datetime-local" onchange="filterAdminActivity()"></label><button id="clear-admin-activity-filters" class="report-secondary-action" type="button" onclick="clearAdminActivityFilters()"><i class="fa-solid fa-xmark" aria-hidden="true"></i><span>Clear</span></button><button id="refresh-admin-activity" class="report-secondary-action" type="button"><i class="fa-solid fa-rotate" aria-hidden="true"></i><span>Refresh</span></button></div></div>
       <div id="adminActivityWrap">Loading admin activity...</div>
     </section>
     <section id="system-settings" class="admin-students-section admin-system-settings" style="margin-top:22px">
@@ -961,25 +961,58 @@ async function removeAdminAccount(userId){
   }
 }
 
-function getAdminActivityCategory(action){
-  const event = String(action || '');
-  return event.startsWith('student_') || event.startsWith('report_card_') || event.startsWith('recommendations_')
-    ? 'student'
-    : 'admin';
+function getAdminActivityCategory(item){
+  return item?.actor_role === 'student' ? 'student' : 'admin';
+}
+
+const studentActivityLabels = {
+  login: 'Signed in',
+  logout: 'Signed out',
+  account_registered: 'Created an account',
+  report_card_uploaded: 'Uploaded a report card',
+  report_card_upload_failed: 'Report card upload failed',
+  grades_saved: 'Saved grades and profile',
+  recommendations_generated: 'Generated course recommendations',
+  account_name_changed: 'Changed account name',
+  profile_picture_changed: 'Changed profile picture',
+};
+
+function formatActivityAction(item){
+  if(item.actor_role === 'student' && studentActivityLabels[item.action]) return studentActivityLabels[item.action];
+  const text = String(item.action || '').replaceAll('_', ' ');
+  return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
 function filterAdminActivity(){
   const wrap = document.getElementById('adminActivityWrap');
   const category = document.getElementById('adminActivityCategory')?.value || 'all';
+  const fromValue = document.getElementById('adminActivityFrom')?.value;
+  const toValue = document.getElementById('adminActivityTo')?.value;
+  const fromTime = fromValue ? new Date(fromValue).getTime() : null;
+  // datetime-local has minute precision, so include the whole "To" minute.
+  const toTime = toValue ? new Date(toValue).getTime() + 59999 : null;
   const rows = Array.from(wrap?.querySelectorAll('tbody tr[data-activity-category]') || []);
   let visibleCount = 0;
   rows.forEach(row => {
-    const visible = category === 'all' || row.dataset.activityCategory === category;
+    const rowTime = Number(row.dataset.activityTime);
+    const hasTime = Number.isFinite(rowTime) && rowTime > 0;
+    const inRange = (fromTime === null || (hasTime && rowTime >= fromTime)) && (toTime === null || (hasTime && rowTime <= toTime));
+    const visible = (category === 'all' || row.dataset.activityCategory === category) && inRange;
     row.hidden = !visible;
     if(visible) visibleCount += 1;
   });
   const emptyRow = wrap?.querySelector('.admin-activity-filter-empty');
   if(emptyRow) emptyRow.hidden = visibleCount > 0;
+}
+
+function clearAdminActivityFilters(){
+  const category = document.getElementById('adminActivityCategory');
+  const from = document.getElementById('adminActivityFrom');
+  const to = document.getElementById('adminActivityTo');
+  if(category) category.value = 'all';
+  if(from) from.value = '';
+  if(to) to.value = '';
+  filterAdminActivity();
 }
 
 async function loadAdminActivity(){
@@ -989,8 +1022,8 @@ async function loadAdminActivity(){
     const result = await fetchJsonOrThrow('/admin/activity');
     const activity = result.activity || [];
     wrap.innerHTML = activity.length
-      ? `<div class="admin-activity-table-wrap" role="region" aria-label="Admin activity records" tabindex="0"><table class="table-fixed admin-students-table admin-activity-table"><thead><tr><th>When</th><th>Administrator</th><th>Action</th><th>Target</th><th>Session IP</th><th>Details</th></tr></thead><tbody>${activity.map(item => `<tr data-activity-category="${getAdminActivityCategory(item.action)}"><td>${escapeAdminHtml(formatReportDate(item.created_at))}</td><td>${escapeAdminHtml(item.actor_name)}<small class="admin-current-account">${escapeAdminHtml(item.actor_email)}</small></td><td>${escapeAdminHtml(item.action.replaceAll('_', ' '))}</td><td>${escapeAdminHtml(item.target_label || '—')}</td><td>${escapeAdminHtml(item.session_ip || '—')}</td><td>${escapeAdminHtml(item.details || '—')}</td></tr>`).join('')}<tr class="admin-activity-filter-empty" hidden><td colspan="6">No activity in this category.</td></tr></tbody></table></div>`
-      : '<div class="records-empty">No admin activity recorded yet.</div>';
+      ? `<div class="admin-activity-table-wrap" role="region" aria-label="Admin activity records" tabindex="0"><table class="table-fixed admin-students-table admin-activity-table"><thead><tr><th>When</th><th>User</th><th>Action</th><th>Target</th><th>Session IP</th><th>Details</th></tr></thead><tbody>${activity.map(item => `<tr data-activity-category="${getAdminActivityCategory(item)}" data-activity-time="${Date.parse(item.created_at) || 0}"><td>${escapeAdminHtml(formatReportDate(item.created_at))}</td><td>${escapeAdminHtml(item.actor_name)}<span class="admin-activity-role is-${item.actor_role === 'student' ? 'student' : 'admin'}">${item.actor_role === 'student' ? 'Student' : 'Admin'}</span><small class="admin-current-account">${escapeAdminHtml(item.actor_email)}</small></td><td>${escapeAdminHtml(formatActivityAction(item))}</td><td>${escapeAdminHtml(item.target_label || '—')}</td><td>${escapeAdminHtml(item.session_ip || '—')}</td><td>${escapeAdminHtml(item.details || '—')}</td></tr>`).join('')}<tr class="admin-activity-filter-empty" hidden><td colspan="6">No activity matches these filters.</td></tr></tbody></table></div>`
+      : '<div class="records-empty">No activity recorded yet.</div>';
     filterAdminActivity();
   }catch(error){
     wrap.innerHTML = `<div class="records-empty">${escapeAdminHtml(error.message || 'Unable to load admin activity.')}</div>`;
@@ -1264,6 +1297,36 @@ async function refreshReportCards(){
   if(report) openReportReview(report.id);
 }
 
+const ADMIN_STUDENTS_PER_PAGE = 10;
+let adminStudentPage = 1;
+
+function setAdminStudentPage(page){
+  adminStudentPage = page;
+  renderAdminStudents();
+  const section = document.getElementById('view-students');
+  if(section && section.getBoundingClientRect().top < 0) section.scrollIntoView({behavior: 'smooth', block: 'start'});
+}
+
+function resetAdminStudentPage(){
+  adminStudentPage = 1;
+  renderAdminStudents();
+}
+
+function buildAdminStudentPager(total, totalPages){
+  if(totalPages <= 1) return `<div class="admin-student-pager"><span class="admin-student-pager-info">Showing ${total} of ${total} students</span></div>`;
+  const start = (adminStudentPage - 1) * ADMIN_STUDENTS_PER_PAGE + 1;
+  const end = Math.min(adminStudentPage * ADMIN_STUDENTS_PER_PAGE, total);
+  const pages = [];
+  for(let page = 1; page <= totalPages; page += 1){
+    if(page === 1 || page === totalPages || Math.abs(page - adminStudentPage) <= 1) pages.push(page);
+    else if(pages[pages.length - 1] !== '…') pages.push('…');
+  }
+  const pageButtons = pages.map(page => page === '…'
+    ? '<span class="admin-student-pager-gap" aria-hidden="true">…</span>'
+    : `<button type="button" class="admin-student-pager-btn${page === adminStudentPage ? ' is-active' : ''}" data-student-page="${page}" aria-label="Page ${page}"${page === adminStudentPage ? ' aria-current="page"' : ''}>${page}</button>`).join('');
+  return `<nav class="admin-student-pager" aria-label="Student list pages"><span class="admin-student-pager-info">Showing ${start}–${end} of ${total} students</span><div class="admin-student-pager-controls"><button type="button" class="admin-student-pager-btn" data-student-page="${adminStudentPage - 1}" aria-label="Previous page"${adminStudentPage === 1 ? ' disabled' : ''}><i class="fa-solid fa-chevron-left" aria-hidden="true"></i></button>${pageButtons}<button type="button" class="admin-student-pager-btn" data-student-page="${adminStudentPage + 1}" aria-label="Next page"${adminStudentPage === totalPages ? ' disabled' : ''}><i class="fa-solid fa-chevron-right" aria-hidden="true"></i></button></div></nav>`;
+}
+
 function renderAdminStudents(){
   const wrap = document.getElementById('studentsWrap');
   if(!wrap) return;
@@ -1277,13 +1340,19 @@ function renderAdminStudents(){
       && (!status || (status === 'active') === Boolean(student.is_active));
   });
   if(!filtered.length){ wrap.innerHTML = '<div class="records-empty">No students found.</div>'; return; }
-  wrap.innerHTML = `<table class="table-fixed admin-students-table"><thead><tr><th>Student number</th><th>Student</th><th>Strand</th><th>GWA</th><th>Account</th><th>Report</th></tr></thead><tbody>${filtered.map(student => {
+  const totalPages = Math.max(1, Math.ceil(filtered.length / ADMIN_STUDENTS_PER_PAGE));
+  adminStudentPage = Math.min(Math.max(1, adminStudentPage), totalPages);
+  const pageStudents = filtered.slice((adminStudentPage - 1) * ADMIN_STUDENTS_PER_PAGE, adminStudentPage * ADMIN_STUDENTS_PER_PAGE);
+  wrap.innerHTML = `<table class="table-fixed admin-students-table"><thead><tr><th>Student number</th><th>Student</th><th>Strand</th><th>GWA</th><th>Account</th><th>Report</th></tr></thead><tbody>${pageStudents.map(student => {
     const accountStatus = student.is_active ? 'Active' : 'Deactivated';
     const reportAction = student.report_card_upload_id
       ? `<button class="student-report-button" type="button" data-report-id="${student.report_card_upload_id}" aria-label="View uploaded report card"><i class="fa-solid fa-eye" aria-hidden="true"></i><span>View</span></button>`
       : '<span class="student-report-empty">Not uploaded</span>';
     return `<tr><td>${escapeAdminHtml(student.student_number || '—')}</td><td><button class="student-name-link" type="button" data-student-id="${student.id}">${escapeAdminHtml(student.student_name || 'Unnamed student')}<small>${escapeAdminHtml(student.email)}</small></button></td><td>${escapeAdminHtml(student.strand || '—')}</td><td>${escapeAdminHtml(student.gwa || '—')}</td><td><span class="student-status ${student.is_active ? 'is-active' : 'is-inactive'}">${accountStatus}</span></td><td>${reportAction}</td></tr>`;
-  }).join('')}</tbody></table>`;
+  }).join('')}</tbody></table>${buildAdminStudentPager(filtered.length, totalPages)}`;
+  wrap.querySelectorAll('.admin-student-pager-btn[data-student-page]').forEach(button => button.addEventListener('click', () => {
+    if(!button.disabled) setAdminStudentPage(Number(button.dataset.studentPage));
+  }));
   wrap.querySelectorAll('.student-name-link').forEach(button => button.addEventListener('click', () => openStudentEditor(button.dataset.studentId)));
   wrap.querySelectorAll('.student-report-button').forEach(button => button.addEventListener('click', () => {
     const reportUrl = `/api/v1/admin/report_cards/${encodeURIComponent(button.dataset.reportId)}`;
@@ -1402,9 +1471,9 @@ async function openStudentEditor(studentId){
   }catch(error){ alert(error.message || 'Unable to load student record.'); }
 }
 
-document.getElementById('globalSearch')?.addEventListener('input', renderAdminStudents);
-document.getElementById('strandFilter')?.addEventListener('change', renderAdminStudents);
-document.getElementById('studentStatusFilter')?.addEventListener('change', renderAdminStudents);
+document.getElementById('globalSearch')?.addEventListener('input', resetAdminStudentPage);
+document.getElementById('strandFilter')?.addEventListener('change', resetAdminStudentPage);
+document.getElementById('studentStatusFilter')?.addEventListener('change', resetAdminStudentPage);
 document.getElementById('close-student-editor')?.addEventListener('click', () => { document.getElementById('student-editor-modal').hidden = true; });
 document.getElementById('close-subadmin-profile')?.addEventListener('click', () => { document.getElementById('subadmin-profile-modal').hidden = true; });
 document.getElementById('subadmin-profile-modal')?.addEventListener('click', event => {

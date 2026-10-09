@@ -1519,6 +1519,7 @@ def init_database():
         """
     )
     cursor.execute("ALTER TABLE admin_activity_logs ADD COLUMN IF NOT EXISTS session_ip TEXT NOT NULL DEFAULT ''")
+    cursor.execute("ALTER TABLE admin_activity_logs ADD COLUMN IF NOT EXISTS actor_role TEXT NOT NULL DEFAULT 'admin'")
     cursor.execute(
         """
         INSERT INTO course_recommendation_history (profile_id, recommendations)
@@ -1659,6 +1660,47 @@ def _record_admin_activity(sess, action, target_user_id=None, target_label="", d
                 pass
     finally:
         if owns_connection and conn is not None:
+            conn.close()
+
+
+def _client_ip(req):
+    forwarded = (req.headers.get("x-forwarded-for") or "").split(",")[0].strip()
+    return forwarded or (req.client.host if req.client else "")
+
+
+def _record_student_activity(req, action, details="", target_label="", user_id=None, name=None, email=None):
+    sess = req.session
+    actor_id = user_id or sess.get("user_id")
+    if not actor_id or (user_id is None and sess.get("role", "student") != "student"):
+        return
+    conn = None
+    try:
+        conn = _db_conn()
+        conn.execute(
+            """
+            INSERT INTO admin_activity_logs
+                (actor_user_id, actor_name, actor_email, action, target_label, details, session_ip, actor_role)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'student')
+            """,
+            (
+                actor_id,
+                str(name if name is not None else sess.get("name") or "")[:200],
+                str(email if email is not None else sess.get("email") or "")[:320],
+                str(action)[:100],
+                str(target_label or "")[:320],
+                str(details or "")[:1000],
+                str(_client_ip(req))[:64],
+            ),
+        )
+        conn.commit()
+    except Exception:
+        if conn is not None:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+    finally:
+        if conn is not None:
             conn.close()
 
 # Render a template with the current session context and additional context variables
@@ -1836,6 +1878,8 @@ async def generate_recommendations(req):
         )
     conn.commit()
     conn.close()
+    top_course = (recommendations[0] or {}).get("course", "") if recommendations else ""
+    _record_student_activity(req, "recommendations_generated", f"{len(recommendations)} courses; top match: {top_course}" if top_course else f"{len(recommendations)} courses")
     return JSONResponse({"success": True, "count": len(recommendations)})
 
 
@@ -1860,11 +1904,14 @@ async def register(req):
             INSERT INTO users
             (name, email, password_hash, role, profile_picture)
             VALUES (?, ?, ?, ?, ?)
+            RETURNING id
             """,
             (name, email, hashed_password, "student", "default.svg"),
         )
+        new_user_id = cursor.fetchone()[0]
         conn.commit()
         conn.close()
+        _record_student_activity(req, "account_registered", "Email sign-up", user_id=new_user_id, name=name, email=email)
         return JSONResponse({"success": True, "message": "Account Created"})
     except UniqueViolation:
         return JSONResponse({"success": False, "message": "Email already exists"})
@@ -1925,6 +1972,8 @@ async def login(req):
     _set_session_profile_image(sess, profile_picture)
     if role in (ROLE_ADMIN, ROLE_SEMI_ADMIN):
         _record_admin_activity(sess, "login", target_label=username or email or "")
+    else:
+        _record_student_activity(req, "login", "Email and password")
 
     resp = {"success": True}
     if role in (ROLE_ADMIN, ROLE_SEMI_ADMIN):
@@ -1938,6 +1987,7 @@ async def login(req):
 @fastapi_route("/logout", methods=["GET"])
 def logout(req):
     _record_admin_activity(req.session, "logout")
+    _record_student_activity(req, "logout")
     req.session.clear()
     return RedirectResponse("/", status_code=302)
 
@@ -2061,20 +2111,22 @@ def admin_get_activity(req):
     cursor = conn.cursor()
     cursor.execute(
         """
-        SELECT id, actor_name, actor_email, action, target_label, details, session_ip, created_at
+        SELECT id, actor_name, actor_email, action, target_label, details, session_ip, created_at,
+               COALESCE(actor_role, 'admin')
         FROM admin_activity_logs
         ORDER BY created_at DESC, id DESC
-        LIMIT 500
+        LIMIT 1000
         """
     )
     rows = cursor.fetchall()
     conn.close()
     return JSONResponse({"success": True, "activity": [
         {
-            "id": row[0], "actor_name": row[1] or "Unknown admin",
+            "id": row[0], "actor_name": row[1] or ("Unknown student" if row[8] == "student" else "Unknown admin"),
             "actor_email": row[2] or "", "action": row[3],
             "target_label": row[4] or "", "details": row[5] or "",
             "session_ip": row[6] or "", "created_at": row[7].isoformat() if row[7] else "",
+            "actor_role": row[8],
         }
         for row in rows
     ]})
@@ -3527,6 +3579,17 @@ async def save_profile(req):
     sess.pop("latest_report_card_upload_id", None)
     sess.pop("latest_report_card_upload_ids", None)
     sess.pop("latest_report_card_batch", None)
+    saved_subject_count = len([line for line in str(subjects_text or "").splitlines() if line.strip()])
+    top_course = (recommendation[0] or {}).get("course", "") if recommendation else ""
+    _record_student_activity(
+        req,
+        "grades_saved",
+        "; ".join(part for part in (
+            f"{saved_subject_count} subjects",
+            f"GWA {normalized_gwa}" if normalized_gwa else "",
+            f"top match: {top_course}" if top_course else "",
+        ) if part),
+    )
     # Build the comparisons for the top 3 recommended courses based on student performance analytics
     comparisons = {
         item["course"]: _build_student_performance_analytics(item["course"], subjects_text)
@@ -3558,6 +3621,8 @@ async def update_account(req):
     sess["name"] = name
     if sess.get("role") in (ROLE_ADMIN, ROLE_SEMI_ADMIN):
         _record_admin_activity(sess, "profile_name_changed", target_label=sess.get("email", ""))
+    else:
+        _record_student_activity(req, "account_name_changed", f"New name: {name}")
     return JSONResponse({"success": True, "name": name})
 
 # Define the route for changing the admin password
@@ -3717,6 +3782,8 @@ async def upload_profile_picture(req):
     _set_session_profile_image(sess, stored_value)
     if sess.get("role") in (ROLE_ADMIN, ROLE_SEMI_ADMIN):
         _record_admin_activity(sess, "profile_picture_changed", target_label=sess.get("email", ""))
+    else:
+        _record_student_activity(req, "profile_picture_changed", filename_in)
     return JSONResponse({"success": True, "picture": stored_value, "profile_image": _profile_image_from_value(stored_value)})
 
 
@@ -3865,6 +3932,10 @@ async def google_authorize(req):
     _set_session_profile_image(sess, current_picture)
     if role in (ROLE_ADMIN, ROLE_SEMI_ADMIN):
         _record_admin_activity(sess, "google_login", target_label=email)
+    else:
+        if not existing_user:
+            _record_student_activity(req, "account_registered", "Google sign-up")
+        _record_student_activity(req, "login", "Google account")
 
     return RedirectResponse("/admin/dashboard" if role in (ROLE_ADMIN, ROLE_SEMI_ADMIN) else "/home", status_code=302)
 
@@ -4055,6 +4126,13 @@ async def ocr_report_card(req):
             )
             conn.commit()
             conn.close()
+        subject_count = len(parsed.get("subjects", []))
+        _record_student_activity(
+            req,
+            "report_card_uploaded",
+            f"{subject_count} subjects extracted" + ("; needs review" if parsed.get("needs_review") else ""),
+            target_label=filename,
+        )
         return JSONResponse({
             "success": True,
             "message": "Report card extraction completed using Docling.",
@@ -4086,6 +4164,7 @@ async def ocr_report_card(req):
             )
             conn.commit()
             conn.close()
+        _record_student_activity(req, "report_card_upload_failed", str(exc)[:300], target_label=filename)
         return JSONResponse({"success": False, "message": f"Report card OCR failed: {exc}"})
 
 

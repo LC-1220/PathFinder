@@ -2178,6 +2178,7 @@ body.logout-confirm-open {
 .admin-page .admin-activity-toolbar {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 10px;
 }
 .admin-page .admin-activity-filter {
@@ -2195,6 +2196,31 @@ body.logout-confirm-open {
   background: #fff;
   color: var(--admin-ink);
   font: 500 12px "DM Sans", sans-serif;
+}
+.admin-page .admin-activity-date input {
+  min-height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--admin-line);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--admin-ink);
+  font: 500 12px "DM Sans", sans-serif;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+.admin-page .admin-activity-date input:focus {
+  outline: none;
+  border-color: var(--admin-accent, #8b0000);
+  box-shadow: 0 0 0 3px rgba(139, 0, 0, 0.14);
+}
+.admin-page .admin-activity-date input::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  opacity: 0.7;
+}
+.admin-dark .admin-page .admin-activity-date input {
+  background: #211e21;
+  color: #eee9e7;
+  border-color: #4b3d40;
+  color-scheme: dark;
 }
 .admin-page .system-settings-grid {
   display: grid;
@@ -2338,8 +2364,9 @@ body.logout-confirm-open {
   outline: 0;
 }
 .admin-page #studentsWrap {
-  max-height: min(62vh, 680px);
-  overflow: auto;
+  max-height: none;
+  overflow-x: auto;
+  overflow-y: visible;
   padding: 0;
   border: 1px solid var(--admin-line);
   border-radius: 5px;
@@ -2795,7 +2822,58 @@ body.logout-confirm-open {
   border-color: var(--admin-green);
   background: var(--admin-green);
   color: #fff;
-}.admin-page .admin-report-preview p,
+}
+.admin-page .admin-student-pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 12px 14px;
+  border-top: 1px solid var(--admin-line);
+}
+.admin-page .admin-student-pager-info {
+  color: var(--admin-muted);
+  font: 600 12px "DM Sans", sans-serif;
+}
+.admin-page .admin-student-pager-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.admin-page .admin-student-pager-btn {
+  min-width: 34px;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--admin-line);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--admin-ink);
+  font: 700 12px "DM Sans", sans-serif;
+  cursor: pointer;
+  transition: background .18s ease, color .18s ease, border-color .18s ease, transform .18s ease;
+}
+.admin-page .admin-student-pager-btn:hover:not(:disabled):not(.is-active) {
+  border-color: var(--admin-green);
+  color: var(--admin-green);
+  transform: translateY(-1px);
+}
+.admin-page .admin-student-pager-btn.is-active {
+  border-color: var(--admin-green);
+  background: var(--admin-green);
+  color: #fff;
+  cursor: default;
+}
+.admin-page .admin-student-pager-btn:disabled {
+  opacity: .4;
+  cursor: not-allowed;
+}
+.admin-page .admin-student-pager-gap {
+  padding: 0 2px;
+  color: var(--admin-muted);
+}
+.admin-page .admin-report-preview p,
 .admin-page .student-detail-empty {
   margin: 6px 0;
   color: var(--admin-muted);
@@ -4699,7 +4777,8 @@ html.admin-dark .admin-page select option:checked {
     min-width: 0;
     grid-template-columns: auto minmax(0, 1fr);
   }
-  .admin-page .admin-activity-filter select {
+  .admin-page .admin-activity-filter select,
+  .admin-page .admin-activity-date input {
     width: 100%;
     min-width: 0;
   }
@@ -4772,4 +4851,58 @@ html.admin-dark .admin-page select option:checked {
 
 body.admin-page:has(.student-editor-modal:not([hidden]), .admin-settings-panel:not([hidden])) {
   overflow: hidden;
+}
+
+html.admin-dark .admin-page .recommendation-detail-item {
+  border-color: var(--admin-line);
+  background: #2a2426;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.03) inset;
+}
+html.admin-dark .admin-page .recommendation-detail-item h4,
+html.admin-dark .admin-page .recommendation-detail-item .recommendation-detail-reason {
+  color: var(--admin-ink);
+}
+html.admin-dark .admin-page .recommendation-detail-item p {
+  color: var(--admin-muted);
+}
+html.admin-dark .admin-page .recommendation-detail-item .recommendation-detail-reason strong {
+  color: #fff0ec;
+}
+html.admin-dark .admin-page .recommendation-fit-tags span {
+  background: #382e30;
+  color: #f2c9c5;
+}
+html.admin-dark .admin-page .recommendation-detail-columns th {
+  background: #382e30;
+  color: var(--admin-muted);
+}
+html.admin-dark .admin-page .recommendation-detail-columns :is(th, td) {
+  border-color: var(--admin-line);
+}
+.admin-page .admin-activity-role {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .03em;
+  text-transform: uppercase;
+  vertical-align: middle;
+}
+.admin-page .admin-activity-role.is-student {
+  background: #e7ecfb;
+  color: #3b4fa8;
+}
+.admin-page .admin-activity-role.is-admin {
+  background: #f6e6e4;
+  color: #800000;
+}
+html.admin-dark .admin-page .admin-activity-role.is-student {
+  background: #2e3350;
+  color: #c3ccff;
+}
+html.admin-dark .admin-page .admin-activity-role.is-admin {
+  background: #3d2b2e;
+  color: #f2c9c5;
 }
