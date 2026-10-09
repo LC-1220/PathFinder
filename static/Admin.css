@@ -2831,6 +2831,8 @@ body.logout-confirm-open {
   gap: 10px;
   padding: 12px 14px;
   border-top: 1px solid var(--admin-line);
+  position: sticky;
+  left: 0;
 }
 .admin-page .admin-student-pager-info {
   color: var(--admin-muted);
