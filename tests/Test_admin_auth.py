@@ -117,3 +117,97 @@ def test_first_login_dashboard_shows_modal_and_blocks_admin_data(monkeypatch):
     assert blocked.status_code == 403
     assert blocked.json()["code"] == "password_change_required"
     assert legacy.headers["location"] == "/admin/dashboard"
+
+
+class PasswordCursor(AuthCursor):
+    def __init__(self, role, password, forced=False):
+        super().__init__()
+        self.role = role
+        self.password_hash = app._hash_password(password)
+        self.forced = forced
+
+    def execute(self, query, params=()):
+        super().execute(query, params)
+        if "UPDATE users SET password_hash" in query:
+            self.password_hash = params[0]
+            self.forced = False
+
+    def fetchone(self):
+        if "SELECT password_hash" in self.statements[-1][0]:
+            return (self.password_hash,)
+        return (self.role, True, self.forced)
+
+
+@pytest.mark.parametrize("role", [app.ROLE_SUPER_ADMIN, app.ROLE_SEMI_ADMIN])
+@pytest.mark.parametrize("forced", [False, True])
+def test_admin_can_change_own_password(monkeypatch, role, forced):
+    cursor = PasswordCursor(role, "OldPassword!", forced)
+    monkeypatch.setattr(app, "_db_conn", lambda: AuthConnection(cursor))
+    actions = []
+    monkeypatch.setattr(app, "_record_admin_activity", lambda session, action, **kwargs: actions.append(action))
+    request = AuthRequest({
+        "current_password": "OldPassword!",
+        "new_password": "NewPassword!",
+        "confirm_password": "NewPassword!",
+    })
+    response = asyncio.run(app.admin_change_password(request))
+
+    assert response.status_code == 200
+    assert json.loads(response.body)["success"] is True
+    assert app._check_password(cursor.password_hash, "NewPassword!")
+    assert not app._check_password(cursor.password_hash, "OldPassword!")
+    assert request.session["must_change_password"] is False
+    assert request.session["role"] == role
+    assert actions == ["temporary_password_changed" if forced else "password_changed"]
+    update = next(params for query, params in cursor.statements if "UPDATE users SET password_hash" in query)
+    assert update[1] == request.session["user_id"]
+
+
+@pytest.mark.parametrize(("current", "new", "confirmation", "message"), [
+    ("WrongPassword!", "NewPassword!", "NewPassword!", "Current password is incorrect."),
+    ("OldPassword!", "NewPassword!", "DifferentPassword!", "New passwords do not match."),
+    ("OldPassword!", "weak", "weak", app._password_policy_error("weak")),
+    ("OldPassword!", "OldPassword!", "OldPassword!", "Choose a password different from your current password."),
+    ("", "NewPassword!", "NewPassword!", "Complete all password fields."),
+])
+def test_super_admin_password_change_rejects_invalid_input(monkeypatch, current, new, confirmation, message):
+    cursor = PasswordCursor(app.ROLE_SUPER_ADMIN, "OldPassword!")
+    original_hash = cursor.password_hash
+    monkeypatch.setattr(app, "_db_conn", lambda: AuthConnection(cursor))
+    request = AuthRequest({
+        "current_password": current, "new_password": new, "confirm_password": confirmation,
+    })
+    response = asyncio.run(app.admin_change_password(request))
+    assert response.status_code == 400
+    assert json.loads(response.body)["message"] == message
+    assert cursor.password_hash == original_hash
+    assert not any("UPDATE users" in query for query, _ in cursor.statements)
+
+
+@pytest.mark.parametrize("role", [app.ROLE_SUPER_ADMIN, app.ROLE_SEMI_ADMIN])
+def test_admin_dashboard_includes_password_change_option(monkeypatch, role):
+    secret = app.app.user_middleware[0].kwargs["secret_key"]
+    session = {"user_id": 12345, "role": role, "name": "Test Admin"}
+    cookie = TimestampSigner(secret).sign(base64.b64encode(json.dumps(session).encode())).decode()
+    monkeypatch.setattr(app, "_db_conn", lambda: AuthConnection(AuthCursor((role, True, False))))
+    monkeypatch.setattr(app, "_get_system_settings", lambda: app.SYSTEM_SETTING_DEFAULTS)
+    with TestClient(app.app) as client:
+        client.cookies.set("session_", cookie)
+        dashboard = client.get("/admin/dashboard", headers={"Accept": "text/html"})
+    assert dashboard.status_code == 200
+    assert 'data-admin-settings="account"' in dashboard.text
+    assert 'id="admin-password-form"' in dashboard.text
+    assert 'name="current_password"' in dashboard.text
+    assert 'name="new_password"' in dashboard.text
+    assert 'name="confirm_password"' in dashboard.text
+
+
+def test_password_change_requires_admin_account(monkeypatch):
+    cursor = AuthCursor(("student", True, False))
+    monkeypatch.setattr(app, "_db_conn", lambda: AuthConnection(cursor))
+    request = AuthRequest({
+        "current_password": "OldPassword!", "new_password": "NewPassword!", "confirm_password": "NewPassword!",
+    })
+    response = asyncio.run(app.admin_change_password(request))
+    assert response.status_code == 401
+    assert not any("UPDATE users" in query for query, _ in cursor.statements)

@@ -470,6 +470,8 @@ adminNameForm?.addEventListener('submit', async event => {
 
 adminPasswordForm?.addEventListener('submit', async event => {
   event.preventDefault();
+  const button = adminPasswordForm.querySelector('button[type="submit"]');
+  button.disabled = true;
   adminPasswordStatus.textContent = 'Updating...';
   const values = Object.fromEntries(new FormData(adminPasswordForm).entries());
   try{
@@ -478,6 +480,8 @@ adminPasswordForm?.addEventListener('submit', async event => {
     adminPasswordStatus.textContent = result.message || 'Password updated.';
   }catch(error){
     adminPasswordStatus.textContent = error.message || 'Could not update password.';
+  }finally{
+    button.disabled = false;
   }
 });
 
@@ -521,10 +525,13 @@ adminPictureInput?.addEventListener('change', async () => {
   }
 });
 
-function setAdminSettings(open){
+function setAdminSettings(open, tabName = 'profile'){
   if(!adminSettingsPanel) return;
   adminSettingsPanel.hidden = !open;
-  if(open) selectAdminSettingsTab('profile');
+  if(open){
+    selectAdminSettingsTab(tabName);
+    if(tabName === 'account') document.getElementById('admin-current-password')?.focus();
+  }
   adminSettingsTriggers.forEach(trigger => trigger.setAttribute('aria-expanded', String(open)));
 }
 
@@ -540,12 +547,12 @@ adminSettingsTriggers.forEach(trigger => trigger.addEventListener('click', event
   event.stopPropagation();
   if(adminProfileMenu) adminProfileMenu.hidden = true;
   adminAccountTrigger?.setAttribute('aria-expanded', 'false');
-  setAdminSettings(true);
+  setAdminSettings(true, trigger.dataset.adminSettings || 'profile');
 }));
 adminSettingsTriggers.forEach(trigger => trigger.addEventListener('keydown', event => {
   if(event.key === 'Enter' || event.key === ' '){
     event.preventDefault();
-    setAdminSettings(true);
+    setAdminSettings(true, trigger.dataset.adminSettings || 'profile');
   }
 }));
 closeAdminSettings?.addEventListener('click', () => setAdminSettings(false));

@@ -1092,7 +1092,7 @@ function studentMetadataFromOcr(parsed = {}, fallbackText = ''){
         firstName: nameParts.firstName || fallback.firstName || '',
         middleInitial: nameParts.middleInitial || fallback.middleInitial || '',
         lastName: nameParts.lastName || fallback.lastName || '',
-        strand: normalizeOcrStrand(parsed.strand || parsed.major || fallback.course || '')
+        strand: normalizeOcrStrand(parsed.strand || '')
     };
 }
 
@@ -2737,7 +2737,6 @@ function clearInputs() {
                     gwa: average === null ? '' : average.toFixed(2),
                     grades: reviewedRows.map(row => row.grade).filter(Boolean).join(', '),
                     subjects: reviewedRows.filter(row => row.subject && row.grade).map(row => `${row.subject} - ${row.grade}`).join('\n')
-                    ,ocrTable: window.latestDoclingTable || []
                 };
 
                 try{
@@ -2759,7 +2758,13 @@ function clearInputs() {
                     }
                     if(data && data.success){
                         setProgress(100, isGuest ? 'Recommendations ready.' : 'Report card saved and recommendations ready.');
-                        renderInlineRecommendations(data.recommendation, payload, data.comparisons);
+                        if(!isGuest){
+                            await loadSavedProfile(data.profile);
+                            if(document.getElementById('saved-grades-panel')?.hidden === false){
+                                await showSavedGrades(false);
+                            }
+                        }
+                        renderInlineRecommendations(data.recommendation, data.profile || payload, data.comparisons);
                         setSavedProfileView(true);
                         panel.style.display = 'none';
                         form.innerHTML = '';
@@ -2947,9 +2952,10 @@ function clearInputs() {
 })();
 
 
-function loadSavedProfile() {
-    return fetch('/api/v1/get_profile')
-        .then(response => response.json())
+function loadSavedProfile(savedProfile = null) {
+    return (savedProfile
+        ? Promise.resolve(savedProfile)
+        : fetch('/api/v1/get_profile').then(response => response.json()))
         .then(data => {
             if (!data.success) return data;
 
@@ -3036,7 +3042,7 @@ function loadSavedProfile() {
         });
 }
 
-async function showSavedGrades(){
+async function showSavedGrades(shouldScroll = true){
     let profile = window.latestSavedProfile;
     if(!profile){
             const response = await fetch('/api/v1/get_profile');
@@ -3056,7 +3062,7 @@ async function showSavedGrades(){
         ? rows.map(row => `<tr><td>${escapeText(row.subject)}</td><td>${escapeText(row.grade)}</td><td>${escapeText(row.status || 'Recorded')}</td></tr>`).join('')
         : '<tr><td colspan="3">No saved subjects were found.</td></tr>';
     panel.hidden = false;
-    panel.scrollIntoView({behavior: 'smooth', block: 'start'});
+    if(shouldScroll) panel.scrollIntoView({behavior: 'smooth', block: 'start'});
     document.getElementById('close-saved-grades').onclick = () => { panel.hidden = true; };
 }
 

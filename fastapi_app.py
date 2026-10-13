@@ -744,11 +744,17 @@ def _extract_numeric_from_grades_text(grades_text):
     values = []
     if not grades_text:
         return values
-    for token in re.findall(r"[0-9]{1,3}(?:\.[0-9]+)?", grades_text):
-        try:
-            values.append(float(token))
-        except (TypeError, ValueError):
-            continue
+    for line in str(grades_text).splitlines():
+        if re.search(r"[A-Za-z]", line):
+            match = re.search(
+                r"(?:[-–:|/]\s*|\s+)(\d{1,3}(?:\.\d+)?)\s*(?:passed|failed|remarks|inc|withdrawn|conditional)?\s*$",
+                line,
+                flags=re.IGNORECASE,
+            )
+            tokens = [match.group(1)] if match else []
+        else:
+            tokens = re.findall(r"[0-9]{1,3}(?:\.[0-9]+)?", line)
+        values.extend(float(token) for token in tokens)
     return values
 
 #Compute General Weighted Average (GWA) from Subject Grades
@@ -775,7 +781,7 @@ def _coalesce_grades_text(subjects_text, incoming_grades=""):
     grades = _extract_numeric_from_grades_text(subjects_text)
     if not grades:
         return ""
-    return ", ".join(str(g).rstrip("0").rstrip(".") for g in grades)
+    return ", ".join(f"{grade:g}" for grade in grades)
 
 #Normalize Student Number (removes non-alphanumeric characters and converts to uppercase)
 def _normalize_student_number(value):
@@ -874,7 +880,6 @@ def _merge_subject_entries(existing_subjects, incoming_subjects):
             grade_match = re.search(r"(?P<label>.*?)(?:\s*[-–:|/]\s*|\s+)(?P<grade>\d{1,3}(?:\.\d+)?)\s*$", cleaned)
             if grade_match:
                 label = grade_match.group("label").strip()
-                label = re.sub(r"\s+\d{1,3}(?:\.\d+)?$", "", label).strip()
                 label = re.sub(r"^[-:|/]+\s*", "", label)
                 label = re.sub(r"\s+[-:|/]+\s*$", "", label).strip()
                 if not label:
@@ -1089,7 +1094,17 @@ def _build_course_model():
     _NEAREST_NEIGHBOR_MODEL = model
     return model
 
+def _is_degree_program(value):
+    return bool(re.match(
+        r"^(?:bachelor(?:'s)?\b|(?:bs|ba|bsc|beng|btech|bba|bsa|bscs|bsit|bshm|bstm|bsn|bsed|beed|bped)(?:$|[\s.-]))",
+        str(value or "").strip(),
+        flags=re.IGNORECASE,
+    ))
+
+
 def _recommendation_strand_code(strand):
+    if _is_degree_program(strand):
+        return ""
     label = str(strand or "").strip().lower()
     tokens = set(re.findall(r"[a-z0-9]+", label))
     if "abm" in tokens or "accountancy and business management" in label:
@@ -1118,6 +1133,8 @@ def _recommendation_strand_code(strand):
 # Recommend only courses cataloged for the student's strand.
 def recommend_course(subjects_text, current_course="", strand=""):
     training_data = _course_training_data()
+    if _is_degree_program(strand):
+        strand = ""
     strand_text = str(strand or "").strip()
     strand_key = _recommendation_strand_code(strand)
     missing_strand_values = {"other", "unknown", "not detected", "not available", "not specified", "n/a", "na", "none"}
@@ -3448,8 +3465,11 @@ async def save_profile(req):
 
     user_id = sess["user_id"]
     data = await req.json()
+    if _is_degree_program(data.get("strand")):
+        data["course"] = data.get("course") or data["strand"]
+        data["strand"] = ""
     subjects_text = data.get("subjects", "")
-    table_subjects = _subjects_from_table(data.get("ocrTable", [])) if data.get("ocrTable") else []
+    table_subjects = _subjects_from_table(data.get("ocrTable", [])) if "subjects" not in data and data.get("ocrTable") else []
     if table_subjects:
         subjects_text = "\n".join(
             f"{item['subject_name']} - {item['grade']:g}"
@@ -3459,12 +3479,6 @@ async def save_profile(req):
     normalized_gwa = _compute_gwa(subjects_text, data.get("gwa", ""), data.get("grades", ""))
     normalized_grades = _coalesce_grades_text(subjects_text, data.get("grades", ""))
 
-    recommendation_subjects = _clean_subjects_for_recommendation(subjects_text) or subjects_text
-    recommendation = _configured_recommendations(recommendation_subjects, data.get("course", ""), data.get("strand", ""))
-    recommendation_payload = json.dumps(recommendation)
-    sess["latest_recommendations"] = recommendation_payload
-    sess["latest_subjects"] = subjects_text
-
     conn = _db_conn()
     cursor = conn.cursor()
     cursor.execute(
@@ -3472,7 +3486,7 @@ async def save_profile(req):
         SELECT id, student_number, first_name, middle_initial, last_name, course, gwa, grades, subjects, strand, report_card_upload_id
         FROM student_profiles
         WHERE user_id = ?
-        ORDER BY upload_date DESC
+        ORDER BY id DESC
         LIMIT 1
         """,
         (user_id,),
@@ -3538,12 +3552,18 @@ async def save_profile(req):
             "subjects": existing_profile[8],
             "strand": existing_profile[9],
         }
+        if _is_degree_program(target_student["strand"]):
+            target_student["course"] = target_student["course"] or target_student["strand"]
+            target_student["strand"] = ""
     # Merge the existing student profile with the new data and prepare it for saving
     merged_student = data.copy()
+    merged_student["gwa"] = normalized_gwa
+    merged_student["grades"] = normalized_grades
+    merged_student["subjects"] = subjects_text
     if target_student:
         merged_subjects = _merge_subject_entries(target_student.get("subjects", ""), data.get("subjects", ""))
-        merged_grades = _coalesce_grades_text(merged_subjects, data.get("grades", "") or target_student.get("grades", ""))
-        merged_gwa = _compute_gwa(merged_subjects, data.get("gwa", "") or target_student.get("gwa", ""), merged_grades)
+        merged_grades = _coalesce_grades_text(merged_subjects)
+        merged_gwa = _compute_gwa(merged_subjects, incoming_grades=merged_grades)
         merged_student = {
             "studentNumber": target_student.get("student_number", ""),
             "firstName": target_student.get("first_name", ""),
@@ -3555,6 +3575,13 @@ async def save_profile(req):
             "grades": merged_grades,
             "subjects": merged_subjects,
         }
+    subjects_text = merged_student.get("subjects", "")
+    normalized_gwa = merged_student.get("gwa", "")
+    recommendation_subjects = _clean_subjects_for_recommendation(subjects_text) or subjects_text
+    recommendation = _configured_recommendations(
+        recommendation_subjects, merged_student.get("course", ""), merged_student.get("strand", "")
+    )
+    recommendation_payload = json.dumps(recommendation)
     # If a target student exists, update their profile in the database; otherwise, insert a new profile
     if target_student:
         recommendation_profile_id = existing_profile[0]
@@ -3574,7 +3601,7 @@ async def save_profile(req):
                 merged_student.get("grades", ""),
                 merged_student.get("subjects", ""),
                 recommendation_payload,
-                merged_student.get("strand") or _infer_strand(merged_student.get("course", "")),
+                merged_student.get("strand", ""),
                 datetime.utcnow().isoformat(),
                 report_card_upload_id,
                 user_id,
@@ -3600,7 +3627,7 @@ async def save_profile(req):
                 normalized_grades,
                 data.get("subjects", ""),
                 recommendation_payload,
-                data.get("strand") or _infer_strand(data.get("course", "")),
+                data.get("strand", ""),
                 datetime.utcnow().isoformat(),
                 report_card_upload_id,
             ),
@@ -3614,6 +3641,8 @@ async def save_profile(req):
     # Commit the changes to the database and close the connection
     conn.commit()
     conn.close()
+    sess["latest_recommendations"] = recommendation_payload
+    sess["latest_subjects"] = subjects_text
     sess.pop("latest_report_card_upload_id", None)
     sess.pop("latest_report_card_upload_ids", None)
     sess.pop("latest_report_card_batch", None)
@@ -3633,11 +3662,23 @@ async def save_profile(req):
         item["course"]: _build_student_performance_analytics(item["course"], subjects_text)
         for item in recommendation[:3]
     }
+    saved_profile = {
+        key: merged_student.get(key, "")
+        for key in ("studentNumber", "firstName", "middleInitial", "lastName", "course", "gwa", "grades", "subjects")
+    }
+    saved_profile.update({
+        "success": True,
+        "strand": merged_student.get("strand", ""),
+        "subjectRows": _subject_rows_for_display(subjects_text),
+        "recommendation": recommendation,
+        "comparisons": comparisons,
+    })
     return JSONResponse({
         "success": True,
         "message": "Profile saved successfully",
         "recommendation": recommendation,
         "comparisons": comparisons,
+        "profile": saved_profile,
     })
 
 # Define the route for updating the user account
@@ -3693,7 +3734,7 @@ async def admin_change_password(req):
         return JSONResponse({"success": False, "message": "Current password is incorrect."}, status_code=400)
     if _check_password(row[0], new_password):
         conn.close()
-        return JSONResponse({"success": False, "message": "Choose a password different from your temporary password."}, status_code=400)
+        return JSONResponse({"success": False, "message": "Choose a password different from your current password."}, status_code=400)
 
     cursor.execute("UPDATE users SET password_hash = ?, must_change_password = FALSE WHERE id = ?", (_hash_password(new_password), sess["user_id"]))
     conn.commit()
@@ -3710,7 +3751,7 @@ async def recommend_anonymous(req):
 
     data = await req.json()
     subjects_text = data.get("subjects", "")
-    table_subjects = _subjects_from_table(data.get("ocrTable", [])) if data.get("ocrTable") else []
+    table_subjects = _subjects_from_table(data.get("ocrTable", [])) if "subjects" not in data and data.get("ocrTable") else []
     if table_subjects:
         subjects_text = "\n".join(
             f"{item['subject_name']} - {item['grade']:g}"
@@ -4661,4 +4702,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

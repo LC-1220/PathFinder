@@ -51,6 +51,17 @@ Docling is used for every report-card upload:
 The first upload initializes Docling and may download its model files. Report cards
 use Docling OCR plus the accurate TableFormer table-structure model.
 
+For signed-in students, saving another report card adds its reviewed subjects to
+the existing academic record. Numbered subjects (such as Physical Education and
+Health 1 and 3) remain separate; duplicate subject names retain the saved grade.
+The saved-grades view, average, and recommendations use the combined record
+immediately after saving. Review corrections take precedence over the original
+OCR table.
+Recommendations are recalculated and saved after each additional report card.
+College program labels (such as BSCS-DS) are not SHS strands: when no SHS strand
+is detected, matching uses the combined grades across the course catalog instead
+of inferring an SHS strand from a college program.
+
 ## Notes
 
 - Main app entrypoint: fastapi_app.py
@@ -65,6 +76,7 @@ use Docling OCR plus the accurate TableFormer table-structure model.
 - Semi Admins can view student, report, recommendation, and analytics pages, but cannot edit records, recalculate recommendations, manage admin accounts, or view the admin audit log.
 - New admin accounts use a unique username and temporary password; existing email-based sign-in remains available. The initial Super Admin can still be bootstrapped with `BOOTSTRAP_ADMIN_EMAIL`.
 - Newly created Semi Admins change their temporary password in a required dashboard pop-up before accessing admin data.
+- Super Admins and Semi Admins can change their own password from the dashboard profile menu by selecting **Change password** (also available under **Account settings > Account**). Enter the current password and confirm the new password.
 - Super Admins and Semi Admins can generate, print, and download PDF reports from the Reports page.
 - New or changed passwords require at least 8 characters, an uppercase letter, and a symbol; the maximum is 72 UTF-8 bytes.
 - Admin activity logs record sign-ins and administrative changes, including the session source IP. Logs are retained in `admin_activity_logs`.

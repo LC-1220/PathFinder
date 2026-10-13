@@ -50,6 +50,7 @@
       <button id="admin-account-trigger" class="admin-account-trigger" type="button" aria-expanded="false"><span>{{ admin }}</span><img src="{{ profile_image }}" referrerpolicy="no-referrer" data-fallback-src="/static/profile_pictures/default.svg" alt="{{ admin }} profile picture"></button>
       <div id="admin-profile-menu" class="admin-profile-menu" hidden>
         <button type="button" data-admin-settings><i class="fa-solid fa-user-gear"></i> Account settings</button>
+        <button type="button" data-admin-settings="account"><i class="fa-solid fa-key" aria-hidden="true"></i> Change password</button>
         <button id="admin-theme-toggle" type="button" aria-pressed="false"><i class="fa-solid fa-moon" aria-hidden="true"></i><span>Dark mode</span></button>
         <a href="/admin/logout" data-confirm-logout><i class="fa-solid fa-right-from-bracket"></i> Logout</a>
       </div>
@@ -249,7 +250,7 @@
   <dialog id="first-password-dialog" class="first-password-dialog" aria-labelledby="first-password-title" aria-describedby="first-password-description">
     <span class="admin-panel-kicker">ACCOUNT SECURITY</span>
     <h2 id="first-password-title">Change your temporary password</h2>
-    <p id="first-password-description">Set a new password to access your Semi Admin dashboard.</p>
+    <p id="first-password-description">Set a new password to access your {{ 'Super Admin' if account_role == 'admin' else 'Semi Admin' }} dashboard.</p>
     <p class="admin-password-policy-note">Use at least 8 characters, including an uppercase letter and a symbol. Maximum 72 UTF-8 bytes.</p>
     <form id="first-password-form">
       <label>Temporary password<input name="current_password" type="password" autocomplete="current-password" required></label>
