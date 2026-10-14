@@ -86,7 +86,16 @@ def _strand_from_major(value):
         return "TVL"
     if "SPORTS" in tokens:
         return "SPORTS"
-    if normalized in {"ARTS DESIGN", "ARTS AND DESIGN"}:
+    if normalized in {"ARTS & DESIGN", "ARTS DESIGN", "ARTS AND DESIGN"}:
+        return "ARTS_DESIGN"
+    return ""
+
+
+def _strand_from_metadata_value(value):
+    normalized = re.sub(r"[\s_-]+", " ", normalize_ocr_text(value).upper()).strip()
+    if normalized in {"STEM", "ABM", "HUMSS", "HUMMS", "HUMS", "GAS", "ICT", "TVL", "HR", "SPORTS"}:
+        return _strand_from_major(normalized)
+    if normalized in {"ARTS & DESIGN", "ARTS DESIGN", "ARTS AND DESIGN"}:
         return "ARTS_DESIGN"
     return ""
 
@@ -157,6 +166,14 @@ def parse_student_metadata(metadata_items):
             match = re.search(r"(?:course|major|program|strand)\s*(?:/\s*major)?\s*[:\-]?\s*(.+)$", text, flags=re.IGNORECASE)
             if match:
                 info["major"] = match.group(1).strip()
+                break
+    if not info.get("strand"):
+        for item in entries:
+            text = normalize_ocr_text(item.get("text", "") if isinstance(item, dict) else item)
+            inferred_strand = _strand_from_metadata_value(text)
+            if inferred_strand:
+                info["strand"] = inferred_strand
+                info["strand_raw"] = text
                 break
     if not info.get("strand"):
         inferred_strand = _strand_from_major(info.get("major", ""))

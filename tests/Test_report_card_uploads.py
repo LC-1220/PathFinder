@@ -317,6 +317,37 @@ def test_ocr_recognizes_shs_strand_in_course_major_field(course_major, expected_
     assert parsed["strand_raw"] == course_major
 
 
+@pytest.mark.parametrize(
+    ("strand_token", "expected_strand"),
+    [
+        ("STEM", "STEM"),
+        ("ABM", "ABM"),
+        ("HUMSS", "HUMSS"),
+        ("HUMMS", "HUMSS"),
+        ("HUMS", "HUMSS"),
+        ("GAS", "GAS"),
+        ("TVL", "TVL"),
+        ("HR", "TVL"),
+        ("ICT", "ICT"),
+        ("SPORTS", "SPORTS"),
+        ("ARTS & DESIGN", "ARTS_DESIGN"),
+        ("ARTS AND DESIGN", "ARTS_DESIGN"),
+    ],
+)
+def test_ocr_recognizes_standalone_strand_metadata_token(strand_token, expected_strand):
+    parsed = app.parse_report_card_structure({
+        "raw_text": f"Student name : CARLOS, LAUKE ROMMEL PATINIO\n{strand_token}",
+        "student_info_raw": [
+            {"text": "Student name : CARLOS, LAUKE ROMMEL PATINIO"},
+            {"text": strand_token},
+        ],
+        "table": [],
+    })
+
+    assert parsed["strand"] == expected_strand
+    assert parsed["strand_raw"] == strand_token
+
+
 @pytest.mark.parametrize("course_major", ["BSIT-05", "BS in ICT", "Bachelor of Science in STEM Education"])
 def test_ocr_does_not_treat_degree_program_course_major_as_shs_strand(course_major):
     parsed = app.parse_report_card_structure({
