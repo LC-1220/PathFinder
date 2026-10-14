@@ -1087,12 +1087,14 @@ function normalizeOcrStrand(value){
 function studentMetadataFromOcr(parsed = {}, fallbackText = ''){
     const fallback = parseStudent(fallbackText || '') || {};
     const nameParts = splitOcrStudentName(parsed.student_name || fallback.studentName || '');
+    const rawStrand = String(parsed.strand_raw || parsed.strand || '').replace(/\s+/g, ' ').trim();
     return {
         studentNumber: normalizeStudentNumber(parsed.student_no || fallback.studentNumber || ''),
         firstName: nameParts.firstName || fallback.firstName || '',
         middleInitial: nameParts.middleInitial || fallback.middleInitial || '',
         lastName: nameParts.lastName || fallback.lastName || '',
-        strand: normalizeOcrStrand(parsed.strand || '')
+        strand: normalizeOcrStrand(parsed.strand || rawStrand),
+        strandDisplay: rawStrand
     };
 }
 
@@ -1107,7 +1109,7 @@ function updateOcrIdentityPreview(metadata){
     const values = [
         ['Student number', metadata?.studentNumber],
         ['Name', [metadata?.firstName, metadata?.middleInitial ? `${metadata.middleInitial}.` : '', metadata?.lastName].filter(Boolean).join(' ')],
-        ['Strand', metadata?.strand]
+        ['Strand', metadata?.strandDisplay || metadata?.strand]
     ];
     preview.innerHTML = values.map(([label, value]) => `<span><strong>${label}</strong><em>${escapeText(value || 'Not detected')}</em></span>`).join('');
 }

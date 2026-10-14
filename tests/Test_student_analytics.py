@@ -671,6 +671,60 @@ def test_parse_report_card_handles_plain_ocr_lines_from_new_report_cards():
     assert parsed["gwa"] == 91.0
 
 
+def test_parse_report_card_fills_missing_strand_after_other_metadata_is_detected():
+    raw = {
+        "raw_text": (
+            "Student Number: 22-0105-274\n"
+            "Student Name: KENNETH CHARLES RAMOS\n"
+            "Strand/Track\n"
+            "STEM"
+        ),
+        "student_info_raw": [
+            {"text": "Student Number: 22-0105-274"},
+            {"text": "Student Name: KENNETH CHARLES RAMOS"},
+        ],
+        "table": [],
+    }
+
+    parsed = parse_report_card_structure(raw)
+
+    assert parsed["student_no"] == "22-0105-274"
+    assert parsed["student_name"] == "KENNETH CHARLES RAMOS"
+    assert parsed["strand"] == "STEM"
+
+
+def test_parse_report_card_reads_strand_from_labeled_table_column():
+    raw = {
+        "raw_text": "Student Number: 22-0105-274\nStudent Name: KENNETH CHARLES RAMOS",
+        "student_info_raw": [
+            {"text": "Student Number: 22-0105-274"},
+            {"text": "Student Name: KENNETH CHARLES RAMOS"},
+        ],
+        "table": [
+            {
+                "row": 0,
+                "cells": [
+                    {"column": 0, "text": "STUDENT NUMBER"},
+                    {"column": 1, "text": "NAME"},
+                    {"column": 2, "text": "STRAND"},
+                ],
+            },
+            {
+                "row": 1,
+                "cells": [
+                    {"column": 0, "text": "22-0105-274"},
+                    {"column": 1, "text": "KENNETH CHARLES RAMOS"},
+                    {"column": 2, "text": "HUMSS"},
+                ],
+            },
+        ],
+    }
+
+    parsed = parse_report_card_structure(raw)
+
+    assert parsed["strand"] == "HUMSS"
+
+
 def test_build_ocr_review_payload_converts_paddleocr_boxes_to_report_card_structure():
     paddle_result = [
         [[

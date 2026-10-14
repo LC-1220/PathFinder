@@ -6,6 +6,91 @@ def normalize_ocr_text(value):
     return re.sub(r"\s+", " ", str(value or "")).strip()
 
 
+def _is_strand_label(value):
+    text = normalize_ocr_text(value).strip(" :-")
+    return bool(re.fullmatch(r"(?:strand(?:\s*/\s*track)?|track(?:\s*/\s*strand)?)", text, flags=re.IGNORECASE))
+
+
+def _is_metadata_label(value):
+    text = normalize_ocr_text(value).strip(" :-").lower()
+    if _is_strand_label(text):
+        return True
+    return bool(re.fullmatch(
+        r"(?:student\s*(?:id|number|no)|id\s*number|student\s*name|name\s*of\s*student|full\s*name|name|course|major|program|degree)",
+        text,
+    ))
+
+
+def _strand_from_table_rows(table_rows):
+    rows = []
+    for row in table_rows or []:
+        if not isinstance(row, dict) or not isinstance(row.get("cells"), list):
+            continue
+        cells = sorted(row["cells"], key=lambda entry: int(entry.get("column", 0)))
+        rows.append(cells)
+
+    for row_index, cells in enumerate(rows):
+        for cell_index, cell in enumerate(cells):
+            text = normalize_ocr_text(cell.get("text", ""))
+            inline_match = re.fullmatch(
+                r"(?:strand(?:\s*/\s*track)?|track(?:\s*/\s*strand)?)\s*[:\-]\s*(.+)",
+                text,
+                flags=re.IGNORECASE,
+            )
+            if inline_match:
+                return normalize_ocr_text(inline_match.group(1))
+            if not _is_strand_label(text):
+                continue
+
+            if cell_index + 1 < len(cells):
+                adjacent_value = normalize_ocr_text(cells[cell_index + 1].get("text", ""))
+                if adjacent_value and not _is_metadata_label(adjacent_value):
+                    return adjacent_value
+
+            column = int(cell.get("column", cell_index))
+            if row_index + 1 < len(rows):
+                value_cell = next(
+                    (candidate for candidate in rows[row_index + 1] if int(candidate.get("column", 0)) == column),
+                    None,
+                )
+                value = normalize_ocr_text(value_cell.get("text", "")) if value_cell else ""
+                if value and not _is_metadata_label(value):
+                    return value
+    return ""
+
+
+def _strand_from_major(value):
+    text = normalize_ocr_text(value)
+    if re.match(
+        r"^(?:bachelor(?:'s)?\b|(?:bs|ba|bsc|beng|btech|bba|bsa|bscs|bsit|bshm|bstm|bsn|bsed|beed|bped)(?:$|[\s.-]))",
+        text,
+        flags=re.IGNORECASE,
+    ):
+        return ""
+
+    normalized = re.sub(r"[\s_-]+", " ", text.upper()).strip()
+    tokens = set(re.findall(r"[A-Z0-9]+", normalized))
+    if "STEM" in tokens:
+        return "STEM"
+    if "ABM" in tokens:
+        return "ABM"
+    if tokens.intersection({"HUMSS", "HUMMS", "HUMS"}):
+        return "HUMSS"
+    if "GAS" in tokens:
+        return "GAS"
+    if "ICT" in tokens:
+        return "ICT"
+    if "HR" in tokens:
+        return "TVL"
+    if "TVL" in tokens:
+        return "TVL"
+    if "SPORTS" in tokens:
+        return "SPORTS"
+    if normalized in {"ARTS DESIGN", "ARTS AND DESIGN"}:
+        return "ARTS_DESIGN"
+    return ""
+
+
 def parse_student_metadata(metadata_items):
     info = {}
     entries = metadata_items or []
@@ -37,6 +122,7 @@ def parse_student_metadata(metadata_items):
                 info["student_name"] = value_clean
         elif "strand" in label_lower:
             info.setdefault("strand", value_clean)
+            info.setdefault("strand_raw", value_clean)
             info.setdefault("major", value_clean)
         elif any(token in label_lower for token in ["course", "major", "program", "degree"]):
             info.setdefault("major", value_clean)
@@ -58,9 +144,12 @@ def parse_student_metadata(metadata_items):
     if not info.get("strand"):
         for item in entries:
             text = normalize_ocr_text(item.get("text", "") if isinstance(item, dict) else item)
+            if _is_strand_label(text):
+                continue
             match = re.search(r"strand\s*(?:/\s*track)?\s*[:\-]?\s*(.+)$", text, flags=re.IGNORECASE)
             if match:
                 info["strand"] = match.group(1).strip()
+                info["strand_raw"] = info["strand"]
                 break
     if not info.get("major"):
         for item in entries:
@@ -69,6 +158,11 @@ def parse_student_metadata(metadata_items):
             if match:
                 info["major"] = match.group(1).strip()
                 break
+    if not info.get("strand"):
+        inferred_strand = _strand_from_major(info.get("major", ""))
+        if inferred_strand:
+            info["strand"] = inferred_strand
+            info["strand_raw"] = info["major"]
     return info
 
 
@@ -409,7 +503,7 @@ def parse_report_card_structure(raw_ocr):
         table_rows = table_rows.get("rows", []) or table_rows.get("cells", []) or []
 
     raw_text = str(raw_ocr.get("raw_text", "") or "").strip()
-    if not student_info and raw_text:
+    if raw_text:
         lines = raw_text.splitlines()
         i = 0
         while i < len(lines):
@@ -419,37 +513,46 @@ def parse_report_card_structure(raw_ocr):
                 label_lower = label.lower()
                 value_clean = normalize_ocr_text(value)
                 if any(token in label_lower for token in ["student id", "student no", "student number", "id number"]):
-                    student_info["student_no"] = value_clean
+                    student_info.setdefault("student_no", value_clean)
                 elif "student name" in label_lower:
-                    student_info["student_name"] = value_clean
+                    student_info.setdefault("student_name", value_clean)
                 elif "strand" in label_lower:
-                    student_info["strand"] = value_clean
+                    student_info.setdefault("strand", value_clean)
+                    student_info.setdefault("strand_raw", value_clean)
                     student_info.setdefault("major", value_clean)
                 elif any(token in label_lower for token in ["course", "major", "program", "degree"]):
-                    student_info["major"] = value_clean
+                    student_info.setdefault("major", value_clean)
                 i += 1
                 continue
 
             label_lower = line.lower()
             has_next = i + 1 < len(lines)
             if has_next and any(token in label_lower for token in ["student id", "student no", "student number", "id number"]):
-                student_info["student_no"] = normalize_ocr_text(lines[i + 1])
+                student_info.setdefault("student_no", normalize_ocr_text(lines[i + 1]))
                 i += 2
                 continue
             if has_next and "student name" in label_lower:
-                student_info["student_name"] = normalize_ocr_text(lines[i + 1])
+                student_info.setdefault("student_name", normalize_ocr_text(lines[i + 1]))
                 i += 2
                 continue
             if has_next and "strand" in label_lower:
-                student_info["strand"] = normalize_ocr_text(lines[i + 1])
+                student_info.setdefault("strand", normalize_ocr_text(lines[i + 1]))
+                student_info.setdefault("strand_raw", normalize_ocr_text(lines[i + 1]))
                 student_info.setdefault("major", student_info["strand"])
                 i += 2
                 continue
             if has_next and any(token in label_lower for token in ["course", "major", "program", "degree"]):
-                student_info["major"] = normalize_ocr_text(lines[i + 1])
+                student_info.setdefault("major", normalize_ocr_text(lines[i + 1]))
                 i += 2
                 continue
             i += 1
+
+    if not student_info.get("strand"):
+        table_strand = _strand_from_table_rows(table_rows)
+        if table_strand:
+            student_info["strand"] = table_strand
+            student_info["strand_raw"] = table_strand
+            student_info.setdefault("major", table_strand)
 
     if not table_rows:
         consumed_values = {
@@ -468,6 +571,7 @@ def parse_report_card_structure(raw_ocr):
             "student_name": student_info.get("student_name", ""),
             "major": student_info.get("major", ""),
             "strand": student_info.get("strand", ""),
+            "strand_raw": student_info.get("strand_raw", student_info.get("strand", "")),
             "subjects": subjects,
             "gwa": calculate_gwa(subjects),
             "needs_review": bool(validation_errors or any(item.get("needs_review") for item in subjects)),
@@ -494,6 +598,7 @@ def parse_report_card_structure(raw_ocr):
             "student_name": student_info.get("student_name", ""),
             "major": student_info.get("major", ""),
             "strand": student_info.get("strand", ""),
+            "strand_raw": student_info.get("strand_raw", student_info.get("strand", "")),
             "subjects": [],
             "gwa": None,
             "needs_review": True,
@@ -508,6 +613,7 @@ def parse_report_card_structure(raw_ocr):
         "student_name": student_info.get("student_name", ""),
         "major": student_info.get("major", ""),
         "strand": student_info.get("strand", ""),
+        "strand_raw": student_info.get("strand_raw", student_info.get("strand", "")),
         "subjects": subjects,
         "gwa": calculate_gwa(subjects),
         "needs_review": bool(errors or any(item.get("needs_review") for item in subjects)),

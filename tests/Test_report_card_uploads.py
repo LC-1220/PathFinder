@@ -283,6 +283,52 @@ def test_ocr_keeps_program_and_shs_strand_separate(strand):
     assert parsed["strand"] == strand
 
 
+@pytest.mark.parametrize(
+    ("course_major", "expected_strand"),
+    [
+        ("STEM", "STEM"),
+        ("HUMMS", "HUMSS"),
+        ("ABM", "ABM"),
+        ("TVL TRACK A", "TVL"),
+        ("HR", "TVL"),
+        ("ICT", "ICT"),
+        ("GAS", "GAS"),
+    ],
+)
+def test_ocr_recognizes_shs_strand_in_course_major_field(course_major, expected_strand):
+    raw = {
+        "raw_text": (
+            "Student ID : 20-0002-791\n"
+            "Student name : CARLOS, LAUKE ROMMEL PATINIO\n"
+            f"Course/Major : {course_major}"
+        ),
+        "student_info_raw": [
+            {"text": "Student ID : 20-0002-791"},
+            {"text": "Student name : CARLOS, LAUKE ROMMEL PATINIO"},
+            {"text": f"Course/Major : {course_major}"},
+        ],
+        "table": [],
+    }
+
+    parsed = app.parse_report_card_structure(raw)
+
+    assert parsed["major"] == course_major
+    assert parsed["strand"] == expected_strand
+    assert parsed["strand_raw"] == course_major
+
+
+@pytest.mark.parametrize("course_major", ["BSIT-05", "BS in ICT", "Bachelor of Science in STEM Education"])
+def test_ocr_does_not_treat_degree_program_course_major_as_shs_strand(course_major):
+    parsed = app.parse_report_card_structure({
+        "raw_text": f"Course/Major : {course_major}",
+        "student_info_raw": [{"text": f"Course/Major : {course_major}"}],
+        "table": [],
+    })
+
+    assert parsed["major"] == course_major
+    assert parsed["strand"] == ""
+
+
 def test_saving_college_course_does_not_infer_an_shs_strand(monkeypatch):
     connection = ProfileConnection()
     result, _, _, _ = save_record(monkeypatch, connection, {

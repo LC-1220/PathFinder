@@ -221,11 +221,12 @@ function renderStrandPie(ctxElem, labels, values){
   const colors = labels.map((_, index) => adminChartPalette.set1[index % adminChartPalette.set1.length]);
   const total = values.reduce((sum, value) => sum + Number(value || 0), 0);
   chartStrand = new Chart(ctxElem, {
-    type: 'pie',
-    data: { labels, datasets: [{ data: values, backgroundColor: colors, borderWidth: 0, hoverBorderWidth: 0, hoverOffset: 4 }] },
+    type: 'doughnut',
+    data: { labels, datasets: [{ data: values, backgroundColor: colors, borderWidth: 0, hoverBorderWidth: 0, hoverOffset: 4, borderRadius: 8, spacing: 4 }] },
     options: {
       responsive: true,
       maintainAspectRatio: false,
+      cutout: '48%',
       plugins: {
         legend: { position: 'bottom', labels: { usePointStyle: true, generateLabels: chart => chart.data.labels.map((label, index) => ({
           text: `${label} ${Number(values[index] || 0)} (${total ? Math.round((Number(values[index] || 0) / total) * 100) : 0}%)`,
