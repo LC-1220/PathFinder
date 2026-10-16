@@ -1304,18 +1304,29 @@ def _limit_recommendations(payload, limit=None):
     alternatives = [item for item in recommendations if item["recommendation_basis"] == "grade_alternative"]
     primary = primary[:limit]
     primary_courses = {item["course"] for item in primary}
-    return primary + [item for item in alternatives if item["course"] not in primary_courses][:limit]
+    return primary + [item for item in alternatives if item["course"] not in primary_courses][:1]
 
 
 def _grade_based_alternatives(subjects_text, strand):
     subjects_text = _recommendation_subjects_only(subjects_text)
+    non_core_subjects = re.compile(
+        r"\b(?:nihongo|japanese|chinese|korean|spanish|french|german|"
+        r"foreign\s+language|filipino|computer|programming|ict|"
+        r"social\s+sciences?|political\s+science|business|accounting|"
+        r"entrepreneurship|tourism|hospitality)\b",
+        re.IGNORECASE,
+    )
+    subjects_text = "\n".join(
+        line for line in subjects_text.splitlines()
+        if not non_core_subjects.search(line)
+    )
     strand_key = _recommendation_strand_code(strand)
     if not strand_key:
         return []
     subject_scores = _extract_subject_scores(subjects_text)
     observed = [
         (index, category, _average(subject_scores[category]))
-        for index, category in enumerate(CATEGORY_NAMES)
+        for index, category in enumerate(CATEGORY_NAMES[:3])
         if subject_scores[category]
     ]
     if not observed:
@@ -1350,9 +1361,11 @@ def _grade_based_alternatives(subjects_text, strand):
             "description": sample.get("description", ""),
             "reason": (
                 f"Your strongest graded areas are {strength_text}. "
-                "This alternative compares your observed grades with the course's stored academic profile, "
+                "Only Math, Science, English, and their recognized branches are used to compare "
+                "your grades with the course's stored academic profile, "
                 "giving higher weight to your strongest areas (85% of the ranking) "
-                "and using all observed grades for the remaining 15% to distinguish close matches. "
+                "and using all observed Math, Science, and English grades for the remaining 15% "
+                "to distinguish close matches. "
                 f"It is outside your {strand_key} catalog group; strand eligibility did not determine its ranking."
             ),
             "category": categorize_course(sample["course"], sample.get("description", "")),

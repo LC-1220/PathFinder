@@ -38,7 +38,8 @@ def test_high_math_gas_student_gets_engineering_as_separate_alternative(catalog)
         item["course"] for item in app.recommend_course(subjects, strand="GAS")[:2]
     ]
     assert alternatives[0]["course"] == "BS in Civil Engineering"
-    assert len(primary) == len(alternatives) == 2
+    assert len(primary) == 2
+    assert len(alternatives) == 1
     assert all(item["strand_alignment"] for item in primary)
     assert all(not item["strand_alignment"] and item["strand_label"] == "GAS" for item in alternatives)
     assert {item["course"] for item in primary}.isdisjoint(item["course"] for item in alternatives)
@@ -58,9 +59,46 @@ def test_alternatives_follow_database_profiles_not_course_names(catalog):
 
 def test_changing_highest_grade_changes_alternative(catalog):
     science = app._grade_based_alternatives("Mathematics - 80\nScience - 98\nEnglish - 75", "GAS")
-    technology = app._grade_based_alternatives("Mathematics - 80\nComputer Programming - 98\nEnglish - 75", "GAS")
     assert science[0]["course"] == "BS in Pharmacy"
-    assert technology[0]["course"] == "BS in Information Technology"
+
+
+@pytest.mark.parametrize("subject", [
+    "Computer Programming", "Computer Science", "Business", "Accounting",
+    "Entrepreneurship", "Social Studies", "Social Science", "Political Science",
+    "Filipino", "Nihongo", "Foreign Language", "Tourism", "Hospitality",
+])
+def test_non_core_grades_do_not_influence_best_alternative(catalog, subject):
+    baseline = "Mathematics - 98\nScience - 80\nEnglish - 75"
+    expected = app._grade_based_alternatives(baseline, "GAS")
+    for grade in (70, 100):
+        assert app._grade_based_alternatives(f"{baseline}\n{subject} - {grade}", "GAS") == expected
+
+
+@pytest.mark.parametrize(("subject", "category"), [
+    ("Algebra", "math"), ("Calculus", "math"), ("Geometry", "math"),
+    ("Statistics and Probability", "math"), ("Trigonometry", "math"),
+    ("Physics", "science"), ("Chemistry", "science"), ("General Biology", "science"),
+    ("Earth and Life Science", "science"), ("Reading and Writing", "english"),
+    ("Oral Communication", "english"), ("English Literature", "english"),
+])
+def test_core_branches_are_used_for_alternatives(catalog, subject, category):
+    result = app._grade_based_alternatives(f"{subject} - 95", "GAS")
+    assert result
+    assert f"{category.title()} (95.0)" in result[0]["reason"]
+
+
+def test_non_core_only_record_has_no_alternative_but_keeps_strand_matches(catalog):
+    subjects = "Business - 95\nComputer Programming - 98\nSocial Studies - 90"
+    assert app._grade_based_alternatives(subjects, "GAS") == []
+    assert app.recommend_course(subjects, strand="GAS")
+
+
+def test_non_core_database_features_do_not_affect_alternatives(catalog):
+    subjects = "Mathematics - 98\nScience - 80\nEnglish - 75"
+    expected = app._grade_based_alternatives(subjects, "GAS")
+    for course in catalog:
+        course["features"][3:] = [100, 0, 100]
+    assert app._grade_based_alternatives(subjects, "GAS") == expected
 
 
 def test_close_strength_matches_prefer_better_full_profile(monkeypatch):
@@ -162,6 +200,21 @@ def test_group_limits_and_basis_survive_serialization(catalog):
     assert app._limit_recommendations(legacy)[0]["recommendation_basis"] == "strand"
     duplicate = {**result[0], "recommendation_basis": "grade_alternative"}
     assert len({item["course"] for item in app._limit_recommendations(result + [duplicate])}) == len(result)
+
+
+@pytest.mark.parametrize("limit", [1, 2, 3, 4, 5])
+def test_existing_saved_lists_keep_only_best_alternative(catalog, limit):
+    subjects = "Mathematics - 98\nEnglish - 75"
+    primary = app.recommend_course(subjects, strand="GAS")
+    alternatives = app._grade_based_alternatives(subjects, "GAS")
+    assert len(alternatives) > 1
+    restored = app._limit_recommendations(json.dumps(primary + alternatives), limit)
+    assert [item["course"] for item in restored if item["recommendation_basis"] == "grade_alternative"] == [
+        alternatives[0]["course"],
+    ]
+    assert [item["course"] for item in restored if item["recommendation_basis"] != "grade_alternative"] == [
+        item["course"] for item in primary[:limit]
+    ]
 
 
 def test_saved_profile_restores_both_groups_and_all_comparisons(monkeypatch, catalog):

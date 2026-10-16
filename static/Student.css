@@ -310,6 +310,7 @@ body[data-home-mode="true"] .DMT{background:transparent;padding-top:34px;height:
 .recommendation-group-heading h3{margin:0 0 6px;color:#171b4b;font-size:18px;}
 .recommendation-group-heading p{margin:0;color:#69708c;font-size:13px;line-height:1.6;}
 .inline-recommendation-card{display:grid;grid-template-columns:38px minmax(0,1fr);gap:12px;padding:18px;border:1px solid #dfe4f7;border-radius:7px;background:#fff;box-shadow:0 8px 20px rgba(31,43,100,.06);transition:border-color .25s ease,box-shadow .35s ease;}
+.inline-recommendation-card.grade-based-alternative{grid-column:2;}
 .inline-recommendation-card:hover{border-color:#8e99ee;box-shadow:0 12px 25px rgba(46,57,150,.12);}
 .inline-recommendation-card.best-match{border-color:#dfe4f7;box-shadow:0 8px 20px rgba(31,43,100,.06);}
 .inline-recommendation-card.best-match:hover{border-color:#8e99ee;box-shadow:0 12px 25px rgba(46,57,150,.12);}
@@ -1009,6 +1010,7 @@ button:hover{
     .review-fields-two{ grid-template-columns: 1fr 1fr; }
     .analytics-grid{grid-template-columns:1fr 1fr;}
     .inline-recommendation-list{grid-template-columns:1fr;}
+    .inline-recommendation-card.grade-based-alternative{grid-column:1;}
     .course-analysis-bars{grid-template-columns:1fr;}
 }
 

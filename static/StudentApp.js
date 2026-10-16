@@ -2130,20 +2130,20 @@ function clearInputs() {
                 .slice(0, configuredRecommendationLimit);
             const primaryCourses = new Set(primary.map(item => item.course));
             const alternatives = recommendationsList.filter(item => item.recommendation_basis === 'grade_alternative' && !primaryCourses.has(item.course))
-                .slice(0, configuredRecommendationLimit);
+                .slice(0, 1);
             const items = [...primary, ...alternatives];
             const isAlternative = item => item.recommendation_basis === 'grade_alternative';
             const groupRank = index => index < primary.length ? index + 1 : index - primary.length + 1;
             const resultsTitle = document.getElementById('recommendation-results-title');
             if(resultsTitle){
-                resultsTitle.textContent = alternatives.length ? 'Your course matches and grade-based alternatives'
+                resultsTitle.textContent = alternatives.length ? 'Your course matches and best grade-based alternative'
                     : `Your top ${items.length} course match${items.length === 1 ? '' : 'es'}`;
             }
             list.innerHTML = items.length
                 ? items.map((item, index) => `
                     ${index === 0 && primary.length ? `<div class="recommendation-group-heading"><h3>${primary[0].strand_label ? 'Strand-matched courses' : 'Grade-profile matches'}</h3><p>${primary[0].strand_label ? 'Courses listed for your strand, ranked using your grades.' : 'Courses ranked using your available grades.'}</p></div>` : ''}
-                    ${isAlternative(item) && index === primary.length ? '<div class="recommendation-group-heading"><h3>Grade-based alternatives</h3><p>Outside your strand group, ranked from database course profiles with greater weight on your strongest graded areas. These are guidance, not admission guarantees.</p></div>' : ''}
-                    <article class="inline-recommendation-card${index === 0 && !isAlternative(item) ? ' best-match' : ''}" data-recommendation-index="${index}">
+                    ${isAlternative(item) && index === primary.length ? '<div class="recommendation-group-heading"><h3>Best grade-based alternative</h3><p>The highest-ranked course outside your strand group, based only on Math, Science, English, and their recognized branches. This is guidance, not an admission guarantee.</p></div>' : ''}
+                    <article class="inline-recommendation-card${isAlternative(item) ? ' grade-based-alternative' : index === 0 ? ' best-match' : ''}" data-recommendation-index="${index}">
                         <div class="recommendation-rank">${String(groupRank(index)).padStart(2, '0')}</div>
                         <div class="recommendation-detail">
                             <div class="recommendation-title-row">
@@ -2270,7 +2270,7 @@ function clearInputs() {
                         </div>
                         <p class="course-analysis-reason course-fit-narrative"><i class="fa-solid fa-lightbulb"></i>${escapeHtml(fitExplanation)}</p>
                         <div class="course-analysis-signals" aria-label="Why this course matches">
-                            <div class="course-analysis-signal"><span>Recommendation match</span><strong>${matchScore}%</strong><small>${isAlternative(item) ? '85% strongest-area fit and 15% full observed-grade profile fit.' : 'Final ranking score, including course relevance signals.'}</small></div>
+                            <div class="course-analysis-signal"><span>Recommendation match</span><strong>${matchScore}%</strong><small>${isAlternative(item) ? 'Math, Science, and English only: 85% strongest-area fit and 15% observed core-grade profile fit.' : 'Final ranking score, including course relevance signals.'}</small></div>
                             <div class="course-analysis-signal"><span>Grade-profile similarity</span><strong>${profileSimilarity}%</strong><small>Similarity between your grades and the course reference profile.</small></div>
                             <div class="course-analysis-signal"><span>${strandLabel ? `${escapeHtml(strandLabel)} strand` : 'Strand'}</span><strong>${isAlternative(item) ? 'Grade-based alternative' : strandLabel ? (item.strand_alignment ? 'Aligned' : 'Not aligned') : 'Not provided'}</strong><small>${isAlternative(item) ? 'This separate list considers courses outside your strand using grades, not strand eligibility.' : strandLabel ? 'Only courses tagged for the selected strand are eligible.' : 'No strand was identified; matches are ranked from your strongest grades.'}</small></div>
                         </div>

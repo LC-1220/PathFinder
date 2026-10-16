@@ -64,7 +64,12 @@ of inferring an SHS strand from a college program.
 For recognized SHS strands, recommendations include two separate groups:
 strand-matched courses and grade-based alternatives outside that strand's catalog
 group. Alternatives use only existing database courses and their stored academic
-profiles. Observed category grades are compared using weighted root-mean-square
+profiles. Only Math, Science, English, and their recognized branches determine
+the best grade-based alternative. Technology, business, social studies, and
+foreign-language grades do not influence it; strand-matched scoring is unchanged.
+Recognized branches include algebra, calculus, geometry, statistics, probability,
+physics, chemistry, biology, earth/life sciences, reading, writing, literature,
+speech, and oral communication. Observed core-category grades are compared using weighted root-mean-square
 distance; weights are `(category average - lowest observed category average + 1)^2`,
 so stronger graded areas have more influence. Final alternative scores combine
 85% of this strength-weighted distance with 15% equal-weight distance across all
@@ -76,7 +81,8 @@ FCL / Filipino Christian Living and PE / Physical Education are excluded from
 both recommendation groups' scoring and strongest-grade calculations. Their OCR
 extraction, saved grade rows, and GWA remain unchanged.
 No course-name-to-subject rules determine the alternatives' ranking.
-The configured result limit applies separately to each group. Both groups are
+The configured result limit applies to primary recommendations; only the single
+highest-ranked grade-based alternative is included. Both groups are
 saved with recommendation history and restored on reload for signed-in students;
 guest results remain in the current page. Full recommendation payloads are not
 duplicated in session cookies. Regenerate older
