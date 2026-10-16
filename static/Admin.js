@@ -969,7 +969,7 @@ function openRecommendationDetail(historyId){
     : '<p class="student-detail-empty">No subject grades were saved with this profile.</p>';
   const recommendations = item.recommendations || [];
   document.getElementById('recommendation-detail-list').innerHTML = recommendations.length
-    ? recommendations.map((rec, index) => `<article class="recommendation-detail-item"><div class="recommendation-detail-item-heading"><h4>${index + 1}. ${escapeAdminHtml(rec.course || 'Unspecified course')}</h4><span>${Number.isFinite(Number(rec.confidence)) ? `${Number(rec.confidence).toFixed(1)}% confidence` : 'Confidence unavailable'}</span></div><p>${escapeAdminHtml(rec.description || '')}</p><p class="recommendation-detail-reason"><strong>Reason:</strong> ${escapeAdminHtml(rec.reason || 'No reason saved.')}</p><div class="recommendation-fit-tags"><span>Core grade fit: ${Number.isFinite(Number(rec.core_grade_fit)) ? `${Number(rec.core_grade_fit).toFixed(1)}%` : '—'}</span><span>${rec.strand_grade_based ? 'Strand aligned' : 'Grade profile match'}</span></div></article>`).join('')
+    ? recommendations.map((rec, index) => `<article class="recommendation-detail-item"><div class="recommendation-detail-item-heading"><h4>${index + 1}. ${escapeAdminHtml(rec.course || 'Unspecified course')}</h4><span>${Number.isFinite(Number(rec.confidence)) ? `${Number(rec.confidence).toFixed(1)}% confidence` : 'Confidence unavailable'}</span></div><p>${escapeAdminHtml(rec.description || '')}</p><p class="recommendation-detail-reason"><strong>Reason:</strong> ${escapeAdminHtml(rec.reason || 'No reason saved.')}</p><div class="recommendation-fit-tags"><span>Core grade fit: ${Number.isFinite(Number(rec.core_grade_fit)) ? `${Number(rec.core_grade_fit).toFixed(1)}%` : '—'}</span>    <span>${rec.recommendation_basis === 'grade_alternative' ? 'Grade-based alternative (outside strand)' : rec.strand_alignment ? 'Strand aligned' : 'Grade profile match'}</span></div></article>`).join('')
     : '<p class="student-detail-empty">No recommendations in this snapshot.</p>';
   document.getElementById('recommendation-detail-modal').hidden = false;
 }
@@ -1215,7 +1215,7 @@ async function openStudentEditor(studentId){
     }
     const recommendations = document.getElementById('student-editor-recommendations');
     recommendations.innerHTML = student.recommendation?.length
-      ? `<ol>${student.recommendation.map(item => `<li><strong>${escapeAdminHtml(item.course)}</strong>${item.description ? `<span>${escapeAdminHtml(item.description)}</span>` : ''}</li>`).join('')}</ol>`
+      ? `<ol>${student.recommendation.map(item => `<li><strong>${escapeAdminHtml(item.course)}</strong><span>${item.recommendation_basis === 'grade_alternative' ? 'Grade-based alternative (outside strand)' : item.strand_alignment ? 'Strand-matched course' : 'Grade-profile match'}</span>${item.description ? `<span>${escapeAdminHtml(item.description)}</span>` : ''}</li>`).join('')}</ol>`
       : '<p class="student-detail-empty">No course recommendations saved.</p>';
     modal.hidden = false;
   }catch(error){ alert(error.message || 'Unable to load student record.'); }

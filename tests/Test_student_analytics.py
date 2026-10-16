@@ -1,5 +1,8 @@
 import asyncio
 import json
+from pathlib import Path
+import re
+import sqlite3
 import pytest
 from types import SimpleNamespace
 
@@ -15,6 +18,61 @@ from fastapi_app import (
     recommend_course,
 )
 from ocr.parser import calculate_gwa, parse_report_card_structure, validate_grade
+
+
+def test_gas_migration_only_tags_existing_courses_and_preserves_other_strands(monkeypatch):
+    root = Path(__file__).resolve().parents[1]
+    migration = (root / "migrations" / "gas_course_strands.sql").read_text()
+    schema = (root / "supabase_schema.sql").read_text()
+    expected = {
+        "BS in Accountancy", "BS in Business Administration",
+        "BS in Business Administration major in Human Resource Management",
+        "BS in Business Administration major in Marketing Management",
+        "BS in Entrepreneurship", "Bachelor of Arts in Communication",
+        "Bachelor of Arts in Psychology", "Bachelor of Science in Psychology",
+        "BS in Criminology", "BS in Tourism Management", "BS in Hospitality Management",
+        "Bachelor of Early Childhood Education", "Bachelor of Elementary Education",
+        "Bachelor of Physical Education", "Bachelor of Secondary Education",
+        "Bachelor of Special Needs Education",
+    }
+    assert set(re.findall(r"\('([^']+)', 'GAS'\)", schema)) == expected
+    courses = re.findall(r"^\('([^']+)', '\[", schema, re.MULTILINE)
+    assert expected <= set(courses)
+    connection = sqlite3.connect(":memory:")
+    connection.execute("ATTACH DATABASE ':memory:' AS public")
+    connection.executescript("""
+        CREATE TABLE public.university_courses (course TEXT PRIMARY KEY);
+        CREATE TABLE public.university_course_strands (
+            course TEXT, strand_code TEXT, PRIMARY KEY (course, strand_code)
+        );
+    """)
+    # Leave one approved course absent to verify that the migration cannot create it.
+    existing = set(courses) - {"BS in Accountancy"}
+    connection.executemany("INSERT INTO public.university_courses VALUES (?)", [(course,) for course in existing])
+    connection.execute("INSERT INTO public.university_course_strands VALUES (?, ?)",
+                       ("BS in Entrepreneurship", "ABM"))
+    connection.executescript(migration)
+    connection.executescript(migration)
+    assert {row[0] for row in connection.execute("SELECT course FROM public.university_courses")} == existing
+    tags = set(connection.execute("SELECT course, strand_code FROM public.university_course_strands"))
+    assert tags == {(course, "GAS") for course in expected & existing} | {("BS in Entrepreneurship", "ABM")}
+    catalog = [
+        {"course": course, "features": [80] * 6, "description": "", "strands": [
+            strand for name, strand in tags if name == course
+        ]}
+        for course in existing
+    ]
+    monkeypatch.setattr(app, "_course_training_data", lambda: catalog)
+    recommendations = recommend_course("Mathematics - 85\nEnglish - 90\nBusiness - 95", strand="GAS")
+    assert len(recommendations) == 5
+    assert {item["course"] for item in recommendations} <= expected & existing
+    assert all(item["strand_alignment"] and item["strand_label"] == "GAS" for item in recommendations)
+    for course in expected & existing:
+        monkeypatch.setattr(app, "_course_training_data", lambda course=course: [
+            sample for sample in catalog if sample["course"] == course or "GAS" not in sample["strands"]
+        ])
+        assert [item["course"] for item in recommend_course("English - 90", strand="GAS")] == [course]
+    connection.close()
 
 
 def _box(text, x, y, width=80, height=20):
@@ -551,7 +609,7 @@ def test_university_catalog_loads_course_strand_assignments(monkeypatch):
     assert app._sanitize_recommendations([{"course": "Software Engineering"}, {"course": expected[0]}]) == [
         {"course": expected[0], "description": "", "reason": "", "category": app.categorize_course(expected[0]),
             "confidence": 0, "match_score": 0, "core_grade_fit": 0, "strand_grade_based": False, "field_fit": None,
-            "subject_field_evidence": [], "strand_alignment": False, "strand_label": ""}
+            "subject_field_evidence": [], "strand_alignment": False, "strand_label": "", "recommendation_basis": "grades"}
     ]
 
 

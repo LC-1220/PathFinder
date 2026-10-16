@@ -237,6 +237,27 @@ body{
 }
 .container .entry-button:hover{transform:translateY(-1px);box-shadow:0 8px 20px rgba(20,30,70,.12);}
 
+.container :is(button, .entry-button, .admin-login summary){
+    transition: scale .18s ease, box-shadow .18s ease;
+}
+
+.container :is(button, .entry-button, .admin-login summary):not(:disabled):is(:hover, :focus-visible){
+    scale: 1.04;
+}
+
+.container :is(button, .entry-button, .admin-login summary):not(:disabled):active{
+    scale: 1.07;
+}
+
+@media (prefers-reduced-motion: reduce){
+    .container :is(button, .entry-button, .admin-login summary){
+        transition: none;
+    }
+    .container :is(button, .entry-button, .admin-login summary):not(:disabled):is(:hover, :focus-visible, :active){
+        scale: 1;
+    }
+}
+
 .admin-login{
     width:100%;
     padding-top:14px;
@@ -269,6 +290,8 @@ body{
 .admin-fields-content{
     min-height:0;
     overflow:hidden;
+    padding:0 4% 6px;
+    margin:0 -4%;
 }
 
 .password-field{position:relative;width:100%;}

@@ -61,9 +61,52 @@ Recommendations are recalculated and saved after each additional report card.
 College program labels (such as BSCS-DS) are not SHS strands: when no SHS strand
 is detected, matching uses the combined grades across the course catalog instead
 of inferring an SHS strand from a college program.
+For recognized SHS strands, recommendations include two separate groups:
+strand-matched courses and grade-based alternatives outside that strand's catalog
+group. Alternatives use only existing database courses and their stored academic
+profiles. Observed category grades are compared using weighted root-mean-square
+distance; weights are `(category average - lowest observed category average + 1)^2`,
+so stronger graded areas have more influence. Final alternative scores combine
+85% of this strength-weighted distance with 15% equal-weight distance across all
+observed categories, allowing full-profile fit to distinguish close matches.
+Candidates are sorted using unrounded distances; full-profile distance breaks
+exact ties before the course name. Displayed match scores use two decimal places.
+Missing categories are excluded from both distances.
+FCL / Filipino Christian Living and PE / Physical Education are excluded from
+both recommendation groups' scoring and strongest-grade calculations. Their OCR
+extraction, saved grade rows, and GWA remain unchanged.
+No course-name-to-subject rules determine the alternatives' ranking.
+The configured result limit applies separately to each group. Both groups are
+saved with recommendation history and restored on reload for signed-in students;
+guest results remain in the current page. Full recommendation payloads are not
+duplicated in session cookies. Regenerate older
+recommendations to include alternatives. Similarity scores are guidance, not
+admission probabilities.
+HE / Home Economics is recognized as an SHS strand when supplied as standalone
+student metadata or under Course/Major, including TVL-HE. The original label is
+shown in the upload preview, and recommendations use the Home Economics catalog
+category rather than generic TVL.
+During extraction, the upload screen displays server-reported OCR and result
+preparation stages. During processing, the bar displays a clearly labeled
+estimated percentage, capped below the next completed-file milestone. It reaches
+100% only when results are ready. This is not an exact OCR percentage.
+A moving highlight in the bar and a spinner remain
+active until the request finishes; both stop on completion or failure.
+Interrupted requests show an error rather than completing the bar.
+Loading motion and login-button hover/press scaling respect reduced-motion
+preferences.
+Clients can request newline-delimited progress events from the OCR endpoint with
+`Accept: application/x-ndjson`; other clients still receive the usual JSON result.
 
 ## Notes
 
+- GAS recommendations use 16 existing catalog courses aligned with business,
+  accounting, communication, psychology, policing, hospitality/tourism, and
+  teaching careers. For an existing database, apply
+  `migrations/gas_course_strands.sql` to add only these GAS tags without adding
+  courses, resetting the catalog, or changing other strand tags. Restart the app
+  afterward to refresh the cached catalog; regenerate recommendations for saved
+  GAS profiles to use the updated eligibility.
 - Main app entrypoint: fastapi_app.py
 - Static assets: static/
 - HTML templates: templates/

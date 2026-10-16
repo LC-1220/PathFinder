@@ -80,6 +80,8 @@ def _strand_from_major(value):
         return "GAS"
     if "ICT" in tokens:
         return "ICT"
+    if "HE" in tokens or "HOME ECONOMICS" in normalized:
+        return "HE"
     if "HR" in tokens:
         return "TVL"
     if "TVL" in tokens:
@@ -93,6 +95,11 @@ def _strand_from_major(value):
 
 def _strand_from_metadata_value(value):
     normalized = re.sub(r"[\s_-]+", " ", normalize_ocr_text(value).upper()).strip()
+    if normalized in {
+        "HE", "HOME ECONOMICS", "HOME ECONOMICS (HE)",
+        "TVL HE", "TVL HOME ECONOMICS", "TVL HOME ECONOMICS (HE)",
+    }:
+        return "HE"
     if normalized in {"STEM", "ABM", "HUMSS", "HUMMS", "HUMS", "GAS", "ICT", "TVL", "HR", "SPORTS"}:
         return _strand_from_major(normalized)
     if normalized in {"ARTS & DESIGN", "ARTS DESIGN", "ARTS AND DESIGN"}:

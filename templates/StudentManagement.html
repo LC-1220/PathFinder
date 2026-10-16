@@ -198,10 +198,11 @@
                     <div id="upload-error" class="upload-error" role="alert" hidden></div>
 
                     <div id="progress-wrap" class="progress-wrap" style="display:none;" role="status" aria-live="polite">
-                        <div class="progress-bar">
+                        <div id="progress-percent" class="progress-percent">0%</div>
+                        <div class="progress-bar" role="progressbar" aria-label="Report card processing" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
                             <div id="progress-fill" class="progress-fill"></div>
                         </div>
-                        <div id="progress-label" class="progress-label">Preparing upload</div>
+                        <div class="progress-status"><span class="progress-spinner" aria-hidden="true"></span><div id="progress-label" class="progress-label">Preparing upload</div></div>
                     </div>
                     </div>
 

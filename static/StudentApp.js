@@ -1079,6 +1079,7 @@ function splitOcrStudentName(value){
 function normalizeOcrStrand(value){
     const text = String(value || '').replace(/\s+/g, ' ').trim();
     const upper = text.toUpperCase();
+    if(/\bHE\b|\bHOME ECONOMICS\b|^TVL_HE$/.test(upper)) return 'HE';
     const known = configuredAcademicStrands;
     const match = known.find(item => upper.includes(item.replace('_', ' ')) || upper.includes(item));
     return match || text;
@@ -1606,50 +1607,124 @@ function clearInputs() {
     let progressWrapEl = null;
     let progressFillEl = null;
     let progressLabelEl = null;
+    let progressPercentEl = null;
+    let completedFilePercent = 0;
+    let progressFileCount = 1;
+    let estimatedProgress = 0;
+    let progressTimer = null;
+    let currentFileLabel = '';
 
     function showProgress(){
         if(progressWrapEl) progressWrapEl.style.display = 'block';
     }
 
     function hideProgress(){
+        clearInterval(progressTimer);
+        progressTimer = null;
         if(progressWrapEl) progressWrapEl.style.display = 'none';
+        if(progressWrapEl) progressWrapEl.setAttribute('aria-busy', 'false');
     }
 
     function setProgress(percent, label){
         showProgress();
-        if(progressFillEl){
-            if(typeof percent === 'number' && !isNaN(percent)){
-                progressFillEl.classList.remove('indeterminate');
-                progressFillEl.style.width = Math.max(0, Math.min(100, percent)) + '%';
-            }else{
-                progressFillEl.classList.add('indeterminate');
+        const busy = typeof percent !== 'number' || !Number.isFinite(percent);
+        if(progressWrapEl) progressWrapEl.setAttribute('aria-busy', String(busy));
+        function renderPercent(){
+            const value = Math.floor(estimatedProgress);
+            if(progressFillEl){
+                progressFillEl.style.width = value + '%';
+                progressFillEl.parentElement.setAttribute('aria-valuenow', String(value));
+                progressFillEl.parentElement.setAttribute('aria-valuetext', `${value}%${busy ? ' estimated' : ''}`);
             }
+            if(progressPercentEl) progressPercentEl.textContent = `${value}%${busy ? ' (estimated)' : ''}`;
         }
+        if(busy){
+            if(progressTimer === null){
+                const ceiling = Math.min(99, completedFilePercent + 95 / progressFileCount);
+                estimatedProgress = Math.max(estimatedProgress, completedFilePercent);
+                const advance = () => {
+                    estimatedProgress += Math.max(0, ceiling - estimatedProgress) * 0.025;
+                    renderPercent();
+                };
+                advance();
+                progressTimer = setInterval(advance, 500);
+            }
+        }else{
+            clearInterval(progressTimer);
+            progressTimer = null;
+            estimatedProgress = Math.max(0, Math.min(100, percent));
+        }
+        renderPercent();
         if(progressLabelEl && label !== undefined){
             progressLabelEl.textContent = label;
         }
     }
 
+    async function readOcrResponse(response){
+        if(!response.ok || !response.headers.get('content-type')?.includes('application/x-ndjson')){
+            try{
+                const data = await response.json();
+                if(!response.ok) throw new Error(data?.message || `OCR request failed (status ${response.status}).`);
+                return data;
+            }catch(error){
+                if(error instanceof SyntaxError){
+                    throw new Error(`Server did not return a valid response (status ${response.status}). It may have run out of memory or timed out processing this file. Please try again in a moment.`);
+                }
+                throw error;
+            }
+        }
+        if(!response.body) throw new Error('The OCR progress stream is unavailable. Please try again.');
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let pending = '';
+        let result;
+        let receivedResult = false;
+        function consume(line){
+            if(!line.trim()) return;
+            const event = JSON.parse(line);
+            if(event.type === 'progress'){
+                setProgress(null, `${currentFileLabel}${event.message}`);
+            }else if(event.type === 'result'){
+                result = event.data;
+                receivedResult = true;
+            }else{
+                throw new Error('The server returned an unexpected OCR progress event.');
+            }
+        }
+        try{
+            while(true){
+                const {value, done} = await reader.read();
+                pending += decoder.decode(value, {stream: !done});
+                const lines = pending.split('\n');
+                pending = lines.pop();
+                lines.forEach(consume);
+                if(done) break;
+            }
+            if(pending.trim()) consume(pending);
+            if(!receivedResult) throw new Error('OCR connection ended before results were ready. Please try again.');
+            return result;
+        }finally{
+            reader.releaseLock();
+        }
+    }
+
     async function imageBlobToText(blob){
         try{
-            setProgress(null, 'Running Docling OCR and TableFormer...');
+            setProgress(null, `${currentFileLabel}Uploading report card...`);
             const formData = new FormData();
             formData.append('report_card', blob, blob.name || 'report-card.png');
             if(window.currentReportCardBatch) formData.append('upload_batch', window.currentReportCardBatch);
 
-            const response = await fetch('/api/v1/ocr_report_card', { method: 'POST', body: formData });
-            let data;
-            try{
-                data = await response.json();
-            }catch(parseError){
-                throw new Error(`Server did not return a valid response (status ${response.status}). It may have run out of memory or timed out processing this file. Please try again in a moment.`);
-            }
+            const response = await fetch('/api/v1/ocr_report_card', {
+                method: 'POST', body: formData, headers: {'Accept': 'application/x-ndjson'}
+            });
+            const data = await readOcrResponse(response);
 
             if(!data || !data.success){
                 throw new Error((data && data.message) || 'Docling could not process this file.');
             }
 
-            setProgress(90, `${data.provider || 'OCR'} extraction complete.`);
+            setProgress(null, `${currentFileLabel}Preparing review...`);
             window.latestOcrReviewRequired = Boolean(window.latestOcrReviewRequired || data.review_required);
             window.latestParsedSubjects = Array.isArray(data.parsed?.subjects) ? data.parsed.subjects : [];
             const normalizeReviewText = value => ` ${String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()} `;
@@ -1741,7 +1816,7 @@ function clearInputs() {
                 const ctx = canvas.getContext('2d');
                 await page.render({canvasContext: ctx, viewport}).promise;
                 const blob = await new Promise(r=>canvas.toBlob(r,'image/png'));
-                setProgress(Math.round((i/pdf.numPages)*100), `OCR page ${i}/${pdf.numPages}`);
+                setProgress(null, `${currentFileLabel}Reading scanned page ${i}/${pdf.numPages}...`);
                 const pageOcr = await imageBlobToText(blob);
                 console.log(`PDF page ${i} OCR text length:`, pageOcr ? pageOcr.length : 0);
                 fullText += pageOcr + '\n\n';
@@ -1972,6 +2047,7 @@ function clearInputs() {
         progressWrapEl = document.getElementById('progress-wrap');
         progressFillEl = document.getElementById('progress-fill');
         progressLabelEl = document.getElementById('progress-label');
+        progressPercentEl = document.getElementById('progress-percent');
 
         function setJourneyStep(activeStep){
             document.querySelectorAll('.journey-steps li').forEach(item => {
@@ -1985,6 +2061,7 @@ function clearInputs() {
             const evidence = [];
             const lines = String(academicRecord?.subjects || '').split(/\r?\n/).map(line => line.trim()).filter(Boolean);
             for(const line of lines){
+                if(/\b(?:fcl|p\.?\s*e\.?)(?:\s*\d+)?\b|\b(?:filipino\s+)?christian\s+living\b|\bphysical\s+education\b/i.test(line)) continue;
                 const match = line.match(/^(.+?)\s*[-:|]\s*(\d{1,3}(?:\.\d+)?)\s*$/);
                 if(!match) continue;
                 const grade = Number.parseFloat(match[2]);
@@ -2048,21 +2125,30 @@ function clearInputs() {
                 .replace(/</g, '&lt;')
                 .replace(/>/g, '&gt;')
                 .replace(/"/g, '&quot;');
-            const items = (Array.isArray(recommendations) ? recommendations : [])
-                .slice()
+            const recommendationsList = Array.isArray(recommendations) ? recommendations : [];
+            const primary = recommendationsList.filter(item => item.recommendation_basis !== 'grade_alternative')
                 .slice(0, configuredRecommendationLimit);
+            const primaryCourses = new Set(primary.map(item => item.course));
+            const alternatives = recommendationsList.filter(item => item.recommendation_basis === 'grade_alternative' && !primaryCourses.has(item.course))
+                .slice(0, configuredRecommendationLimit);
+            const items = [...primary, ...alternatives];
+            const isAlternative = item => item.recommendation_basis === 'grade_alternative';
+            const groupRank = index => index < primary.length ? index + 1 : index - primary.length + 1;
             const resultsTitle = document.getElementById('recommendation-results-title');
             if(resultsTitle){
-                resultsTitle.textContent = `Your top ${items.length} course match${items.length === 1 ? '' : 'es'}`;
+                resultsTitle.textContent = alternatives.length ? 'Your course matches and grade-based alternatives'
+                    : `Your top ${items.length} course match${items.length === 1 ? '' : 'es'}`;
             }
             list.innerHTML = items.length
                 ? items.map((item, index) => `
-                    <article class="inline-recommendation-card${index === 0 ? ' best-match' : ''}" data-recommendation-index="${index}">
-                        <div class="recommendation-rank">${String(index + 1).padStart(2, '0')}</div>
+                    ${index === 0 && primary.length ? `<div class="recommendation-group-heading"><h3>${primary[0].strand_label ? 'Strand-matched courses' : 'Grade-profile matches'}</h3><p>${primary[0].strand_label ? 'Courses listed for your strand, ranked using your grades.' : 'Courses ranked using your available grades.'}</p></div>` : ''}
+                    ${isAlternative(item) && index === primary.length ? '<div class="recommendation-group-heading"><h3>Grade-based alternatives</h3><p>Outside your strand group, ranked from database course profiles with greater weight on your strongest graded areas. These are guidance, not admission guarantees.</p></div>' : ''}
+                    <article class="inline-recommendation-card${index === 0 && !isAlternative(item) ? ' best-match' : ''}" data-recommendation-index="${index}">
+                        <div class="recommendation-rank">${String(groupRank(index)).padStart(2, '0')}</div>
                         <div class="recommendation-detail">
                             <div class="recommendation-title-row">
                                 <h3>${escapeHtml(item.course)}</h3>
-                                ${index === 0 ? '<span class="best-match-badge"><i class="fa-solid fa-star"></i> Best match</span>' : ''}
+                                ${groupRank(index) === 1 ? `<span class="best-match-badge"><i class="fa-solid fa-star"></i> ${isAlternative(item) ? 'Top grade-based alternative' : 'Best match'}</span>` : ''}
                             </div>
                             <p>${escapeHtml(item.description || item.reason)}</p>
                             ${item.reason ? `<small>${escapeHtml(item.reason)}</small>` : ''}
@@ -2079,12 +2165,12 @@ function clearInputs() {
                                     ? `<div class="subject-evidence">${majorEvidence.length ? `<span>Major related subjects</span><div>${renderEvidence(majorEvidence)}</div>` : ''}${supportingEvidence.length ? `<span>Supporting subjects</span><div>${renderEvidence(supportingEvidence)}</div>` : ''}</div>`
                                     : '';
                             })()}
-                            <div class="match-meter" aria-label="${escapeHtml(item.course)} recommendation match ${Math.round(Number(item.match_score ?? item.confidence ?? 0))} percent">
-                                <div class="match-meter-label"><span>Recommendation match</span><strong>${Math.round(Number(item.match_score ?? item.confidence ?? 0))}%</strong></div>
+                            <div class="match-meter" aria-label="${escapeHtml(item.course)} recommendation match ${Number(item.match_score ?? item.confidence ?? 0).toFixed(2)} percent">
+                                <div class="match-meter-label"><span>Recommendation match</span><strong>${Number(item.match_score ?? item.confidence ?? 0).toFixed(2)}%</strong></div>
                                 <div class="match-meter-track"><span style="width:${Math.max(0, Math.min(100, Number(item.match_score ?? item.confidence ?? 0)))}%"></span></div>
                             </div>
                             <div class="recommendation-actions">
-                                <button class="recommendation-match-explanation" type="button" aria-haspopup="dialog">${index === 0 ? 'Why this is your best match' : 'Why this course matches'} <i class="fa-solid fa-lightbulb" aria-hidden="true"></i></button>
+                                <button class="recommendation-match-explanation" type="button" aria-haspopup="dialog">${isAlternative(item) ? 'Why this alternative matches' : index === 0 ? 'Why this is your best match' : 'Why this course matches'} <i class="fa-solid fa-lightbulb" aria-hidden="true"></i></button>
                             </div>
                         </div>
                     </article>
@@ -2110,14 +2196,14 @@ function clearInputs() {
                 courseAnalysis.innerHTML = `
                     <div class="course-analysis-header">
                         <div><span>${index === 0 ? 'Your best match' : 'Recommended course'}</span><h3>${escapeHtml(item.course)}</h3></div>
-                        <strong>${Math.round(Number(item.confidence || 0))}% profile similarity</strong>
+                        <strong>${Number(item.confidence || 0).toFixed(2)}% profile similarity</strong>
                     </div>
                     <p class="course-analysis-reason"><i class="fa-solid fa-lightbulb"></i>${escapeHtml(item.reason || 'This program matches your academic profile and subject strengths.')}</p>
                     <p class="course-analysis-description">${escapeHtml(item.description || 'Course description is not available.')}</p>
                     <div class="course-analysis-signals" aria-label="Recommendation signals">
-                        <div class="course-analysis-signal"><span>Grade-profile similarity</span><strong>${Math.round(Number(item.confidence || 0))}%</strong><small>Based on graded subject categories compared with this course profile.</small></div>
+                        <div class="course-analysis-signal"><span>Grade-profile similarity</span><strong>${Number(item.confidence || 0).toFixed(2)}%</strong><small>Based on graded subject categories compared with this course profile.</small></div>
                         <div class="course-analysis-signal"><span>Related-field grades</span><strong>${fieldAverage !== null && Number.isFinite(fieldAverage) ? fieldAverage.toFixed(1) : 'Not available'}</strong><small>${fieldEvidence.length ? fieldEvidence.map(entry => `${escapeHtml(entry.field)} ${Number(entry.grade).toFixed(1)}`).join(' · ') : 'No recognized related-field grades.'}</small></div>
-                        <div class="course-analysis-signal"><span>${strandLabel ? `${escapeHtml(strandLabel)} strand` : 'Strand'}</span><strong>${strandLabel ? (item.strand_alignment ? 'Aligned' : 'Not aligned') : 'Not provided'}</strong><small>Strand alignment helps prioritize results; it does not replace grade evidence.</small></div>
+                        <div class="course-analysis-signal"><span>${strandLabel ? `${escapeHtml(strandLabel)} strand` : 'Strand'}</span><strong>${isAlternative(item) ? 'Grade-based alternative' : strandLabel ? (item.strand_alignment ? 'Aligned' : 'Not aligned') : 'Not provided'}</strong><small>${isAlternative(item) ? 'Ranked by your strongest grades and stored course profiles, not strand eligibility.' : 'Strand alignment helps prioritize results; it does not replace grade evidence.'}</small></div>
                     </div>
                     <div class="course-analysis-summary">
                         <div><span>Your average (graded categories)</span><strong>${hasStudentAverage ? studentAverage.toFixed(2) : 'N/A'}</strong></div>
@@ -2153,8 +2239,8 @@ function clearInputs() {
                     .sort((left, right) => (left.priority === right.priority ? right.grade - left.grade : left.priority === 'major' ? -1 : 1))
                     .slice(0, 6);
                 const strandLabel = String(item.strand_label || '').trim();
-                const matchScore = Math.round(Number(item.match_score ?? item.confidence ?? 0));
-                const profileSimilarity = Math.round(Number(item.confidence || 0));
+                const matchScore = Number(item.match_score ?? item.confidence ?? 0).toFixed(2);
+                const profileSimilarity = Number(item.confidence || 0).toFixed(2);
                 const subjectNames = [...new Set(supportingSubjects.slice(0, 4).map(entry => entry.subject))];
                 const subjectList = subjectNames.length === 1
                     ? subjectNames[0]
@@ -2172,21 +2258,21 @@ function clearInputs() {
                     'Sports & Physical Education': 'These programs combine physical performance, health knowledge, and instruction.',
                 };
                 const fieldExplanation = fieldFitExplanations[item.category] || 'This course overlaps with the strengths shown in your academic profile.';
-                const fitExplanation = subjectList
+                const fitExplanation = isAlternative(item) ? item.reason : subjectList
                     ? `${index === 0 ? 'This is your strongest course match' : 'This course is a relevant match'} because your grades in ${subjectList} show strengths related to ${item.course}. ${fieldExplanation}${strandLabel && item.strand_alignment ? ` It is also listed for your ${strandLabel} strand.` : !strandLabel ? ' No strand was identified, so the match is based on your grade profile.' : ''}`
                     : `${index === 0 ? 'This is currently your strongest course match' : 'This course is a relevant match'} based on how your overall grade profile compares with ${item.course}. ${fieldExplanation}${strandLabel && item.strand_alignment ? ` It is also listed for your ${strandLabel} strand.` : ''}`;
 
                 courseAnalysis.innerHTML = `
                     <div class="course-fit-explanation">
                         <div class="course-analysis-header">
-                            <div><span>${index === 0 ? 'Why this is your best match' : 'Why this course matches'}</span><h3>${escapeHtml(item.course)}</h3></div>
+                            <div><span>${isAlternative(item) ? 'Why this grade-based alternative matches' : index === 0 ? 'Why this is your best match' : 'Why this course matches'}</span><h3>${escapeHtml(item.course)}</h3></div>
                             <strong>${matchScore}% match</strong>
                         </div>
                         <p class="course-analysis-reason course-fit-narrative"><i class="fa-solid fa-lightbulb"></i>${escapeHtml(fitExplanation)}</p>
                         <div class="course-analysis-signals" aria-label="Why this course matches">
-                            <div class="course-analysis-signal"><span>Recommendation match</span><strong>${matchScore}%</strong><small>Final ranking score, including course relevance signals.</small></div>
+                            <div class="course-analysis-signal"><span>Recommendation match</span><strong>${matchScore}%</strong><small>${isAlternative(item) ? '85% strongest-area fit and 15% full observed-grade profile fit.' : 'Final ranking score, including course relevance signals.'}</small></div>
                             <div class="course-analysis-signal"><span>Grade-profile similarity</span><strong>${profileSimilarity}%</strong><small>Similarity between your grades and the course reference profile.</small></div>
-                            <div class="course-analysis-signal"><span>${strandLabel ? `${escapeHtml(strandLabel)} strand` : 'Strand'}</span><strong>${strandLabel ? (item.strand_alignment ? 'Aligned' : 'Not aligned') : 'Not provided'}</strong><small>${strandLabel ? 'Only courses tagged for the selected strand are eligible.' : 'No strand was identified; matches are ranked from your strongest grades.'}</small></div>
+                            <div class="course-analysis-signal"><span>${strandLabel ? `${escapeHtml(strandLabel)} strand` : 'Strand'}</span><strong>${isAlternative(item) ? 'Grade-based alternative' : strandLabel ? (item.strand_alignment ? 'Aligned' : 'Not aligned') : 'Not provided'}</strong><small>${isAlternative(item) ? 'This separate list considers courses outside your strand using grades, not strand eligibility.' : strandLabel ? 'Only courses tagged for the selected strand are eligible.' : 'No strand was identified; matches are ranked from your strongest grades.'}</small></div>
                         </div>
                         <p class="course-analysis-disclaimer">This is a relative academic match, not an admission probability or eligibility decision.</p>
                     </div>
@@ -2742,6 +2828,9 @@ function clearInputs() {
                 };
 
                 try{
+                    completedFilePercent = 0;
+                    progressFileCount = 1;
+                    estimatedProgress = 0;
                     setProgress(null, isGuest ? 'Preparing recommendations...' : 'Saving report card...');
                     const response = await fetch(isGuest ? '/api/v1/recommend_anonymous' : '/api/v1/save_profile', {
                         method: 'POST',
@@ -2777,8 +2866,6 @@ function clearInputs() {
                     console.error('Save reviewed report failed:', error);
                     setProgress(0, 'Save failed');
                     alert('Save failed: ' + (error && error.message ? error.message : error));
-                } finally {
-                    setTimeout(hideProgress, 1600);
                 }
             });
 
@@ -2843,6 +2930,9 @@ function clearInputs() {
             runBtn.setAttribute('aria-busy', 'true');
             setUploadMessage('');
             setJourneyStep(2);
+            completedFilePercent = 0;
+            progressFileCount = files.length;
+            estimatedProgress = 0;
             if(recommendBtn) recommendBtn.style.display = 'none';
             setProgress(null, 'Processing files with high-accuracy OCR...');
 
@@ -2874,7 +2964,8 @@ function clearInputs() {
                     if(!isSupportedReportCardFile(file)){
                         throw new Error('Use a JPG, JPEG, PNG, WEBP, PDF, or DOCX report-card file.');
                     }
-                    setProgress(Math.round((i / total) * 100), `Processing file ${i + 1}/${total}: ${file.name}`);
+                    currentFileLabel = `File ${i + 1}/${total} (${file.name}): `;
+                    setProgress(null, `${currentFileLabel}Reading file...`);
 
                     const fileName = String(file.name || '').toLowerCase();
                     const rawText = fileName.endsWith('.pdf')
@@ -2884,6 +2975,8 @@ function clearInputs() {
                             : await imageBlobToText(file);
                     if(window.latestAutomaticOcrDisabled){
                         processedCount += 1;
+                        completedFilePercent = Math.round(((i + 1) / total) * 100);
+                        setProgress(Math.min(99, completedFilePercent), `Received ${i + 1}/${total} files for manual review.`);
                         continue;
                     }
                     if(!rawText || !rawText.trim()){
@@ -2920,6 +3013,8 @@ function clearInputs() {
                     } else {
                         alert('The OCR service could not read the uploaded file. Please review the extracted content and save manually if needed.');
                     }
+                    completedFilePercent = Math.round(((i + 1) / total) * 100);
+                    setProgress(Math.min(99, completedFilePercent), `Finished reading ${i + 1}/${total} files.`);
                 }
 
                 if(processedCount > 0){
@@ -2947,7 +3042,7 @@ function clearInputs() {
             }finally{
                 runBtn.disabled = false;
                 runBtn.removeAttribute('aria-busy');
-                setTimeout(hideProgress, 2200);
+                currentFileLabel = '';
             }
         });
     });

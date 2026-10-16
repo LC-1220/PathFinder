@@ -1,4 +1,5 @@
 # FastAPI application configuration and imports
+import asyncio
 import json
 import html
 import inspect
@@ -34,7 +35,7 @@ from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.utils import ImageReader
 from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 from starlette.middleware import Middleware
-from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 
 load_dotenv()
 
@@ -1076,6 +1077,11 @@ def _sanitize_recommendations(payload):
             ],
             "strand_alignment": bool(item.get("strand_alignment", False)),
             "strand_label": item.get("strand_label") or "",
+            "recommendation_basis": (
+                item.get("recommendation_basis")
+                if item.get("recommendation_basis") in {"strand", "grades", "grade_alternative"}
+                else "strand" if item.get("strand_label") else "grades"
+            ),
         })
     return valid
 
@@ -1130,8 +1136,21 @@ def _recommendation_strand_code(strand):
     return ""
 
 
+def _recommendation_subjects_only(subjects_text):
+    excluded = re.compile(
+        r"\b(?:fcl|p\.?\s*e\.?)(?:\s*\d+)?\b|"
+        r"\b(?:filipino\s+)?christian\s+living\b|\bphysical\s+education\b",
+        re.IGNORECASE,
+    )
+    return "\n".join(
+        line for line in str(subjects_text or "").splitlines()
+        if not excluded.search(line)
+    )
+
+
 # Recommend only courses cataloged for the student's strand.
 def recommend_course(subjects_text, current_course="", strand=""):
+    subjects_text = _recommendation_subjects_only(subjects_text)
     training_data = _course_training_data()
     if _is_degree_program(strand):
         strand = ""
@@ -1280,13 +1299,88 @@ def _recommendation_limit():
 
 def _limit_recommendations(payload, limit=None):
     limit = _recommendation_limit() if limit is None else limit
-    return _sanitize_recommendations(payload)[:limit]
+    recommendations = _sanitize_recommendations(payload)
+    primary = [item for item in recommendations if item["recommendation_basis"] != "grade_alternative"]
+    alternatives = [item for item in recommendations if item["recommendation_basis"] == "grade_alternative"]
+    primary = primary[:limit]
+    primary_courses = {item["course"] for item in primary}
+    return primary + [item for item in alternatives if item["course"] not in primary_courses][:limit]
+
+
+def _grade_based_alternatives(subjects_text, strand):
+    subjects_text = _recommendation_subjects_only(subjects_text)
+    strand_key = _recommendation_strand_code(strand)
+    if not strand_key:
+        return []
+    subject_scores = _extract_subject_scores(subjects_text)
+    observed = [
+        (index, category, _average(subject_scores[category]))
+        for index, category in enumerate(CATEGORY_NAMES)
+        if subject_scores[category]
+    ]
+    if not observed:
+        return []
+    lowest_grade = min(grade for _, _, grade in observed)
+    # Relative grade strengths supply the weights, not course names or strand rules.
+    weighted = [
+        (index, (grade - lowest_grade + 1) ** 2, grade)
+        for index, _, grade in observed
+    ]
+    total_weight = sum(weight for _, weight, _ in weighted)
+    features = _build_feature_vector(subjects_text)
+    strengths = sorted(observed, key=lambda entry: entry[2], reverse=True)[:2]
+    strength_text = ", ".join(f"{category.title()} ({grade:.1f})" for _, category, grade in strengths)
+    alternatives = []
+    for sample in _course_training_data():
+        if strand_key in sample.get("strands", []):
+            continue
+        distance = math.sqrt(sum(
+            weight * (grade - sample["features"][index]) ** 2
+            for index, weight, grade in weighted
+        ) / total_weight)
+        profile_distance = math.sqrt(sum(
+            (grade - sample["features"][index]) ** 2
+            for index, _, grade in observed
+        ) / len(observed))
+        # Strengths dominate; overall fit separates otherwise similar candidates.
+        ranking_distance = 0.85 * distance + 0.15 * profile_distance
+        match_score = round(max(0.0, 100.0 - ranking_distance), 2)
+        alternatives.append({
+            "course": sample["course"],
+            "description": sample.get("description", ""),
+            "reason": (
+                f"Your strongest graded areas are {strength_text}. "
+                "This alternative compares your observed grades with the course's stored academic profile, "
+                "giving higher weight to your strongest areas (85% of the ranking) "
+                "and using all observed grades for the remaining 15% to distinguish close matches. "
+                f"It is outside your {strand_key} catalog group; strand eligibility did not determine its ranking."
+            ),
+            "category": categorize_course(sample["course"], sample.get("description", "")),
+            "confidence": round(max(0.0, 100.0 - profile_distance), 2),
+            "match_score": match_score,
+            "core_grade_fit": round(_core_grade_fit(features, sample["features"]), 2),
+            "strand_alignment": False,
+            "strand_label": strand_key,
+            "recommendation_basis": "grade_alternative",
+            "_ranking_distance": ranking_distance,
+            "_profile_distance": profile_distance,
+        })
+    alternatives.sort(key=lambda item: (
+        item["_ranking_distance"], item["_profile_distance"], item["course"].casefold(),
+    ))
+    for item in alternatives:
+        item.pop("_ranking_distance")
+        item.pop("_profile_distance")
+    return alternatives
 
 
 def _configured_recommendations(subjects_text, current_course="", strand=""):
     limit = _recommendation_limit()
     recommendations = recommend_course(subjects_text, current_course, strand)
-    return _sanitize_recommendations(json.dumps(recommendations))[:limit]
+    for item in recommendations:
+        item["recommendation_basis"] = "strand" if item.get("strand_label") else "grades"
+    alternatives = _grade_based_alternatives(subjects_text, strand)
+    return _limit_recommendations(recommendations + alternatives, limit)
 
 # Calculate the average profile for a given course based on historical training data
 def _course_average_profile(course_name):
@@ -1897,7 +1991,7 @@ async def generate_recommendations(req):
         return JSONResponse({"success": False, "message": "No course matches could be generated from the saved grades."})
 
     payload = json.dumps(recommendations)
-    sess["latest_recommendations"] = payload
+    sess.pop("latest_recommendations", None)
     conn = _db_conn()
     cursor = conn.cursor()
     cursor.execute(
@@ -3641,7 +3735,7 @@ async def save_profile(req):
     # Commit the changes to the database and close the connection
     conn.commit()
     conn.close()
-    sess["latest_recommendations"] = recommendation_payload
+    sess.pop("latest_recommendations", None)
     sess["latest_subjects"] = subjects_text
     sess.pop("latest_report_card_upload_id", None)
     sess.pop("latest_report_card_upload_ids", None)
@@ -3660,7 +3754,7 @@ async def save_profile(req):
     # Build the comparisons for the top 3 recommended courses based on student performance analytics
     comparisons = {
         item["course"]: _build_student_performance_analytics(item["course"], subjects_text)
-        for item in recommendation[:3]
+        for item in recommendation
     }
     saved_profile = {
         key: merged_student.get(key, "")
@@ -3760,12 +3854,12 @@ async def recommend_anonymous(req):
 
     recommendation_subjects = _clean_subjects_for_recommendation(subjects_text) or subjects_text
     recommendations = _configured_recommendations(recommendation_subjects, "", data.get("strand", ""))
-    req.session["latest_recommendations"] = json.dumps(recommendations)
+    req.session.pop("latest_recommendations", None)
     req.session["latest_subjects"] = subjects_text
     req.session["latest_strand"] = data.get("strand", "")
     comparisons = {
         item["course"]: _build_student_performance_analytics(item["course"], subjects_text)
-        for item in recommendations[:3]
+        for item in recommendations
     }
     return JSONResponse({"success": True, "recommendation": recommendations, "comparisons": comparisons})
 
@@ -3805,7 +3899,7 @@ def get_profile(req):
         saved_recommendations = _configured_recommendations(subjects, profile[4] or "", profile[9] or "")
     saved_comparisons = {
         item["course"]: _build_student_performance_analytics(item["course"], profile[7] or "")
-        for item in saved_recommendations[:3]
+        for item in saved_recommendations
     }
 
     return JSONResponse(
@@ -4115,7 +4209,43 @@ def _process_report_card_bytes(file_bytes, filename):
     }
 
 
-# OCR endpoint for processing report cards
+def _stream_ocr_response(process):
+    async def events():
+        queue = asyncio.Queue()
+        loop = asyncio.get_running_loop()
+
+        def report(stage, message):
+            loop.call_soon_threadsafe(queue.put_nowait, {
+                "type": "progress", "stage": stage, "message": message,
+            })
+
+        task = asyncio.create_task(asyncio.to_thread(process, report))
+        try:
+            yield dumps({
+                "type": "progress", "stage": "received",
+                "message": "Upload received. Waiting for OCR to start...",
+            }) + "\n"
+            while not task.done():
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=1)
+                except asyncio.TimeoutError:
+                    continue
+                yield dumps(event) + "\n"
+            while not queue.empty():
+                yield dumps(queue.get_nowait()) + "\n"
+            response = await task
+            yield dumps({"type": "result", "data": json.loads(response.body)}) + "\n"
+        finally:
+            # A disconnected browser must not cancel an upload already being saved.
+            if not task.done():
+                await asyncio.shield(task)
+
+    return StreamingResponse(
+        events(), media_type="application/x-ndjson",
+        headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
+    )
+
+
 @fastapi_route("/ocr_report_card", methods=["POST"])
 async def ocr_report_card(req):
     form = await req.form()
@@ -4178,8 +4308,21 @@ async def ocr_report_card(req):
             "review_required": True,
         })
 
+    def process(on_progress):
+        return _finish_report_card_upload(req, file_bytes, filename, upload_id, user_id, on_progress)
+
+    if "application/x-ndjson" in req.headers.get("accept", ""):
+        return _stream_ocr_response(process)
+    return await asyncio.to_thread(process, None)
+
+
+def _finish_report_card_upload(req, file_bytes, filename, upload_id, user_id, on_progress):
     try:
+        if on_progress:
+            on_progress("processing", "Running Docling OCR and TableFormer...")
         processed = _process_report_card_bytes(file_bytes, filename)
+        if on_progress:
+            on_progress("preparing", "OCR finished. Preparing extracted results...")
         ocr_payload = processed["ocr_payload"]
         raw_ocr = processed["raw_ocr"]
         parsed = processed["parsed"]

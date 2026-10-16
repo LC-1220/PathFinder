@@ -1,10 +1,126 @@
 import asyncio
 import json
+import threading
 from types import SimpleNamespace
 
 import pytest
 
 import fastapi_app as app
+
+
+def test_ocr_progress_is_delivered_before_processing_finishes():
+    release = threading.Event()
+
+    def process(report):
+        report("processing", "OCR is running")
+        assert release.wait(timeout=5)
+        report("preparing", "Preparing results")
+        return app.JSONResponse({"success": True, "structured_text": "Math - 90"})
+
+    async def read_progress():
+        response = app._stream_ocr_response(process)
+        assert response.headers["x-accel-buffering"] == "no"
+        iterator = response.body_iterator
+        try:
+            received = json.loads(await anext(iterator))
+            running = json.loads(await asyncio.wait_for(anext(iterator), timeout=3))
+            assert received["stage"] == "received"
+            assert running["stage"] == "processing"
+            assert not release.is_set()
+        finally:
+            release.set()
+        remaining = [json.loads(chunk) async for chunk in iterator]
+        assert [event.get("stage") for event in remaining[:-1]] == ["preparing"]
+        assert remaining[-1] == {
+            "type": "result",
+            "data": {"success": True, "structured_text": "Math - 90"},
+        }
+
+    asyncio.run(read_progress())
+
+
+@pytest.mark.parametrize("streaming", [False, True])
+@pytest.mark.parametrize("outcome", ["success", "failure", "manual"])
+def test_ocr_upload_progress_preserves_results_and_session(monkeypatch, streaming, outcome):
+    statements = []
+    activity = []
+    connection = SimpleNamespace(
+        cursor=lambda: SimpleNamespace(
+            execute=lambda query, params: statements.append((query, params)),
+            fetchone=lambda: (17,),
+        ),
+        commit=lambda: None,
+        close=lambda: None,
+    )
+    monkeypatch.setattr(app, "_db_conn", lambda: connection)
+    monkeypatch.setattr(app, "_get_system_settings", lambda: {
+        "automatic_ocr_enabled": outcome != "manual",
+    })
+    monkeypatch.setattr(app, "_record_student_activity", lambda *args, **kwargs: activity.append(args[1]))
+
+    async def validate(uploaded, limit):
+        return True, {"file_bytes": b"image", "extension": ".png"}
+
+    monkeypatch.setattr(app, "validate_upload", validate)
+    processing = []
+
+    def process(file_bytes, filename):
+        processing.append((file_bytes, filename))
+        if outcome == "failure":
+            raise ValueError("Test OCR failure")
+        return {
+            "ocr_payload": {"subjects": [{"subject_name": "Math", "grade": 90}]},
+            "raw_ocr": {"table": [], "raw_text": "Math - 90"},
+            "parsed": {"subjects": [{"subject_name": "Math", "grade": 90}], "strand": "HE"},
+            "structured_text": "Math - 90",
+            "extracted_gwa": "90",
+            "ocr_status": "extracted",
+            "app_parse_seconds": 0,
+        }
+
+    monkeypatch.setattr(app, "_process_report_card_bytes", process)
+
+    async def form():
+        return {
+            "report_card": SimpleNamespace(filename="card.png"),
+            "upload_batch": "test-batch",
+        }
+
+    session = {"user_id": "student"}
+    request = SimpleNamespace(
+        form=form, session=session,
+        headers={"accept": "application/x-ndjson" if streaming else "application/json"},
+    )
+
+    async def run_upload():
+        response = await app.ocr_report_card(request)
+        # Session cookies must be ready before streaming response headers are sent.
+        assert session["latest_report_card_upload_id"] == 17
+        assert session["latest_report_card_upload_ids"] == [17]
+        assert session["latest_report_card_batch"] == "test-batch"
+        if streaming and outcome != "manual":
+            events = [json.loads(chunk) async for chunk in response.body_iterator]
+            stages = [event["stage"] for event in events if event["type"] == "progress"]
+            assert stages == (["received", "processing", "preparing"] if outcome == "success"
+                              else ["received", "processing"])
+            return events[-1]["data"]
+        return json.loads(response.body)
+
+    result = asyncio.run(run_upload())
+    if outcome == "manual":
+        assert result["automatic_ocr_disabled"]
+        assert not processing
+    elif outcome == "failure":
+        assert result["success"] is False
+        assert "Test OCR failure" in result["message"]
+        assert "report_card_upload_failed" in activity
+        assert "ocr_status = 'failed'" in statements[-1][0]
+    else:
+        assert result["success"] is True
+        assert result["structured_text"] == "Math - 90"
+        assert result["parsed"]["strand"] == "HE"
+        assert "report_card_uploaded" in activity
+        assert "UPDATE report_card_uploads" in statements[-1][0]
 
 
 class ProfileConnection:
@@ -249,10 +365,39 @@ def test_new_upload_recalculates_real_recommendations_and_persists_them(monkeypa
     assert result["recommendation"] != old_recommendations
     assert result["recommendation"] == app._configured_recommendations(merged_subjects)
     assert json.loads(connection.saved[8]) == result["recommendation"]
-    assert json.loads(request.session["latest_recommendations"]) == result["recommendation"]
+    assert "latest_recommendations" not in request.session
     assert json.loads(connection.history[-1][1]) == result["recommendation"]
     assert result["profile"]["recommendation"] == result["recommendation"]
     assert set(result["comparisons"]) == {item["course"] for item in result["recommendation"]}
+
+
+def test_save_persists_strand_and_grade_alternative_groups(monkeypatch):
+    catalog = [
+        {"course": "BS in Business Administration", "features": [75, 75, 85, 75, 95, 85],
+         "description": "Business", "strands": ["GAS", "ABM"]},
+        {"course": "BS in Civil Engineering", "features": [97, 80, 75, 75, 75, 75],
+         "description": "Engineering", "strands": ["STEM"]},
+    ]
+    monkeypatch.setattr(app, "_course_training_data", lambda: catalog)
+    monkeypatch.setattr(app, "_get_system_settings", lambda: app.SYSTEM_SETTING_DEFAULTS)
+    monkeypatch.setattr(app, "_record_student_activity", lambda *args, **kwargs: None)
+    connection = ProfileConnection()
+    monkeypatch.setattr(app, "_db_conn", lambda: connection)
+
+    async def request_json():
+        return {"subjects": "Mathematics - 98\nEnglish - 75", "strand": "GAS"}
+
+    request = SimpleNamespace(session={"user_id": "student", "latest_recommendations": "stale"}, json=request_json)
+    result = json.loads(asyncio.run(app.save_profile(request)).body)
+    assert result["success"]
+    recommendations = result["recommendation"]
+    assert [item["recommendation_basis"] for item in recommendations] == ["strand", "grade_alternative"]
+    assert connection.committed
+    assert json.loads(connection.saved[8]) == recommendations
+    assert json.loads(connection.history[-1][1]) == recommendations
+    assert "latest_recommendations" not in request.session
+    assert result["profile"]["recommendation"] == recommendations
+    assert set(result["comparisons"]) == {item["course"] for item in recommendations}
 
 
 @pytest.mark.parametrize("degree", ["BSCS-DS", "BSIT-05", "BS in Computer Science", "Bachelor of Science in Nursing"])
@@ -292,6 +437,11 @@ def test_ocr_keeps_program_and_shs_strand_separate(strand):
         ("TVL TRACK A", "TVL"),
         ("HR", "TVL"),
         ("ICT", "ICT"),
+        ("HE", "HE"),
+        ("Home Economics", "HE"),
+        ("Home Economics (HE)", "HE"),
+        ("TVL-HE", "HE"),
+        ("TVL_HE", "HE"),
         ("GAS", "GAS"),
     ],
 )
@@ -329,6 +479,14 @@ def test_ocr_recognizes_shs_strand_in_course_major_field(course_major, expected_
         ("TVL", "TVL"),
         ("HR", "TVL"),
         ("ICT", "ICT"),
+        ("HE", "HE"),
+        ("he", "HE"),
+        ("Home Economics", "HE"),
+        ("Home Economics (HE)", "HE"),
+        ("TVL-HE", "HE"),
+        ("TVL_HE", "HE"),
+        ("TVL Home Economics", "HE"),
+        ("TVL Home Economics (HE)", "HE"),
         ("SPORTS", "SPORTS"),
         ("ARTS & DESIGN", "ARTS_DESIGN"),
         ("ARTS AND DESIGN", "ARTS_DESIGN"),
@@ -348,7 +506,10 @@ def test_ocr_recognizes_standalone_strand_metadata_token(strand_token, expected_
     assert parsed["strand_raw"] == strand_token
 
 
-@pytest.mark.parametrize("course_major", ["BSIT-05", "BS in ICT", "Bachelor of Science in STEM Education"])
+@pytest.mark.parametrize("course_major", [
+    "BSIT-05", "BS in ICT", "Bachelor of Science in STEM Education",
+    "BS in Home Economics", "Bachelor of Science in HE",
+])
 def test_ocr_does_not_treat_degree_program_course_major_as_shs_strand(course_major):
     parsed = app.parse_report_card_structure({
         "raw_text": f"Course/Major : {course_major}",
@@ -358,6 +519,26 @@ def test_ocr_does_not_treat_degree_program_course_major_as_shs_strand(course_maj
 
     assert parsed["major"] == course_major
     assert parsed["strand"] == ""
+
+
+@pytest.mark.parametrize("strand", ["HE", "Home Economics", "Home Economics (HE)", "TVL-HE", "TVL_HE"])
+def test_home_economics_metadata_reaches_saved_profile_and_recommendations(monkeypatch, strand):
+    parsed = app.parse_report_card_structure({
+        "raw_text": f"Course/Major : {strand}",
+        "student_info_raw": [{"text": f"Course/Major : {strand}"}],
+        "table": [],
+    })
+    connection = ProfileConnection()
+    result, _, _, _ = save_record(monkeypatch, connection, {
+        "strand": parsed["strand"],
+        "subjects": "Entrepreneurship - 90",
+    })
+
+    assert parsed["strand"] == "HE"
+    assert parsed["strand_raw"] == strand
+    assert result["profile"]["strand"] == "HE"
+    assert connection.saved[9] == "HE"
+    assert app._recommendation_strand_code(result["profile"]["strand"]) == "TVL_HE"
 
 
 def test_saving_college_course_does_not_infer_an_shs_strand(monkeypatch):
@@ -390,4 +571,4 @@ def test_manual_regeneration_repairs_legacy_zero_matches(monkeypatch):
     result = json.loads(asyncio.run(app.generate_recommendations(request)).body)
     assert result == {"success": True, "count": 1}
     assert len(json.loads(statements[0][1][0])) == 1
-    assert len(json.loads(request.session["latest_recommendations"])) == 1
+    assert "latest_recommendations" not in request.session
