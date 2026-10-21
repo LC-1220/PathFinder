@@ -107,14 +107,11 @@
             <label>University name<input name="university_name" type="text" maxlength="160" required></label>
             <label>School year<input name="school_year" type="text" maxlength="24" placeholder="2026-2027"></label>
             <div class="system-settings-field"><span>Available academic strands</span><div class="system-strand-options">
+              <label><input type="checkbox" name="available_strands" value="BE"> BE – Business Entrepreneurship</label>
               <label><input type="checkbox" name="available_strands" value="STEM"> STEM</label>
-              <label><input type="checkbox" name="available_strands" value="ABM"> ABM</label>
-              <label><input type="checkbox" name="available_strands" value="HUMSS"> HUMSS</label>
-              <label><input type="checkbox" name="available_strands" value="GAS"> GAS</label>
-              <label><input type="checkbox" name="available_strands" value="TVL"> TVL</label>
-              <label><input type="checkbox" name="available_strands" value="ICT"> ICT</label>
-              <label><input type="checkbox" name="available_strands" value="SPORTS"> Sports</label>
-              <label><input type="checkbox" name="available_strands" value="ARTS_DESIGN"> Arts &amp; Design</label>
+              <label><input type="checkbox" name="available_strands" value="ICTech"> ICTech</label>
+              <label><input type="checkbox" name="available_strands" value="HT"> HT – Hospitality and Tourism</label>
+              <label><input type="checkbox" name="available_strands" value="ARSSH"> ARSSH – Arts, Social Sciences, and Humanities</label>
             </div></div>
           </fieldset>
           <fieldset class="system-settings-group">
@@ -193,7 +190,7 @@
       <div class="admin-student-list-heading"><div><span class="admin-panel-kicker">REPORT CENTER</span><h3>Generate reports</h3></div></div>
       <form id="admin-report-form" class="admin-report-controls">
         <label>Report type<select name="report_type"><option value="all_reports">All reports</option><option value="student_summary" selected>Student summary</option><option value="report_cards">Report-card status</option><option value="recommendations">Recommendation frequency</option></select></label>
-        <label>Academic strand<select name="strand"><option value="">All strands</option>{% for strand in system_settings.available_strands %}<option value="{{ strand }}">{{ 'Arts & Design' if strand == 'ARTS_DESIGN' else strand }}</option>{% endfor %}<option value="Unspecified">Unspecified</option></select></label>
+        <label>Academic strand<select name="strand"><option value="">All strands</option>{% for strand in system_settings.available_strands %}<option value="{{ strand }}">{{ strand }}</option>{% endfor %}<option value="Unspecified">Unspecified</option></select></label>
         <div class="admin-report-date-filters">
           <label>From date<input name="from_date" type="date"></label>
           <label>To date<input name="to_date" type="date"></label>

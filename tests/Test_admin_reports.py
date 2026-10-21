@@ -89,13 +89,13 @@ def test_admin_roles_can_generate_each_report(monkeypatch, role, report_type, ex
 
 @pytest.mark.parametrize("role", [app.ROLE_ADMIN, app.ROLE_SEMI_ADMIN])
 def test_admin_roles_can_generate_all_reports(monkeypatch, role):
-    status, result = _call_report(monkeypatch, role, {"report_type": "all_reports", "strand": "TVL"})
+    status, result = _call_report(monkeypatch, role, {"report_type": "all_reports", "strand": "HT"})
 
     assert status == 200
     report = result["report"]
     assert report["title"] == "All Reports"
     assert [section["type"] for section in report["sections"]] == ["student_summary", "report_cards", "recommendations"]
-    assert all(section["filters"]["strand"] == "TVL" for section in report["sections"])
+    assert all(section["filters"]["strand"] == "HT" for section in report["sections"])
 
 
 def test_report_generator_rejects_non_admin_roles(monkeypatch):

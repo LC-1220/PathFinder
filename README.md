@@ -88,10 +88,14 @@ guest results remain in the current page. Full recommendation payloads are not
 duplicated in session cookies. Regenerate older
 recommendations to include alternatives. Similarity scores are guidance, not
 admission probabilities.
-HE / Home Economics is recognized as an SHS strand when supplied as standalone
-student metadata or under Course/Major, including TVL-HE. The original label is
-shown in the upload preview, and recommendations use the Home Economics catalog
-category rather than generic TVL.
+The active SHS strands are BE (Business Entrepreneurship), STEM, ICTech,
+HT (Hospitality and Tourism), and ARSSH (Arts, Social Sciences, and Humanities).
+Strands are recognized when supplied as standalone student metadata, under a
+Strand label, or under Course/Major. Older labels are converted: ABM → BE,
+HUMSS → ARSSH, ICT / TVL-ICT → ICTech, and HE / Home Economics / TVL-HE → HT.
+GAS, Sports, plain TVL, Industrial Arts, and Arts & Design are no longer offered;
+students with those labels receive grade-based recommendations without a strand
+filter. The original label is shown in the upload preview.
 During extraction, the upload screen displays server-reported OCR and result
 preparation stages. During processing, the bar displays a clearly labeled
 estimated percentage, capped below the next completed-file milestone. It reaches
@@ -106,13 +110,12 @@ Clients can request newline-delimited progress events from the OCR endpoint with
 
 ## Notes
 
-- GAS recommendations use 16 existing catalog courses aligned with business,
-  accounting, communication, psychology, policing, hospitality/tourism, and
-  teaching careers. For an existing database, apply
-  `migrations/gas_course_strands.sql` to add only these GAS tags without adding
-  courses, resetting the catalog, or changing other strand tags. Restart the app
-  afterward to refresh the cached catalog; regenerate recommendations for saved
-  GAS profiles to use the updated eligibility.
+- Strand-to-course eligibility lives in `university_course_strands` in
+  `supabase_schema.sql`. For an existing database, rerun `supabase_schema.sql`
+  to replace the old strand tags with BE, STEM, ICTech, HT, and ARSSH, then
+  restart the app to refresh the cached catalog. Saved settings that still list
+  old strands reset to the five active strands on startup. Regenerate
+  recommendations for saved profiles to use the updated eligibility.
 - Main app entrypoint: fastapi_app.py
 - Static assets: static/
 - HTML templates: templates/

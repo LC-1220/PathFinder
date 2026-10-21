@@ -11,15 +11,15 @@ import fastapi_app as app
 def catalog(monkeypatch):
     courses = [
         {"course": "BS in Business Administration", "features": [75, 75, 85, 75, 95, 85],
-         "description": "Business", "strands": ["GAS", "ABM"]},
+         "description": "Business", "strands": ["BE"]},
         {"course": "Bachelor of Elementary Education", "features": [75, 80, 95, 70, 75, 90],
-         "description": "Education", "strands": ["GAS", "HUMSS"]},
+         "description": "Education", "strands": ["BE", "ARSSH"]},
         {"course": "BS in Civil Engineering", "features": [97, 80, 75, 75, 75, 75],
          "description": "Engineering", "strands": ["STEM"]},
         {"course": "BS in Pharmacy", "features": [80, 97, 75, 75, 75, 75],
          "description": "Pharmacy", "strands": ["STEM"]},
         {"course": "BS in Information Technology", "features": [80, 75, 75, 97, 75, 75],
-         "description": "Information technology", "strands": ["TVL_ICT"]},
+         "description": "Information technology", "strands": ["ICTech"]},
     ]
     monkeypatch.setattr(app, "_course_training_data", lambda: courses)
     monkeypatch.setattr(app, "_get_system_settings", lambda: {
@@ -30,18 +30,18 @@ def catalog(monkeypatch):
 
 def test_high_math_gas_student_gets_engineering_as_separate_alternative(catalog):
     subjects = "Mathematics - 98\nScience - 80\nEnglish - 75\nBusiness - 75"
-    result = app._configured_recommendations(subjects, strand="GAS")
+    result = app._configured_recommendations(subjects, strand="BE")
     primary = [item for item in result if item["recommendation_basis"] == "strand"]
     alternatives = [item for item in result if item["recommendation_basis"] == "grade_alternative"]
 
     assert [item["course"] for item in primary] == [
-        item["course"] for item in app.recommend_course(subjects, strand="GAS")[:2]
+        item["course"] for item in app.recommend_course(subjects, strand="BE")[:2]
     ]
     assert alternatives[0]["course"] == "BS in Civil Engineering"
     assert len(primary) == 2
     assert len(alternatives) == 1
     assert all(item["strand_alignment"] for item in primary)
-    assert all(not item["strand_alignment"] and item["strand_label"] == "GAS" for item in alternatives)
+    assert all(not item["strand_alignment"] and item["strand_label"] == "BE" for item in alternatives)
     assert {item["course"] for item in primary}.isdisjoint(item["course"] for item in alternatives)
     assert {item["course"] for item in result} <= {item["course"] for item in catalog}
     assert "Math (98.0)" in alternatives[0]["reason"]
@@ -49,16 +49,16 @@ def test_high_math_gas_student_gets_engineering_as_separate_alternative(catalog)
 
 def test_alternatives_follow_database_profiles_not_course_names(catalog):
     subjects = "Mathematics - 98\nScience - 80\nEnglish - 75"
-    first = app._grade_based_alternatives(subjects, "GAS")
+    first = app._grade_based_alternatives(subjects, "BE")
     assert first[0]["course"] == "BS in Civil Engineering"
     catalog[2]["features"], catalog[3]["features"] = catalog[3]["features"], catalog[2]["features"]
-    assert app._grade_based_alternatives(subjects, "GAS")[0]["course"] == "BS in Pharmacy"
+    assert app._grade_based_alternatives(subjects, "BE")[0]["course"] == "BS in Pharmacy"
     catalog[3]["course"] = "Newly renamed database program"
-    assert app._grade_based_alternatives(subjects, "GAS")[0]["course"] == "Newly renamed database program"
+    assert app._grade_based_alternatives(subjects, "BE")[0]["course"] == "Newly renamed database program"
 
 
 def test_changing_highest_grade_changes_alternative(catalog):
-    science = app._grade_based_alternatives("Mathematics - 80\nScience - 98\nEnglish - 75", "GAS")
+    science = app._grade_based_alternatives("Mathematics - 80\nScience - 98\nEnglish - 75", "BE")
     assert science[0]["course"] == "BS in Pharmacy"
 
 
@@ -69,9 +69,9 @@ def test_changing_highest_grade_changes_alternative(catalog):
 ])
 def test_non_core_grades_do_not_influence_best_alternative(catalog, subject):
     baseline = "Mathematics - 98\nScience - 80\nEnglish - 75"
-    expected = app._grade_based_alternatives(baseline, "GAS")
+    expected = app._grade_based_alternatives(baseline, "BE")
     for grade in (70, 100):
-        assert app._grade_based_alternatives(f"{baseline}\n{subject} - {grade}", "GAS") == expected
+        assert app._grade_based_alternatives(f"{baseline}\n{subject} - {grade}", "BE") == expected
 
 
 @pytest.mark.parametrize(("subject", "category"), [
@@ -82,23 +82,23 @@ def test_non_core_grades_do_not_influence_best_alternative(catalog, subject):
     ("Oral Communication", "english"), ("English Literature", "english"),
 ])
 def test_core_branches_are_used_for_alternatives(catalog, subject, category):
-    result = app._grade_based_alternatives(f"{subject} - 95", "GAS")
+    result = app._grade_based_alternatives(f"{subject} - 95", "BE")
     assert result
     assert f"{category.title()} (95.0)" in result[0]["reason"]
 
 
 def test_non_core_only_record_has_no_alternative_but_keeps_strand_matches(catalog):
     subjects = "Business - 95\nComputer Programming - 98\nSocial Studies - 90"
-    assert app._grade_based_alternatives(subjects, "GAS") == []
-    assert app.recommend_course(subjects, strand="GAS")
+    assert app._grade_based_alternatives(subjects, "BE") == []
+    assert app.recommend_course(subjects, strand="BE")
 
 
 def test_non_core_database_features_do_not_affect_alternatives(catalog):
     subjects = "Mathematics - 98\nScience - 80\nEnglish - 75"
-    expected = app._grade_based_alternatives(subjects, "GAS")
+    expected = app._grade_based_alternatives(subjects, "BE")
     for course in catalog:
         course["features"][3:] = [100, 0, 100]
-    assert app._grade_based_alternatives(subjects, "GAS") == expected
+    assert app._grade_based_alternatives(subjects, "BE") == expected
 
 
 def test_close_strength_matches_prefer_better_full_profile(monkeypatch):
@@ -108,7 +108,7 @@ def test_close_strength_matches_prefer_better_full_profile(monkeypatch):
         {"course": "Stronger overall profile", "features": [97, 80, 75, 0, 0, 0],
          "description": "", "strands": ["STEM"]},
     ])
-    results = app._grade_based_alternatives("Mathematics - 98\nScience - 80\nEnglish - 75", "GAS")
+    results = app._grade_based_alternatives("Mathematics - 98\nScience - 80\nEnglish - 75", "BE")
     assert results[0]["course"] == "Stronger overall profile"
     assert results[0]["match_score"] > results[1]["match_score"]
     assert results[0]["confidence"] > results[1]["confidence"]
@@ -122,7 +122,7 @@ def test_alternative_score_uses_both_distances_without_rounding_before_sort(monk
         {"course": "Z slightly stronger match", "features": [97.002, 0, 0, 0, 0, 0],
          "description": "", "strands": []},
     ])
-    results = app._grade_based_alternatives("Mathematics - 98", "GAS")
+    results = app._grade_based_alternatives("Mathematics - 98", "BE")
     assert results[0]["course"] == "Z slightly stronger match"
     assert results[0]["match_score"] == results[1]["match_score"] == 99.0
     assert all(not any(key.startswith("_") for key in item) for item in results)
@@ -137,17 +137,17 @@ def test_alternative_score_uses_both_distances_without_rounding_before_sort(monk
 ])
 def test_minor_subjects_do_not_change_either_recommendation_group(catalog, minor):
     subjects = "Mathematics - 98\nScience - 80\nEnglish - 75\nFilipino - 82"
-    assert app.recommend_course(subjects, strand="GAS") == app.recommend_course(
-        f"{subjects}\n{minor}", strand="GAS",
+    assert app.recommend_course(subjects, strand="BE") == app.recommend_course(
+        f"{subjects}\n{minor}", strand="BE",
     )
-    assert app._configured_recommendations(subjects, strand="GAS") == app._configured_recommendations(
-        f"{subjects}\n{minor}", strand="GAS",
+    assert app._configured_recommendations(subjects, strand="BE") == app._configured_recommendations(
+        f"{subjects}\n{minor}", strand="BE",
     )
 
 
 def test_minor_only_record_has_no_recommendations(catalog):
     assert app._configured_recommendations(
-        "Filipino Christian Living - 100\nPhysical Education and Health - 100", strand="GAS",
+        "Filipino Christian Living - 100\nPhysical Education and Health - 100", strand="BE",
     ) == []
 
 
@@ -157,9 +157,9 @@ def test_minor_filter_keeps_major_subjects_and_original_text():
 
 
 def test_unobserved_categories_do_not_influence_alternative_ranking(catalog):
-    first = app._grade_based_alternatives("Mathematics - 98", "GAS")
+    first = app._grade_based_alternatives("Mathematics - 98", "BE")
     catalog[2]["features"][1:] = [0, 0, 0, 0, 0]
-    second = app._grade_based_alternatives("Mathematics - 98", "GAS")
+    second = app._grade_based_alternatives("Mathematics - 98", "BE")
     assert [(item["course"], item["match_score"]) for item in first] == [
         (item["course"], item["match_score"]) for item in second
     ]
@@ -167,13 +167,13 @@ def test_unobserved_categories_do_not_influence_alternative_ranking(catalog):
 
 def test_tied_grades_have_finite_scores(catalog):
     for subjects in ("Mathematics - 80\nScience - 80", "Mathematics - 80"):
-        result = app._grade_based_alternatives(subjects, "GAS")
+        result = app._grade_based_alternatives(subjects, "BE")
         assert result
         assert all(0 <= item["match_score"] <= 100 for item in result)
 
 
 def test_zero_only_grades_preserve_existing_unusable_grade_behavior(catalog):
-    assert app._grade_based_alternatives("Mathematics - 0\nScience - 0", "GAS") == []
+    assert app._grade_based_alternatives("Mathematics - 0\nScience - 0", "BE") == []
 
 
 @pytest.mark.parametrize("strand", ["", "Unknown", "BS in Computer Science"])
@@ -184,19 +184,19 @@ def test_missing_or_unrecognized_strand_does_not_duplicate_grade_only_list(catal
 
 
 def test_no_observed_grades_or_outside_courses_yields_no_alternatives(catalog):
-    assert app._grade_based_alternatives("No grades", "GAS") == []
+    assert app._grade_based_alternatives("No grades", "BE") == []
     for item in catalog:
-        item["strands"].append("GAS")
-    assert app._grade_based_alternatives("Mathematics - 98", "GAS") == []
+        item["strands"].append("BE")
+    assert app._grade_based_alternatives("Mathematics - 98", "BE") == []
 
 
 def test_group_limits_and_basis_survive_serialization(catalog):
-    result = app._configured_recommendations("Mathematics - 98\nEnglish - 75", strand="GAS")
+    result = app._configured_recommendations("Mathematics - 98\nEnglish - 75", strand="BE")
     restored = app._limit_recommendations(json.dumps(result))
     assert restored == result
     limited = app._limit_recommendations(json.dumps(result), 1)
     assert [item["recommendation_basis"] for item in limited] == ["strand", "grade_alternative"]
-    legacy = [{"course": catalog[0]["course"], "strand_label": "GAS"}]
+    legacy = [{"course": catalog[0]["course"], "strand_label": "BE"}]
     assert app._limit_recommendations(legacy)[0]["recommendation_basis"] == "strand"
     duplicate = {**result[0], "recommendation_basis": "grade_alternative"}
     assert len({item["course"] for item in app._limit_recommendations(result + [duplicate])}) == len(result)
@@ -205,8 +205,8 @@ def test_group_limits_and_basis_survive_serialization(catalog):
 @pytest.mark.parametrize("limit", [1, 2, 3, 4, 5])
 def test_existing_saved_lists_keep_only_best_alternative(catalog, limit):
     subjects = "Mathematics - 98\nEnglish - 75"
-    primary = app.recommend_course(subjects, strand="GAS")
-    alternatives = app._grade_based_alternatives(subjects, "GAS")
+    primary = app.recommend_course(subjects, strand="BE")
+    alternatives = app._grade_based_alternatives(subjects, "BE")
     assert len(alternatives) > 1
     restored = app._limit_recommendations(json.dumps(primary + alternatives), limit)
     assert [item["course"] for item in restored if item["recommendation_basis"] == "grade_alternative"] == [
@@ -219,9 +219,9 @@ def test_existing_saved_lists_keep_only_best_alternative(catalog, limit):
 
 def test_saved_profile_restores_both_groups_and_all_comparisons(monkeypatch, catalog):
     subjects = "Mathematics - 98\nEnglish - 75"
-    recommendations = app._configured_recommendations(subjects, strand="GAS")
+    recommendations = app._configured_recommendations(subjects, strand="BE")
     profile = ("1", "Student", "", "Name", "", "86.5", "98, 75", subjects,
-               json.dumps(recommendations), "GAS")
+               json.dumps(recommendations), "BE")
     cursor = SimpleNamespace(execute=lambda *args: None, fetchone=lambda: profile)
     monkeypatch.setattr(app, "_db_conn", lambda: SimpleNamespace(cursor=lambda: cursor, close=lambda: None))
     response = app.get_profile(SimpleNamespace(session={"user_id": "student"}))
@@ -232,7 +232,7 @@ def test_saved_profile_restores_both_groups_and_all_comparisons(monkeypatch, cat
 
 def test_guest_endpoint_returns_both_groups(monkeypatch, catalog):
     async def request_json():
-        return {"subjects": "Mathematics - 98\nEnglish - 75", "strand": "GAS"}
+        return {"subjects": "Mathematics - 98\nEnglish - 75", "strand": "BE"}
 
     request = SimpleNamespace(session={"is_guest": True}, json=request_json)
     result = json.loads(asyncio.run(app.recommend_anonymous(request)).body)

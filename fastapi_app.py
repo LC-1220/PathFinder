@@ -77,7 +77,7 @@ ROLE_SUPER_ADMIN = ROLE_ADMIN
 PASSWORD_MIN_LENGTH = 8
 PASSWORD_MAX_BYTES = 72
 PASSWORD_POLICY_MESSAGE = "Use at least 8 characters with an uppercase letter and a symbol. Passwords must be no more than 72 UTF-8 bytes."
-SYSTEM_SETTING_STRANDS = ("STEM", "ABM", "HUMSS", "GAS", "TVL", "ICT", "SPORTS", "ARTS_DESIGN")
+SYSTEM_SETTING_STRANDS = ("BE", "STEM", "ICTech", "HT", "ARSSH")
 SYSTEM_SETTING_DEFAULTS = {
     "university_name": "University of Perpetual Help System Dalta Las Pinas",
     "school_year": "",
@@ -301,6 +301,9 @@ def _get_system_settings():
                 settings.update(saved)
         except (TypeError, ValueError):
             pass
+    saved_strands = settings.get("available_strands")
+    if not isinstance(saved_strands, list) or not saved_strands or any(strand not in SYSTEM_SETTING_STRANDS for strand in saved_strands):
+        settings["available_strands"] = list(SYSTEM_SETTING_STRANDS)
     settings.pop("current_semester", None)
     return settings
 
@@ -983,22 +986,20 @@ def categorize_course(course_name, description=""):
         return "Arts & Design"
     return "Other"
 
-#  Infer Academic Strand Based on Course Name (assigns a strand like STEM, ABM, HUMSS, TVL, GAS, or Other) 
+#  Infer Academic Strand Based on Course Name (assigns a strand like BE, STEM, ICTech, HT, ARSSH, or Other) 
 # help in recommending suitable courses for students based on their academic track
 def _infer_strand(course_name=""):
     course_name = (course_name or "").lower()
-    if any(tok in course_name for tok in ("engineering", "science", "math")):
+    if any(tok in course_name for tok in ("tourism", "hospitality")):
+        return "HT"
+    if any(tok in course_name for tok in ("computer", "information", "technology", "multimedia")):
+        return "ICTech"
+    if any(tok in course_name for tok in ("engineering", "science", "math", "nurs", "health", "medical", "clinical", "therapy", "pharmacy")):
         return "STEM"
-    if any(tok in course_name for tok in ("business", "accounting", "management", "marketing", "economics")):
-        return "ABM"
-    if any(tok in course_name for tok in ("psychology", "education", "communication", "social", "humanities")):
-        return "HUMSS"
-    if any(tok in course_name for tok in ("nurse", "health", "medical", "hospital", "clinical", "care")):
-        return "TVL"
-    if any(tok in course_name for tok in ("gas", "general", "service", "tourism", "hospitality", "arts")):
-        return "GAS"
-    if any(tok in course_name for tok in ("computer", "information", "technology", "it")):
-        return "ICT"
+    if any(tok in course_name for tok in ("business", "accounting", "accountancy", "management", "marketing", "economics", "entrepreneur")):
+        return "BE"
+    if any(tok in course_name for tok in ("psychology", "education", "communication", "social", "humanities", "arts", "political", "criminology")):
+        return "ARSSH"
     return "Other"
 
 # Infer Student's Strengths from Feature Scores (returns top 3 strengths with scores >= 75)
@@ -1108,32 +1109,37 @@ def _is_degree_program(value):
     ))
 
 
+def _strand_words(strand):
+    tokens = re.findall(r"[a-z0-9]+", str(strand or "").lower())
+    return set(tokens), " ".join(tokens)
+
+
+# Older strand names map to the school's current strands; retired strands (GAS, Sports, etc.) map to none.
 def _recommendation_strand_code(strand):
     if _is_degree_program(strand):
         return ""
-    label = str(strand or "").strip().lower()
-    tokens = set(re.findall(r"[a-z0-9]+", label))
-    if "abm" in tokens or "accountancy and business management" in label:
-        return "ABM"
-    if "stem" in tokens or "science, technology, engineering and mathematics" in label:
+    tokens, words = _strand_words(strand)
+    if "stem" in tokens or "science technology engineering and mathematics" in words:
         return "STEM"
-    if "humss" in tokens or "humanities and social sciences" in label:
-        return "HUMSS"
-    if "gas" in tokens or "general academic strand" in label:
-        return "GAS"
-    if "ict" in tokens or "information and communications technology" in label:
-        return "TVL_ICT"
-    if "he" in tokens or "home economics" in label:
-        return "TVL_HE"
-    if "ia" in tokens or "industrial arts" in label:
-        return "TVL_IA"
-    if "arts_design" in label or "arts and design" in label or "media arts" in label:
-        return "ARTS_DESIGN"
-    if "sports" in tokens or "physical education" in label:
-        return "SPORTS"
-    if "tvl" in tokens or ("technical" in tokens and "vocational" in tokens):
-        return "TVL"
+    if tokens & {"ictech", "ict"} or "information and communications technology" in words or "information and communication technology" in words:
+        return "ICTech"
+    if tokens & {"be", "abm"} or "business entrepreneurship" in words or "business and entrepreneurship" in words or "accountancy and business management" in words:
+        return "BE"
+    if tokens & {"ht", "he"} or "hospitality and tourism" in words or "home economics" in words:
+        return "HT"
+    if tokens & {"arssh", "humss", "humms", "hums"} or "arts social sciences and humanities" in words or "humanities and social sciences" in words:
+        return "ARSSH"
     return ""
+
+
+def _is_retired_strand(strand):
+    tokens, words = _strand_words(strand)
+    if tokens & {"gas", "sports", "tvl", "ia", "hr"}:
+        return True
+    return any(name in words for name in (
+        "general academic", "arts and design", "arts design", "industrial arts", "physical education",
+        "technical vocational",
+    ))
 
 
 def _recommendation_subjects_only(subjects_text):
@@ -1157,7 +1163,7 @@ def recommend_course(subjects_text, current_course="", strand=""):
     strand_text = str(strand or "").strip()
     strand_key = _recommendation_strand_code(strand)
     missing_strand_values = {"other", "unknown", "not detected", "not available", "not specified", "n/a", "na", "none"}
-    if strand_text and not strand_key and strand_text.casefold() not in missing_strand_values:
+    if strand_text and not strand_key and strand_text.casefold() not in missing_strand_values and not _is_retired_strand(strand_text):
         return []
 
     subject_scores = _extract_subject_scores(subjects_text)
@@ -1566,8 +1572,9 @@ def init_database():
         try:
             saved_settings = json.loads(saved_settings_row[0])
             saved_strands = saved_settings.get("available_strands", [])
-            if isinstance(saved_strands, list) and "ICT" not in saved_strands:
-                saved_settings["available_strands"] = [*saved_strands, "ICT"]
+            # Settings saved before the BE/STEM/ICTech/HT/ARSSH strands reset to the current strand list.
+            if not isinstance(saved_strands, list) or not saved_strands or any(strand not in SYSTEM_SETTING_STRANDS for strand in saved_strands):
+                saved_settings["available_strands"] = list(SYSTEM_SETTING_STRANDS)
                 cursor.execute(
                     "UPDATE system_settings SET settings_json = ?, updated_at = CURRENT_TIMESTAMP WHERE settings_key = 'global'",
                     (json.dumps(saved_settings),),

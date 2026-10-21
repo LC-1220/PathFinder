@@ -330,9 +330,9 @@ def test_guest_recommendations_use_reviewed_subjects(monkeypatch):
 def test_new_upload_recalculates_real_recommendations_and_persists_them(monkeypatch):
     catalog = [
         {"course": "BS in Computer Science", "features": [95, 85, 80, 95, 70, 80],
-         "description": "Computer science", "strands": ["STEM", "TVL_ICT"]},
+         "description": "Computer science", "strands": ["STEM", "ICTech"]},
         {"course": "BS in Hospitality Management", "features": [80, 80, 85, 70, 96, 80],
-         "description": "Tourism and hospitality", "strands": ["TVL_HE", "TVL"]},
+         "description": "Tourism and hospitality", "strands": ["HT"]},
         {"course": "BS in Nursing", "features": [80, 95, 80, 70, 70, 80],
          "description": "Patient care", "strands": ["STEM"]},
     ]
@@ -374,7 +374,7 @@ def test_new_upload_recalculates_real_recommendations_and_persists_them(monkeypa
 def test_save_persists_strand_and_grade_alternative_groups(monkeypatch):
     catalog = [
         {"course": "BS in Business Administration", "features": [75, 75, 85, 75, 95, 85],
-         "description": "Business", "strands": ["GAS", "ABM"]},
+         "description": "Business", "strands": ["BE"]},
         {"course": "BS in Civil Engineering", "features": [97, 80, 75, 75, 75, 75],
          "description": "Engineering", "strands": ["STEM"]},
     ]
@@ -385,7 +385,7 @@ def test_save_persists_strand_and_grade_alternative_groups(monkeypatch):
     monkeypatch.setattr(app, "_db_conn", lambda: connection)
 
     async def request_json():
-        return {"subjects": "Mathematics - 98\nEnglish - 75", "strand": "GAS"}
+        return {"subjects": "Mathematics - 98\nEnglish - 75", "strand": "BE"}
 
     request = SimpleNamespace(session={"user_id": "student", "latest_recommendations": "stale"}, json=request_json)
     result = json.loads(asyncio.run(app.save_profile(request)).body)
@@ -404,7 +404,7 @@ def test_save_persists_strand_and_grade_alternative_groups(monkeypatch):
 def test_degree_program_is_not_used_as_shs_strand(monkeypatch, degree):
     monkeypatch.setattr(app, "_course_training_data", lambda: [
         {"course": "BS in Hospitality Management", "features": [80, 80, 85, 70, 95, 80],
-         "description": "Hospitality", "strands": ["TVL_HE"]},
+         "description": "Hospitality", "strands": ["HT"]},
     ])
     recommendations = app.recommend_course("Mathematics - 85\nEntrepreneurship - 95", strand=degree)
     assert len(recommendations) == 1
@@ -432,17 +432,22 @@ def test_ocr_keeps_program_and_shs_strand_separate(strand):
     ("course_major", "expected_strand"),
     [
         ("STEM", "STEM"),
-        ("HUMMS", "HUMSS"),
-        ("ABM", "ABM"),
-        ("TVL TRACK A", "TVL"),
-        ("HR", "TVL"),
-        ("ICT", "ICT"),
-        ("HE", "HE"),
-        ("Home Economics", "HE"),
-        ("Home Economics (HE)", "HE"),
-        ("TVL-HE", "HE"),
-        ("TVL_HE", "HE"),
-        ("GAS", "GAS"),
+        ("BE", "BE"),
+        ("ICTech", "ICTech"),
+        ("HT", "HT"),
+        ("ARSSH", "ARSSH"),
+        ("Business Entrepreneurship", "BE"),
+        ("Hospitality and Tourism", "HT"),
+        ("Arts, Social Sciences, and Humanities", "ARSSH"),
+        ("HUMMS", "ARSSH"),
+        ("ABM", "BE"),
+        ("ICT", "ICTech"),
+        ("TVL-ICT", "ICTech"),
+        ("HE", "HT"),
+        ("Home Economics", "HT"),
+        ("Home Economics (HE)", "HT"),
+        ("TVL-HE", "HT"),
+        ("TVL_HE", "HT"),
     ],
 )
 def test_ocr_recognizes_shs_strand_in_course_major_field(course_major, expected_strand):
@@ -471,25 +476,27 @@ def test_ocr_recognizes_shs_strand_in_course_major_field(course_major, expected_
     ("strand_token", "expected_strand"),
     [
         ("STEM", "STEM"),
-        ("ABM", "ABM"),
-        ("HUMSS", "HUMSS"),
-        ("HUMMS", "HUMSS"),
-        ("HUMS", "HUMSS"),
-        ("GAS", "GAS"),
-        ("TVL", "TVL"),
-        ("HR", "TVL"),
-        ("ICT", "ICT"),
-        ("HE", "HE"),
-        ("he", "HE"),
-        ("Home Economics", "HE"),
-        ("Home Economics (HE)", "HE"),
-        ("TVL-HE", "HE"),
-        ("TVL_HE", "HE"),
-        ("TVL Home Economics", "HE"),
-        ("TVL Home Economics (HE)", "HE"),
-        ("SPORTS", "SPORTS"),
-        ("ARTS & DESIGN", "ARTS_DESIGN"),
-        ("ARTS AND DESIGN", "ARTS_DESIGN"),
+        ("BE", "BE"),
+        ("ICTech", "ICTech"),
+        ("HT", "HT"),
+        ("ARSSH", "ARSSH"),
+        ("Business Entrepreneurship", "BE"),
+        ("Hospitality and Tourism", "HT"),
+        ("Arts, Social Sciences, and Humanities", "ARSSH"),
+        ("ABM", "BE"),
+        ("HUMSS", "ARSSH"),
+        ("HUMMS", "ARSSH"),
+        ("HUMS", "ARSSH"),
+        ("ICT", "ICTech"),
+        ("TVL-ICT", "ICTech"),
+        ("HE", "HT"),
+        ("he", "HT"),
+        ("Home Economics", "HT"),
+        ("Home Economics (HE)", "HT"),
+        ("TVL-HE", "HT"),
+        ("TVL_HE", "HT"),
+        ("TVL Home Economics", "HT"),
+        ("TVL Home Economics (HE)", "HT"),
     ],
 )
 def test_ocr_recognizes_standalone_strand_metadata_token(strand_token, expected_strand):
@@ -504,6 +511,28 @@ def test_ocr_recognizes_standalone_strand_metadata_token(strand_token, expected_
 
     assert parsed["strand"] == expected_strand
     assert parsed["strand_raw"] == strand_token
+
+
+@pytest.mark.parametrize("retired", ["GAS", "SPORTS", "TVL", "TVL TRACK A", "HR", "ARTS & DESIGN", "ARTS AND DESIGN"])
+def test_ocr_does_not_map_retired_strands(retired):
+    for raw in (
+        {"raw_text": f"Course/Major : {retired}", "student_info_raw": [{"text": f"Course/Major : {retired}"}], "table": []},
+        {"raw_text": f"Student name : CARLOS, LAUKE ROMMEL PATINIO\n{retired}",
+         "student_info_raw": [{"text": "Student name : CARLOS, LAUKE ROMMEL PATINIO"}, {"text": retired}], "table": []},
+    ):
+        assert app.parse_report_card_structure(raw)["strand"] == ""
+
+
+@pytest.mark.parametrize("retired", ["GAS", "Sports", "TVL", "Arts and Design", "General Academic Strand"])
+def test_retired_strand_uses_grade_based_recommendations(monkeypatch, retired):
+    monkeypatch.setattr(app, "_course_training_data", lambda: [
+        {"course": "BS in Hospitality Management", "features": [80, 80, 85, 70, 95, 80],
+         "description": "Hospitality", "strands": ["HT"]},
+    ])
+    recommendations = app.recommend_course("Mathematics - 85\nEntrepreneurship - 95", strand=retired)
+    assert len(recommendations) == 1
+    assert recommendations[0]["strand_label"] == ""
+    assert app._grade_based_alternatives("Mathematics - 85", retired) == []
 
 
 @pytest.mark.parametrize("course_major", [
@@ -521,8 +550,8 @@ def test_ocr_does_not_treat_degree_program_course_major_as_shs_strand(course_maj
     assert parsed["strand"] == ""
 
 
-@pytest.mark.parametrize("strand", ["HE", "Home Economics", "Home Economics (HE)", "TVL-HE", "TVL_HE"])
-def test_home_economics_metadata_reaches_saved_profile_and_recommendations(monkeypatch, strand):
+@pytest.mark.parametrize("strand", ["HT", "Hospitality and Tourism", "HE", "Home Economics", "Home Economics (HE)", "TVL-HE", "TVL_HE"])
+def test_hospitality_tourism_metadata_reaches_saved_profile_and_recommendations(monkeypatch, strand):
     parsed = app.parse_report_card_structure({
         "raw_text": f"Course/Major : {strand}",
         "student_info_raw": [{"text": f"Course/Major : {strand}"}],
@@ -534,11 +563,11 @@ def test_home_economics_metadata_reaches_saved_profile_and_recommendations(monke
         "subjects": "Entrepreneurship - 90",
     })
 
-    assert parsed["strand"] == "HE"
+    assert parsed["strand"] == "HT"
     assert parsed["strand_raw"] == strand
-    assert result["profile"]["strand"] == "HE"
-    assert connection.saved[9] == "HE"
-    assert app._recommendation_strand_code(result["profile"]["strand"]) == "TVL_HE"
+    assert result["profile"]["strand"] == "HT"
+    assert connection.saved[9] == "HT"
+    assert app._recommendation_strand_code(result["profile"]["strand"]) == "HT"
 
 
 def test_saving_college_course_does_not_infer_an_shs_strand(monkeypatch):
@@ -553,7 +582,7 @@ def test_saving_college_course_does_not_infer_an_shs_strand(monkeypatch):
 def test_manual_regeneration_repairs_legacy_zero_matches(monkeypatch):
     catalog = [
         {"course": "BS in Hospitality Management", "features": [80, 80, 85, 70, 95, 80],
-         "description": "Hospitality", "strands": ["TVL_HE"]},
+         "description": "Hospitality", "strands": ["HT"]},
     ]
     monkeypatch.setattr(app, "_course_training_data", lambda: catalog)
     monkeypatch.setattr(app, "_get_system_settings", lambda: app.SYSTEM_SETTING_DEFAULTS)

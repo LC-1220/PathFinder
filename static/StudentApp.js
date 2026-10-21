@@ -1,7 +1,7 @@
 /* ocr */
 let students = [];
 let selectedStudent = null;
-let configuredAcademicStrands = ['STEM', 'ABM', 'HUMSS', 'GAS', 'TVL', 'ICT', 'SPORTS', 'ARTS_DESIGN'];
+let configuredAcademicStrands = ['BE', 'STEM', 'ICTech', 'HT', 'ARSSH'];
 let configuredRecommendationLimit = 3;
  
 
@@ -1076,13 +1076,20 @@ function splitOcrStudentName(value){
     return { firstName, middleInitial, lastName };
 }
 
+// Older strand names map to the school's current strands; GAS, Sports, plain TVL, and Arts & Design stay unmapped.
 function normalizeOcrStrand(value){
     const text = String(value || '').replace(/\s+/g, ' ').trim();
-    const upper = text.toUpperCase();
-    if(/\bHE\b|\bHOME ECONOMICS\b|^TVL_HE$/.test(upper)) return 'HE';
-    const known = configuredAcademicStrands;
-    const match = known.find(item => upper.includes(item.replace('_', ' ')) || upper.includes(item));
-    return match || text;
+    if(/^(?:bachelor(?:'s)?\b|(?:bs|ba|bsc|beng|btech|bba|bsa|bscs|bsit|bshm|bstm|bsn|bsed|beed|bped)(?:$|[\s.-]))/i.test(text)) return text;
+    const words = (text.toUpperCase().match(/[A-Z0-9]+/g) || []).join(' ');
+    const tokens = new Set(words.split(' '));
+    const hasToken = (...names) => names.some(name => tokens.has(name));
+    let code = '';
+    if(hasToken('STEM') || words.includes('SCIENCE TECHNOLOGY ENGINEERING AND MATHEMATICS')) code = 'STEM';
+    else if(hasToken('ICTECH', 'ICT') || /INFORMATION AND COMMUNICATIONS? TECHNOLOGY/.test(words)) code = 'ICTech';
+    else if(hasToken('BE', 'ABM') || /BUSINESS (?:AND )?ENTREPRENEURSHIP/.test(words)) code = 'BE';
+    else if(hasToken('HT', 'HE') || words.includes('HOSPITALITY AND TOURISM') || words.includes('HOME ECONOMICS')) code = 'HT';
+    else if(hasToken('ARSSH', 'HUMSS', 'HUMMS', 'HUMS') || words.includes('ARTS SOCIAL SCIENCES AND HUMANITIES') || words.includes('HUMANITIES AND SOCIAL SCIENCES')) code = 'ARSSH';
+    return code && configuredAcademicStrands.includes(code) ? code : text;
 }
 
 function studentMetadataFromOcr(parsed = {}, fallbackText = ''){

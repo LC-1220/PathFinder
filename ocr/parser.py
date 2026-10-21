@@ -59,6 +59,11 @@ def _strand_from_table_rows(table_rows):
     return ""
 
 
+def _strand_words(value):
+    return " ".join(re.findall(r"[A-Z0-9]+", normalize_ocr_text(value).upper()))
+
+
+# Older strand names map to the school's current strands; GAS, Sports, plain TVL, and Arts & Design map to none.
 def _strand_from_major(value):
     text = normalize_ocr_text(value)
     if re.match(
@@ -68,42 +73,36 @@ def _strand_from_major(value):
     ):
         return ""
 
-    normalized = re.sub(r"[\s_-]+", " ", text.upper()).strip()
-    tokens = set(re.findall(r"[A-Z0-9]+", normalized))
-    if "STEM" in tokens:
+    words = _strand_words(text)
+    tokens = set(words.split())
+    if "STEM" in tokens or "SCIENCE TECHNOLOGY ENGINEERING AND MATHEMATICS" in words:
         return "STEM"
-    if "ABM" in tokens:
-        return "ABM"
-    if tokens.intersection({"HUMSS", "HUMMS", "HUMS"}):
-        return "HUMSS"
-    if "GAS" in tokens:
-        return "GAS"
-    if "ICT" in tokens:
-        return "ICT"
-    if "HE" in tokens or "HOME ECONOMICS" in normalized:
-        return "HE"
-    if "HR" in tokens:
-        return "TVL"
-    if "TVL" in tokens:
-        return "TVL"
-    if "SPORTS" in tokens:
-        return "SPORTS"
-    if normalized in {"ARTS & DESIGN", "ARTS DESIGN", "ARTS AND DESIGN"}:
-        return "ARTS_DESIGN"
+    if tokens.intersection({"ICTECH", "ICT"}) or "INFORMATION AND COMMUNICATIONS TECHNOLOGY" in words or "INFORMATION AND COMMUNICATION TECHNOLOGY" in words:
+        return "ICTech"
+    if tokens.intersection({"BE", "ABM"}) or "BUSINESS ENTREPRENEURSHIP" in words or "BUSINESS AND ENTREPRENEURSHIP" in words:
+        return "BE"
+    if tokens.intersection({"HT", "HE"}) or "HOSPITALITY AND TOURISM" in words or "HOME ECONOMICS" in words:
+        return "HT"
+    if tokens.intersection({"ARSSH", "HUMSS", "HUMMS", "HUMS"}) or "ARTS SOCIAL SCIENCES AND HUMANITIES" in words or "HUMANITIES AND SOCIAL SCIENCES" in words:
+        return "ARSSH"
     return ""
 
 
+_STANDALONE_STRAND_VALUES = {
+    "STEM", "SCIENCE TECHNOLOGY ENGINEERING AND MATHEMATICS",
+    "ICTECH", "ICT", "TVL ICT", "INFORMATION AND COMMUNICATIONS TECHNOLOGY", "INFORMATION AND COMMUNICATION TECHNOLOGY",
+    "BE", "ABM", "BUSINESS ENTREPRENEURSHIP", "BUSINESS AND ENTREPRENEURSHIP", "BUSINESS ENTREPRENEURSHIP BE",
+    "HT", "HOSPITALITY AND TOURISM", "HOSPITALITY AND TOURISM HT",
+    "HE", "HOME ECONOMICS", "HOME ECONOMICS HE", "TVL HE", "TVL HOME ECONOMICS", "TVL HOME ECONOMICS HE",
+    "ARSSH", "HUMSS", "HUMMS", "HUMS",
+    "ARTS SOCIAL SCIENCES AND HUMANITIES", "ARTS SOCIAL SCIENCES AND HUMANITIES ARSSH",
+}
+
+
 def _strand_from_metadata_value(value):
-    normalized = re.sub(r"[\s_-]+", " ", normalize_ocr_text(value).upper()).strip()
-    if normalized in {
-        "HE", "HOME ECONOMICS", "HOME ECONOMICS (HE)",
-        "TVL HE", "TVL HOME ECONOMICS", "TVL HOME ECONOMICS (HE)",
-    }:
-        return "HE"
-    if normalized in {"STEM", "ABM", "HUMSS", "HUMMS", "HUMS", "GAS", "ICT", "TVL", "HR", "SPORTS"}:
-        return _strand_from_major(normalized)
-    if normalized in {"ARTS & DESIGN", "ARTS DESIGN", "ARTS AND DESIGN"}:
-        return "ARTS_DESIGN"
+    words = _strand_words(value)
+    if words in _STANDALONE_STRAND_VALUES:
+        return _strand_from_major(words)
     return ""
 
 

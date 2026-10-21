@@ -176,34 +176,22 @@ alter table public.university_courses alter column description set not null;
 
 create table if not exists public.university_course_strands (
     course text not null references public.university_courses(course) on delete cascade,
-    strand_code text not null check (strand_code in (
-        'ABM', 'STEM', 'HUMSS', 'GAS', 'TVL', 'TVL_ICT', 'TVL_HE', 'TVL_IA', 'ARTS_DESIGN', 'SPORTS'
-    )),
+    strand_code text not null,
     primary key (course, strand_code)
 );
 delete from public.university_course_strands;
+-- Active SHS strands: BE, STEM, ICTech, HT, ARSSH.
+alter table public.university_course_strands
+    drop constraint if exists university_course_strands_strand_code_check;
+alter table public.university_course_strands
+    add constraint university_course_strands_strand_code_check
+    check (strand_code in ('BE', 'STEM', 'ICTech', 'HT', 'ARSSH'));
 insert into public.university_course_strands (course, strand_code) values
-('BS in Accountancy', 'ABM'),
-('BS in Business Administration', 'ABM'),
-('BS in Business Administration major in Human Resource Management', 'ABM'),
-('BS in Business Administration major in Marketing Management', 'ABM'),
-('BS in Entrepreneurship', 'ABM'),
-('BS in Accountancy', 'GAS'),
-('BS in Business Administration', 'GAS'),
-('BS in Business Administration major in Human Resource Management', 'GAS'),
-('BS in Business Administration major in Marketing Management', 'GAS'),
-('BS in Entrepreneurship', 'GAS'),
-('Bachelor of Arts in Communication', 'GAS'),
-('Bachelor of Arts in Psychology', 'GAS'),
-('Bachelor of Science in Psychology', 'GAS'),
-('BS in Criminology', 'GAS'),
-('BS in Tourism Management', 'GAS'),
-('BS in Hospitality Management', 'GAS'),
-('Bachelor of Early Childhood Education', 'GAS'),
-('Bachelor of Elementary Education', 'GAS'),
-('Bachelor of Physical Education', 'GAS'),
-('Bachelor of Secondary Education', 'GAS'),
-('Bachelor of Special Needs Education', 'GAS'),
+('BS in Accountancy', 'BE'),
+('BS in Business Administration', 'BE'),
+('BS in Business Administration major in Human Resource Management', 'BE'),
+('BS in Business Administration major in Marketing Management', 'BE'),
+('BS in Entrepreneurship', 'BE'),
 ('BS in Medical Technology', 'STEM'),
 ('BS in Nursing', 'STEM'),
 ('BS in Occupational Therapy', 'STEM'),
@@ -227,32 +215,24 @@ insert into public.university_course_strands (course, strand_code) values
 ('BS in Aviation Electronics Technology', 'STEM'),
 ('Aircraft Maintenance Technology', 'STEM'),
 ('Aviation Electronics Technology', 'STEM'),
-('Bachelor of Arts in Communication', 'HUMSS'),
-('Bachelor of Arts major in Political Science', 'HUMSS'),
-('Bachelor of Arts in Psychology', 'HUMSS'),
-('Bachelor of Science in Psychology', 'HUMSS'),
-('Bachelor of Arts in Multimedia Arts', 'HUMSS'),
-('BS in Criminology', 'HUMSS'),
-('Bachelor of Early Childhood Education', 'HUMSS'),
-('Bachelor of Elementary Education', 'HUMSS'),
-('Bachelor of Secondary Education', 'HUMSS'),
-('Bachelor of Special Needs Education', 'HUMSS'),
-('BS in Information Technology with Specialization in Game Development', 'TVL_ICT'),
-('BS in Computer Science with Specialization in Data Science', 'TVL_ICT'),
-('Bachelor of Library and Information Science', 'TVL_ICT'),
-('BS in Hospitality Management', 'TVL_HE'),
-('BS in Tourism Management', 'TVL_HE'),
-('BS in Nursing', 'TVL_HE'),
-('BS in Medical Technology', 'TVL_HE'),
-('Bachelor of Arts in Multimedia Arts', 'ARTS_DESIGN'),
-('BS in Architecture', 'ARTS_DESIGN'),
-('Bachelor of Arts in Communication', 'ARTS_DESIGN'),
-('Bachelor of Physical Education', 'SPORTS');
-
-insert into public.university_course_strands (course, strand_code)
-select distinct course, 'TVL'
-from public.university_course_strands
-where strand_code in ('TVL_ICT', 'TVL_HE', 'TVL_IA')
-on conflict (course, strand_code) do nothing;
+('BS in Information Technology with Specialization in Game Development', 'ICTech'),
+('BS in Computer Science with Specialization in Data Science', 'ICTech'),
+('BS in Computer Engineering', 'ICTech'),
+('BS in Digital Engineering', 'ICTech'),
+('Bachelor of Library and Information Science', 'ICTech'),
+('Bachelor of Arts in Multimedia Arts', 'ICTech'),
+('BS in Hospitality Management', 'HT'),
+('BS in Tourism Management', 'HT'),
+('Bachelor of Arts in Communication', 'ARSSH'),
+('Bachelor of Arts major in Political Science', 'ARSSH'),
+('Bachelor of Arts in Psychology', 'ARSSH'),
+('Bachelor of Science in Psychology', 'ARSSH'),
+('Bachelor of Arts in Multimedia Arts', 'ARSSH'),
+('BS in Criminology', 'ARSSH'),
+('Bachelor of Early Childhood Education', 'ARSSH'),
+('Bachelor of Elementary Education', 'ARSSH'),
+('Bachelor of Secondary Education', 'ARSSH'),
+('Bachelor of Special Needs Education', 'ARSSH'),
+('Bachelor of Physical Education', 'ARSSH');
 
 drop table if exists public.course_training_data;
