@@ -2251,33 +2251,219 @@ async def admin_save_system_settings(req):
     return JSONResponse({"success": True, "settings": settings})
 
 
-@fastapi_route("/admin/activity", methods=["GET"])
-def admin_get_activity(req):
-    if not _is_full_admin_session(req.session):
-        return JSONResponse({"success": False, "error": "forbidden"}, status_code=403)
+ADMIN_ACTIVITY_LIMIT = 1000
+STUDENT_ACTIVITY_LABELS = {
+    "login": "Signed in",
+    "logout": "Signed out",
+    "account_registered": "Created an account",
+    "report_card_uploaded": "Uploaded a report card",
+    "report_card_upload_failed": "Report card upload failed",
+    "grades_saved": "Saved grades and profile",
+    "recommendations_generated": "Generated course recommendations",
+    "account_name_changed": "Changed account name",
+    "profile_picture_changed": "Changed profile picture",
+}
+ADMIN_ACTIVITY_EXPORT_COLUMNS = (
+    ("When", "when", 22),
+    ("User", "user", 26),
+    ("Email", "email", 30),
+    ("Role", "role", 10),
+    ("Action", "action", 30),
+    ("Target", "target", 30),
+    ("Session IP", "session_ip", 16),
+    ("Details", "details", 50),
+)
+
+
+def _fetch_admin_activity():
     conn = _db_conn()
     cursor = conn.cursor()
     cursor.execute(
-        """
+        f"""
         SELECT id, actor_name, actor_email, action, target_label, details, session_ip, created_at,
                COALESCE(actor_role, 'admin')
         FROM admin_activity_logs
         ORDER BY created_at DESC, id DESC
-        LIMIT 1000
+        LIMIT {ADMIN_ACTIVITY_LIMIT}
         """
     )
     rows = cursor.fetchall()
     conn.close()
-    return JSONResponse({"success": True, "activity": [
+    return [
         {
             "id": row[0], "actor_name": row[1] or ("Unknown student" if row[8] == "student" else "Unknown admin"),
             "actor_email": row[2] or "", "action": row[3],
             "target_label": row[4] or "", "details": row[5] or "",
-            "session_ip": row[6] or "", "created_at": row[7].isoformat() if row[7] else "",
+            "session_ip": row[6] or "", "created_at": row[7],
             "actor_role": row[8],
         }
         for row in rows
+    ]
+
+
+def _admin_activity_export_row(item):
+    created_at = item["created_at"]
+    action = str(item["action"] or "")
+    if item["actor_role"] == "student" and action in STUDENT_ACTIVITY_LABELS:
+        action_label = STUDENT_ACTIVITY_LABELS[action]
+    else:
+        action_label = action.replace("_", " ").capitalize()
+    return {
+        "when": _app_local(created_at).strftime("%Y-%m-%d %I:%M:%S %p") if isinstance(created_at, datetime) else str(created_at or ""),
+        "user": item["actor_name"],
+        "email": item["actor_email"],
+        "role": "Student" if item["actor_role"] == "student" else "Admin",
+        "action": action_label,
+        "target": item["target_label"] or "—",
+        "session_ip": item["session_ip"] or "—",
+        "details": item["details"] or "—",
+    }
+
+
+def _admin_activity_pdf(rows, filter_summary, generated):
+    stream = BytesIO()
+    page_size = (A4[1], A4[0])
+    document = SimpleDocTemplate(
+        stream, pagesize=page_size, leftMargin=30, rightMargin=30, topMargin=104,
+        bottomMargin=40, title="Activity Log", author="PathFinder",
+    )
+    maroon = colors.HexColor("#800000")
+    text_color = colors.HexColor("#262122")
+    muted = colors.HexColor("#766e70")
+    line_color = colors.HexColor("#e4dddd")
+    label_style = ParagraphStyle("Activity label", fontName="Helvetica-Bold", fontSize=7.5, leading=10, textColor=maroon)
+    body_style = ParagraphStyle("Activity body", fontName="Helvetica", fontSize=7.5, leading=10, textColor=text_color, wordWrap="CJK")
+    muted_style = ParagraphStyle("Activity muted", fontName="Helvetica", fontSize=8, leading=11, textColor=muted)
+    proportions = [0.11, 0.12, 0.15, 0.06, 0.14, 0.14, 0.09, 0.19]
+    column_widths = [document.width * fraction for fraction in proportions]
+    table_rows = [[Paragraph(label, label_style) for label, _, _ in ADMIN_ACTIVITY_EXPORT_COLUMNS]]
+    table_rows.extend(
+        [Paragraph(html.escape(str(row[key])), body_style) for _, key, _ in ADMIN_ACTIVITY_EXPORT_COLUMNS]
+        for row in rows
+    )
+    if not rows:
+        table_rows.append([Paragraph("No activity matches the selected filters.", muted_style)] + [""] * (len(ADMIN_ACTIVITY_EXPORT_COLUMNS) - 1))
+    table = Table(table_rows, colWidths=column_widths, repeatRows=1, hAlign="LEFT")
+    table_styles = [
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f5e9e9")),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#faf8f8")]),
+        ("LINEBELOW", (0, 0), (-1, 0), 1, maroon),
+        ("BOX", (0, 0), (-1, -1), 0.4, line_color),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("TOPPADDING", (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+    ]
+    if not rows:
+        table_styles.append(("SPAN", (0, 1), (-1, 1)))
+    table.setStyle(TableStyle(table_styles))
+    generated_label = generated.strftime("%b %d, %Y %I:%M %p")
+
+    def draw_page_frame(canvas, doc):
+        canvas.saveState()
+        left = doc.leftMargin
+        right = left + doc.width
+        top = page_size[1]
+        canvas.setFillColor(maroon)
+        canvas.setFont("Helvetica-Bold", 9)
+        canvas.drawString(left, top - 40, "PathFinder")
+        canvas.setFont("Helvetica", 8)
+        canvas.setFillColor(muted)
+        canvas.drawRightString(right, top - 40, f"Generated {generated_label}")
+        canvas.setFont("Helvetica-Bold", 16)
+        canvas.setFillColor(text_color)
+        canvas.drawString(left, top - 64, "Activity Log")
+        canvas.setStrokeColor(maroon)
+        canvas.line(left, top - 74, right, top - 74)
+        canvas.setFont("Helvetica", 8)
+        canvas.setFillColor(muted)
+        canvas.drawString(left, top - 88, f"{filter_summary}  |  {len(rows)} {'entry' if len(rows) == 1 else 'entries'}")
+        canvas.drawRightString(right, 22, f"Page {doc.page}")
+        canvas.restoreState()
+
+    document.build([table], onFirstPage=draw_page_frame, onLaterPages=draw_page_frame)
+    return stream.getvalue()
+
+
+def _admin_activity_xlsx(rows, filter_summary, generated):
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font, PatternFill
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Activity Log"
+    sheet.append(["PathFinder Activity Log"])
+    sheet.append([f"Generated {generated:%b %d, %Y %I:%M %p}  |  {filter_summary}  |  {len(rows)} entries"])
+    sheet.append([])
+    sheet.append([label for label, _, _ in ADMIN_ACTIVITY_EXPORT_COLUMNS])
+    sheet["A1"].font = Font(bold=True, size=14, color="800000")
+    sheet["A2"].font = Font(italic=True, color="766E70")
+    header_row = 4
+    for cell in sheet[header_row]:
+        cell.font = Font(bold=True, color="800000")
+        cell.fill = PatternFill("solid", fgColor="F5E9E9")
+    for row in rows:
+        sheet.append([row[key] for _, key, _ in ADMIN_ACTIVITY_EXPORT_COLUMNS])
+        # Log text is user-controlled; keep values like "=..." as inert text, never formulas.
+        for cell in sheet[sheet.max_row]:
+            if cell.data_type == "f":
+                cell.data_type = "s"
+    for index, (_, _, width) in enumerate(ADMIN_ACTIVITY_EXPORT_COLUMNS, start=1):
+        sheet.column_dimensions[sheet.cell(row=header_row, column=index).column_letter].width = width
+    for row in sheet.iter_rows(min_row=header_row + 1):
+        for cell in row:
+            cell.alignment = Alignment(vertical="top", wrap_text=True)
+    sheet.freeze_panes = sheet.cell(row=header_row + 1, column=1)
+    if rows:
+        sheet.auto_filter.ref = f"A{header_row}:{sheet.cell(row=header_row, column=len(ADMIN_ACTIVITY_EXPORT_COLUMNS)).column_letter}{header_row + len(rows)}"
+    stream = BytesIO()
+    workbook.save(stream)
+    return stream.getvalue()
+
+
+@fastapi_route("/admin/activity", methods=["GET"])
+def admin_get_activity(req):
+    if not _is_full_admin_session(req.session):
+        return JSONResponse({"success": False, "error": "forbidden"}, status_code=403)
+    return JSONResponse({"success": True, "activity": [
+        {**item, "created_at": item["created_at"].isoformat() if item["created_at"] else ""}
+        for item in _fetch_admin_activity()
     ]})
+
+
+@fastapi_route("/admin/activity/export", methods=["POST"])
+async def admin_export_activity(req):
+    if not _is_full_admin_session(req.session):
+        return JSONResponse({"success": False, "error": "forbidden"}, status_code=403)
+    try:
+        payload = await req.json()
+    except ValueError:
+        payload = None
+    if not isinstance(payload, dict):
+        return JSONResponse({"success": False, "message": "Invalid export request."}, status_code=400)
+    export_format = payload.get("format")
+    ids = payload.get("ids")
+    if export_format not in ("pdf", "xlsx"):
+        return JSONResponse({"success": False, "message": "Choose PDF or Excel."}, status_code=400)
+    if (
+        not isinstance(ids, list) or len(ids) > ADMIN_ACTIVITY_LIMIT
+        or not all(isinstance(value, int) and not isinstance(value, bool) for value in ids)
+    ):
+        return JSONResponse({"success": False, "message": "Invalid activity selection."}, status_code=400)
+    filter_summary = str(payload.get("filter_summary") or "All activity")[:300]
+
+    selected = set(ids)
+    rows = [_admin_activity_export_row(item) for item in _fetch_admin_activity() if item["id"] in selected]
+    generated = _app_now()
+    filename = f"pathfinder-activity-log-{generated:%Y-%m-%d}.{export_format}"
+    if export_format == "pdf":
+        body, media_type = _admin_activity_pdf(rows, filter_summary, generated), "application/pdf"
+    else:
+        body = _admin_activity_xlsx(rows, filter_summary, generated)
+        media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    return Response(
+        body, media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"', "Cache-Control": "no-store"},
+    )
 
 
 # Define the route for updating a user (admin only)
@@ -4794,6 +4980,7 @@ _FASTAPI_ENDPOINTS = (
     ("/admin/system-settings", ["GET"], admin_get_system_settings, ()),
     ("/admin/system-settings", ["POST"], admin_save_system_settings, ()),
     ("/admin/activity", ["GET"], admin_get_activity, ()),
+    ("/admin/activity/export", ["POST"], admin_export_activity, ()),
     ("/admin/update_user", ["POST"], admin_update_user, ()),
     ("/admin/delete_user", ["POST"], admin_delete_user, ()),
     ("/admin/remove_admin_account", ["POST"], admin_remove_admin_account, ()),

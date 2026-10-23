@@ -598,10 +598,10 @@ let adminSubadmins = [];
 let adminReports = [];
 let activeReport = null;
 let recommendationHistory = [];
-let frequentRecommendationCourses = [];
 const escapeAdminHtml = value => String(value || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
 const ADMIN_ROWS_PER_PAGE = 10;
+const ADMIN_EXTRA_PAGE_SIZES = [50, 100];
 const adminListPages = {students: 1, reports: 1, accounts: 1, subadmins: 1, recommendations: 1, activity: 1};
 const adminListConfig = {
   students: {render: () => renderAdminStudents(), section: 'view-students'},
@@ -609,10 +609,12 @@ const adminListConfig = {
   accounts: {render: () => renderAdminAccounts(), section: 'manage-admin-accounts'},
   subadmins: {render: () => renderSubadminProfiles(), section: 'view-subadmins'},
   recommendations: {render: () => renderRecommendationHistory(), section: 'manage-recommendations'},
-  activity: {render: () => renderAdminActivity(), section: 'admin-activity', perPage: 20},
+  activity: {render: () => renderAdminActivity(), section: 'admin-activity', defaultPerPage: 20},
 };
 
-const adminPageSize = key => adminListConfig[key]?.perPage || ADMIN_ROWS_PER_PAGE;
+const adminDefaultPageSize = key => adminListConfig[key]?.defaultPerPage || ADMIN_ROWS_PER_PAGE;
+const adminPageSize = key => adminListConfig[key]?.perPage || adminDefaultPageSize(key);
+const adminPageSizeOptions = key => [...new Set([adminDefaultPageSize(key), ...ADMIN_EXTRA_PAGE_SIZES])].sort((a, b) => a - b);
 
 function paginateAdminList(key, items){
   const perPage = adminPageSize(key);
@@ -638,8 +640,8 @@ function buildAdminPager(key, total, noun){
   const current = adminListPages[key];
   const perPage = adminPageSize(key);
   const totalPages = Math.max(1, Math.ceil(total / perPage));
-  if(totalPages <= 1) return `<div class="admin-student-pager"><span class="admin-student-pager-info">Showing ${total} of ${total} ${noun}</span></div>`;
-  const start = (current - 1) * perPage + 1;
+  const pageSizeControl = `<label class="admin-student-page-size"><span>Rows per page</span><select data-admin-page-size aria-label="${escapeAdminHtml(noun)} rows per page">${adminPageSizeOptions(key).map(size => `<option value="${size}"${size === perPage ? ' selected' : ''}>${size}</option>`).join('')}</select></label>`;
+  const start = total ? (current - 1) * perPage + 1 : 0;
   const end = Math.min(current * perPage, total);
   const pages = [];
   for(let page = 1; page <= totalPages; page += 1){
@@ -649,13 +651,19 @@ function buildAdminPager(key, total, noun){
   const pageButtons = pages.map(page => page === '…'
     ? '<span class="admin-student-pager-gap" aria-hidden="true">…</span>'
     : `<button type="button" class="admin-student-pager-btn${page === current ? ' is-active' : ''}" data-admin-page="${page}" aria-label="Page ${page}"${page === current ? ' aria-current="page"' : ''}>${page}</button>`).join('');
-  return `<nav class="admin-student-pager" aria-label="${noun} pages"><span class="admin-student-pager-info">Showing ${start}–${end} of ${total} ${noun}</span><div class="admin-student-pager-controls"><button type="button" class="admin-student-pager-btn" data-admin-page="${current - 1}" aria-label="Previous page"${current === 1 ? ' disabled' : ''}><i class="fa-solid fa-chevron-left" aria-hidden="true"></i></button>${pageButtons}<button type="button" class="admin-student-pager-btn" data-admin-page="${current + 1}" aria-label="Next page"${current === totalPages ? ' disabled' : ''}><i class="fa-solid fa-chevron-right" aria-hidden="true"></i></button></div></nav>`;
+  return `<nav class="admin-student-pager" aria-label="${noun} pages"><span class="admin-student-pager-info">Showing ${start}–${end} of ${total} ${noun}</span><div class="admin-student-pager-controls"><button type="button" class="admin-student-pager-btn" data-admin-page="${current - 1}" aria-label="Previous page"${current === 1 ? ' disabled' : ''}><i class="fa-solid fa-chevron-left" aria-hidden="true"></i></button>${pageButtons}<button type="button" class="admin-student-pager-btn" data-admin-page="${current + 1}" aria-label="Next page"${current === totalPages ? ' disabled' : ''}><i class="fa-solid fa-chevron-right" aria-hidden="true"></i></button>${pageSizeControl}</div></nav>`;
 }
 
 function bindAdminPager(wrap, key){
   wrap.querySelectorAll('.admin-student-pager-btn[data-admin-page]').forEach(button => button.addEventListener('click', () => {
     if(!button.disabled && !button.classList.contains('is-active')) setAdminPage(key, Number(button.dataset.adminPage));
   }));
+  wrap.querySelector('[data-admin-page-size]')?.addEventListener('change', event => {
+    const perPage = Number(event.currentTarget.value);
+    if(!adminPageSizeOptions(key).includes(perPage)) throw new Error('Invalid page size.');
+    adminListConfig[key].perPage = perPage;
+    resetAdminPage(key);
+  });
 }
 
 let adminAccountUsers = [];
@@ -753,27 +761,48 @@ function formatActivityAction(item){
 
 let adminActivityItems = [];
 
-function renderAdminActivity(){
-  const wrap = document.getElementById('adminActivityWrap');
-  if(!wrap) return;
-  if(!adminActivityItems.length){ wrap.innerHTML = '<div class="records-empty">No activity recorded yet.</div>'; return; }
+function getFilteredAdminActivity(){
   const category = document.getElementById('adminActivityCategory')?.value || 'all';
+  const query = (document.getElementById('adminActivitySearch')?.value || '').trim().toLowerCase();
   const fromValue = document.getElementById('adminActivityFrom')?.value;
   const toValue = document.getElementById('adminActivityTo')?.value;
   const fromTime = fromValue ? new Date(fromValue).getTime() : null;
   // datetime-local has minute precision, so include the whole "To" minute.
   const toTime = toValue ? new Date(toValue).getTime() + 59999 : null;
-  const filtered = adminActivityItems.filter(item => {
+  return adminActivityItems.filter(item => {
     const itemTime = Date.parse(item.created_at);
     const hasTime = Number.isFinite(itemTime) && itemTime > 0;
     const inRange = (fromTime === null || (hasTime && itemTime >= fromTime)) && (toTime === null || (hasTime && itemTime <= toTime));
-    return (category === 'all' || getAdminActivityCategory(item) === category) && inRange;
+    if(!inRange || (category !== 'all' && getAdminActivityCategory(item) !== category)) return false;
+    if(!query) return true;
+    const roleLabel = item.actor_role === 'student' ? 'student' : 'admin';
+    return [formatReportDate(item.created_at), item.actor_name, item.actor_email, roleLabel, formatActivityAction(item), item.action, item.target_label, item.session_ip, item.details]
+      .join(' ').toLowerCase().includes(query);
   });
+}
+
+function describeAdminActivityFilters(){
+  const category = document.getElementById('adminActivityCategory');
+  const query = (document.getElementById('adminActivitySearch')?.value || '').trim();
+  const fromValue = document.getElementById('adminActivityFrom')?.value;
+  const toValue = document.getElementById('adminActivityTo')?.value;
+  const formatInput = value => new Date(value).toLocaleString(undefined, {dateStyle: 'medium', timeStyle: 'short'});
+  const parts = [category?.selectedOptions[0]?.textContent || 'All activity'];
+  if(fromValue || toValue) parts.push(`Dates: ${fromValue ? formatInput(fromValue) : 'Beginning'} to ${toValue ? formatInput(toValue) : 'Now'}`);
+  if(query) parts.push(`Search: "${query}"`);
+  return parts.join(' | ');
+}
+
+function renderAdminActivity(){
+  const wrap = document.getElementById('adminActivityWrap');
+  if(!wrap) return;
+  if(!adminActivityItems.length){ wrap.innerHTML = '<div class="records-empty">No activity recorded yet.</div>'; return; }
+  const filtered = getFilteredAdminActivity();
   const pageItems = paginateAdminList('activity', filtered);
   const rows = pageItems.length
     ? pageItems.map(item => `<tr data-activity-category="${getAdminActivityCategory(item)}"><td>${escapeAdminHtml(formatReportDate(item.created_at))}</td><td>${escapeAdminHtml(item.actor_name)}<span class="admin-activity-role is-${item.actor_role === 'student' ? 'student' : 'admin'}">${item.actor_role === 'student' ? 'Student' : 'Admin'}</span><small class="admin-current-account">${escapeAdminHtml(item.actor_email)}</small></td><td>${escapeAdminHtml(formatActivityAction(item))}</td><td>${escapeAdminHtml(item.target_label || '—')}</td><td>${escapeAdminHtml(item.session_ip || '—')}</td><td>${escapeAdminHtml(item.details || '—')}</td></tr>`).join('')
     : '<tr class="admin-activity-filter-empty"><td colspan="6">No activity matches these filters.</td></tr>';
-  wrap.innerHTML = `<div class="admin-activity-table-wrap" role="region" aria-label="Admin activity records" tabindex="0"><table class="table-fixed admin-students-table admin-activity-table"><thead><tr><th>When</th><th>User</th><th>Action</th><th>Target</th><th>Session IP</th><th>Details</th></tr></thead><tbody>${rows}</tbody></table></div>${filtered.length ? buildAdminPager('activity', filtered.length, 'activities') : ''}`;
+  wrap.innerHTML = `<div class="admin-activity-table-wrap" role="region" aria-label="Admin activity records" tabindex="0"><table class="table-fixed admin-students-table admin-activity-table"><thead><tr><th>When</th><th>User</th><th>Action</th><th>Target</th><th>Session IP</th><th>Details</th></tr></thead><tbody>${rows}</tbody></table></div>${buildAdminPager('activity', filtered.length, 'activities')}`;
   bindAdminPager(wrap, 'activity');
 }
 
@@ -783,15 +812,66 @@ function filterAdminActivity(){
 
 function clearAdminActivityFilters(){
   const category = document.getElementById('adminActivityCategory');
+  const search = document.getElementById('adminActivitySearch');
   const from = document.getElementById('adminActivityFrom');
   const to = document.getElementById('adminActivityTo');
   if(category) category.value = 'all';
+  if(search) search.value = '';
   if(from) from.value = '';
   if(to) to.value = '';
   filterAdminActivity();
 }
 
+async function exportAdminActivity(format, button){
+  const status = document.getElementById('admin-activity-export-status');
+  const buttons = document.querySelectorAll('[data-activity-export]');
+  const label = format === 'pdf' ? 'PDF' : 'Excel';
+  const showStatus = (message, isError = false) => {
+    if(!status) return;
+    status.textContent = message;
+    status.hidden = false;
+    status.classList.toggle('is-error', isError);
+  };
+  const filtered = getFilteredAdminActivity();
+  if(!filtered.length){ showStatus('No activity matches these filters to export.', true); return; }
+  buttons.forEach(item => { item.disabled = true; });
+  showStatus(`Preparing ${label} file...`);
+  try{
+    const response = await fetch('/api/v1/admin/activity/export', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({format, ids: filtered.map(item => item.id), filter_summary: describeAdminActivityFilters()}),
+    });
+    if(!response.ok){
+      const error = await response.json().catch(() => ({}));
+      const detail = error.message || error.error || (typeof error.detail === 'string' ? error.detail : '');
+      if(response.status === 403) throw new Error(detail === 'forbidden' ? 'Your admin session has expired or lacks permission. Please sign in again.' : detail || 'Permission denied.');
+      if(response.status === 404) throw new Error('Export service not found. Restart the server to load the latest update.');
+      throw new Error(`Unable to export ${label} file (${response.status}${detail ? `: ${detail}` : ''}).`);
+    }
+    const contentType = response.headers.get('content-type') || '';
+    if(contentType.includes('application/json') || contentType.includes('text/html')) throw new Error(`${label} export is unavailable. Please sign in again.`);
+    const filename = response.headers.get('content-disposition')?.match(/filename="([^"]+)"/)?.[1] || `pathfinder-activity-log.${format}`;
+    const url = URL.createObjectURL(await response.blob());
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 60000);
+    showStatus(`${label} file downloaded (${filtered.length} ${filtered.length === 1 ? 'entry' : 'entries'}).`);
+  }catch(error){
+    showStatus(error.message || `Unable to export ${label} file.`, true);
+  }finally{
+    buttons.forEach(item => { item.disabled = false; });
+    button?.focus();
+  }
+}
+
 document.getElementById('adminActivityCategory')?.addEventListener('change', filterAdminActivity);
+document.getElementById('adminActivitySearch')?.addEventListener('input', filterAdminActivity);
+document.querySelectorAll('[data-activity-export]').forEach(button => button.addEventListener('click', () => exportAdminActivity(button.dataset.activityExport, button)));
 document.getElementById('adminActivityFrom')?.addEventListener('change', filterAdminActivity);
 document.getElementById('adminActivityTo')?.addEventListener('change', filterAdminActivity);
 document.getElementById('clear-admin-activity-filters')?.addEventListener('click', clearAdminActivityFilters);
@@ -915,20 +995,6 @@ async function loadReportCards(){
   }
 }
 
-function renderFrequentRecommendationCourses(){
-  const container = document.getElementById('frequentRecommendationCourses');
-  if(!container) return;
-  if(!frequentRecommendationCourses.length){
-    container.innerHTML = '<div class="records-empty">No saved recommendation history yet.</div>';
-    return;
-  }
-  const maxCount = Math.max(...frequentRecommendationCourses.map(item => Number(item.count || 0)), 1);
-  container.innerHTML = `<div class="admin-recommendation-bars">${frequentRecommendationCourses.slice(0, 12).map((item, index) => {
-    const width = Math.round(Number(item.count || 0) / maxCount * 100);
-    return `<div class="admin-bar-row"><div class="admin-bar-label"><span>${index + 1}. <strong>${escapeAdminHtml(item.course)}</strong></span><b>${Number(item.count || 0)}</b></div><div class="admin-bar-track"><i style="width:${width}%"></i></div></div>`;
-  }).join('')}</div>`;
-}
-
 function renderRecommendationHistory(){
   const wrap = document.getElementById('recommendationHistoryWrap');
   if(!wrap) return;
@@ -981,8 +1047,6 @@ async function loadRecommendationManagement(){
   try{
     const result = await fetchJsonOrThrow('/admin/recommendations');
     recommendationHistory = result.history || [];
-    frequentRecommendationCourses = result.frequent_courses || [];
-    renderFrequentRecommendationCourses();
     renderRecommendationHistory();
   }catch(error){
     historyWrap.innerHTML = `<div class="records-empty">${escapeAdminHtml(error.message || 'Unable to load recommendation history.')}</div>`;
@@ -1232,7 +1296,6 @@ document.getElementById('subadmin-profile-modal')?.addEventListener('click', eve
 document.getElementById('reportSearch')?.addEventListener('input', () => resetAdminPage('reports'));
 document.getElementById('reportStatusFilter')?.addEventListener('change', () => resetAdminPage('reports'));
 document.getElementById('recommendationSearch')?.addEventListener('input', () => resetAdminPage('recommendations'));
-document.getElementById('refreshRecommendationHistory')?.addEventListener('click', loadRecommendationManagement);
 document.getElementById('close-recommendation-detail')?.addEventListener('click', () => { document.getElementById('recommendation-detail-modal').hidden = true; });
 document.getElementById('recommendation-detail-modal')?.addEventListener('click', event => {
   if(event.target === event.currentTarget) event.currentTarget.hidden = true;
@@ -1600,9 +1663,6 @@ document.querySelectorAll('[data-admin-view]').forEach(link => {
     if(link.dataset.adminView === 'system-settings') loadSystemSettings();
   });
 });
-
-document.getElementById('refresh-admin-accounts')?.addEventListener('click', loadAdminAccounts);
-document.getElementById('refresh-admin-activity')?.addEventListener('click', loadAdminActivity);
 
 const availableAdminViews = ['dashboard'];
 if(canViewAdminData) availableAdminViews.push('view-students', 'manage-reports', 'manage-recommendations', 'admin-reports');

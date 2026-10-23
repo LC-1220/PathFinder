@@ -162,3 +162,95 @@ def test_long_pdf_report_spans_multiple_pages(monkeypatch):
     pdf = app._admin_report_pdf(report)
 
     assert len(re.findall(rb"/Type\s*/Page\b", pdf)) > 1
+
+
+class ActivityCursor:
+    rows = [
+        (3, "Admin One", "admin@example.com", "admin_account_updated", "=HYPERLINK(\"x\")", "<b>details</b>", "10.0.0.1", datetime(2026, 10, 23, 2, 0), "admin"),
+        (2, "Student Two", "student@example.com", "login", "", "", "", datetime(2026, 10, 22, 2, 0), "student"),
+        (1, "Admin Three", "", "logout", "", "", "", None, "admin"),
+    ]
+
+    def __init__(self, role):
+        self.role = role
+
+    def execute(self, query, params=()):
+        assert "FROM admin_activity_logs" in query or "FROM users" in query
+
+    def fetchone(self):
+        return self.role, True, False
+
+    def fetchall(self):
+        return self.rows
+
+
+class ActivityConnection:
+    def __init__(self, role):
+        self.role = role
+
+    def cursor(self):
+        return ActivityCursor(self.role)
+
+    def close(self):
+        pass
+
+
+def _export_activity(monkeypatch, payload, role=app.ROLE_SUPER_ADMIN):
+    monkeypatch.setattr(app, "_db_conn", lambda: ActivityConnection(role))
+    return asyncio.run(app.admin_export_activity(ReportRequest(role, payload)))
+
+
+def test_activity_export_is_registered_with_fastapi():
+    assert any(
+        route.path == "/admin/activity/export" and "POST" in route.methods
+        for route in app.api_app.routes
+    )
+
+
+def test_activity_export_pdf_contains_only_selected_entries(monkeypatch):
+    response = _export_activity(monkeypatch, {"format": "pdf", "ids": [3, 1], "filter_summary": "Admin activity"})
+
+    assert response.status_code == 200
+    assert response.media_type == "application/pdf"
+    assert response.body.startswith(b"%PDF-")
+    assert 'filename="pathfinder-activity-log-' in response.headers["content-disposition"]
+    assert response.headers["cache-control"] == "no-store"
+
+
+def test_activity_export_xlsx_keeps_order_labels_and_inert_text(monkeypatch):
+    from io import BytesIO
+    from openpyxl import load_workbook
+
+    response = _export_activity(monkeypatch, {"format": "xlsx", "ids": [2, 3], "filter_summary": "Search: \"x\""})
+
+    assert response.status_code == 200
+    assert response.media_type == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    sheet = load_workbook(BytesIO(response.body)).active
+    data = [[cell.value for cell in row] for row in sheet.iter_rows(min_row=5)]
+    assert [row[1] for row in data] == ["Admin One", "Student Two"]
+    assert data[0][0] == "2026-10-23 10:00:00 AM"
+    assert data[0][4] == "Admin account updated"
+    assert data[1][4] == "Signed in"
+    assert data[0][5] == "=HYPERLINK(\"x\")"
+    assert sheet.cell(row=5, column=6).data_type == "s"
+    assert 'Search: "x"' in sheet["A2"].value
+
+
+def test_activity_export_is_full_admin_only(monkeypatch):
+    response = _export_activity(monkeypatch, {"format": "pdf", "ids": [1]}, role=app.ROLE_SEMI_ADMIN)
+
+    assert response.status_code == 403
+
+
+@pytest.mark.parametrize("payload", [
+    {"format": "csv", "ids": [1]},
+    {"format": "pdf", "ids": "1"},
+    {"format": "pdf", "ids": ["1"]},
+    {"format": "pdf", "ids": [True]},
+    {"format": "xlsx", "ids": list(range(app.ADMIN_ACTIVITY_LIMIT + 1))},
+    [],
+])
+def test_activity_export_rejects_invalid_requests(monkeypatch, payload):
+    response = _export_activity(monkeypatch, payload)
+
+    assert response.status_code == 400

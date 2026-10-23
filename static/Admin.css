@@ -2175,11 +2175,33 @@ body.logout-confirm-open {
 .admin-page .admin-student-list-heading .admin-panel-kicker {
   margin-bottom: 3px;
 }
+.admin-page #admin-activity .admin-student-list-heading {
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.admin-page #admin-activity .admin-student-list-heading > div:first-child {
+  flex: 0 0 auto;
+}
 .admin-page .admin-activity-toolbar {
   display: flex;
+  flex: 1 1 0;
   align-items: center;
+  justify-content: flex-end;
   flex-wrap: wrap;
   gap: 10px;
+}
+.admin-page .admin-activity-search {
+  flex: 1 1 220px;
+  min-width: 200px;
+  max-width: 320px;
+}
+.admin-page .admin-activity-search input {
+  width: 100%;
+  min-width: 0;
+}
+.admin-page #admin-activity-export-status {
+  margin: 0 0 10px;
+  font: 600 12px "DM Sans", sans-serif;
 }
 .admin-page .admin-activity-filter {
   display: flex;
@@ -2844,6 +2866,23 @@ body.logout-confirm-open {
   flex-wrap: wrap;
   gap: 6px;
 }
+.admin-page .admin-student-page-size {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--admin-muted);
+  font: 600 12px "DM Sans", sans-serif;
+}
+.admin-page .admin-student-page-size select {
+  min-height: 34px;
+  padding: 0 8px;
+  border: 1px solid var(--admin-line);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--admin-ink);
+  font: inherit;
+  cursor: pointer;
+}
 .admin-page .admin-student-pager-btn {
   min-width: 34px;
   height: 34px;
@@ -3348,28 +3387,9 @@ body.logout-confirm-open {
 .admin-page .admin-management-panel .admin-panel-heading {
   margin-bottom: 10px;
 }
-.admin-page .recommendation-frequency-panel #frequentRecommendationCourses,
-.admin-page .recommendation-frequency-panel .admin-recommendation-bars,
-.admin-page .recommendation-frequency-panel .admin-bar-row,
-.admin-page .recommendation-frequency-panel .admin-bar-label {
-  width: 100%;
-  max-width: 100%;
-  min-width: 0;
-}
-.admin-page .recommendation-frequency-panel .admin-bar-label span {
-  flex: 1 1 0;
-  min-width: 0;
-  overflow: visible;
-  overflow-wrap: anywhere;
-  text-overflow: clip;
-  white-space: normal;
-}
-.admin-page .recommendation-frequency-panel .admin-bar-label b {
-  flex: 0 0 auto;
-}
 .admin-page .admin-recommendation-history-table {
   min-width: 1080px;
-  width: max-content;
+  width: 100%;
 }
 .admin-page .recommendation-student-number {
   display: block;
@@ -4777,12 +4797,20 @@ html.admin-dark .admin-page select option:checked {
     display: grid;
     width: 100%;
     min-width: 0;
-    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
   }
   .admin-page .admin-activity-filter select,
   .admin-page .admin-activity-date input {
+    box-sizing: border-box;
     width: 100%;
     min-width: 0;
+    max-width: 100%;
+  }
+  .admin-page .admin-activity-search {
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+    max-width: none;
   }
   .admin-page .admin-panel-heading {
     align-items: flex-start;
