@@ -1730,7 +1730,9 @@ function clearInputs() {
             const data = await readOcrResponse(response);
 
             if(!data || !data.success){
-                throw new Error((data && data.message) || 'Docling could not process this file.');
+                const error = new Error((data && data.message) || 'Docling could not process this file.');
+                if(data?.code === 'invalid_report_card') error.invalidReportCard = true;
+                throw error;
             }
 
             setProgress(null, `${currentFileLabel}Preparing review...`);
@@ -3130,11 +3132,17 @@ function clearInputs() {
                     setProgress(null, `${currentFileLabel}Reading file...`);
 
                     const fileName = String(file.name || '').toLowerCase();
-                    const rawText = fileName.endsWith('.pdf')
-                        ? await extractTextFromPDF(file)
-                        : fileName.endsWith('.docx')
-                            ? await extractTextFromDocx(file)
-                            : await imageBlobToText(file);
+                    let rawText;
+                    try{
+                        rawText = fileName.endsWith('.pdf')
+                            ? await extractTextFromPDF(file)
+                            : fileName.endsWith('.docx')
+                                ? await extractTextFromDocx(file)
+                                : await imageBlobToText(file);
+                    }catch(error){
+                        if(error?.invalidReportCard && total > 1) error.message = `${file.name}: ${error.message}`;
+                        throw error;
+                    }
                     if(window.latestAutomaticOcrDisabled){
                         processedCount += 1;
                         completedFilePercent = Math.round(((i + 1) / total) * 100);
@@ -3199,8 +3207,13 @@ function clearInputs() {
                 }
             }catch(e){
                 console.error('Processing error', e);
-                setProgress(0, 'Processing failed');
-                setUploadMessage('Processing failed: ' + (e && e.message || e), 'error');
+                if(e?.invalidReportCard){
+                    setProgress(0, 'Not a report card');
+                    setUploadMessage(e.message, 'error');
+                }else{
+                    setProgress(0, 'Processing failed');
+                    setUploadMessage('Processing failed: ' + (e && e.message || e), 'error');
+                }
             }finally{
                 runBtn.disabled = false;
                 runBtn.removeAttribute('aria-busy');

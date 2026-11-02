@@ -602,3 +602,72 @@ def test_manual_regeneration_repairs_legacy_zero_matches(monkeypatch):
     assert result == {"success": True, "count": 1}
     assert len(json.loads(statements[0][1][0])) == 1
     assert "latest_recommendations" not in request.session
+
+def _ocr_result(raw_text, subjects=(), **parsed):
+    return {
+        "raw_ocr": {"raw_text": raw_text, "student_info_raw": []},
+        "parsed": {"subjects": [{"subject_name": name, "grade": grade} for name, grade in subjects], **parsed},
+    }
+
+
+@pytest.mark.parametrize("processed", [
+    _ocr_result(""),
+    _ocr_result("SM SUPERMARKET Rice 5kg 350.00 Milk 1L 95.00 Bread 88.00 TOTAL 625.00 Thank you come again"),
+    _ocr_result("Cafe Menu Coffee 90 Tea 85 Cake 95 Sandwich 88",
+                [("Cafe Menu Coffee 90 Tea 85 Cake 95 Sandwich", 88.0)]),
+    _ocr_result("Happy birthday Section of the party"),
+])
+def test_non_report_card_images_are_rejected(processed):
+    assert app._looks_like_report_card(processed) is False
+
+
+@pytest.mark.parametrize("processed", [
+    _ocr_result("Math - 90", [("Math", 90)]),
+    _ocr_result("Oral Communication 90 Earth Science 91",
+                [("Oral Communication in Context", 90), ("Earth and Life Science", 91)]),
+    _ocr_result("REPORT CARD School Year 2024-2025 Subject Final Grade"),
+    _ocr_result("Learner progress report", [("Unreadable row", 88)]),
+    _ocr_result("", student_no="2024-00123", strand="STEM"),
+])
+def test_report_cards_are_accepted(processed):
+    assert app._looks_like_report_card(processed) is True
+
+
+@pytest.mark.parametrize("failure", ["not_a_report_card", "unloadable_image"])
+def test_ocr_upload_rejects_non_report_card_images(monkeypatch, failure):
+    statements = []
+    activity = []
+    connection = SimpleNamespace(
+        cursor=lambda: SimpleNamespace(
+            execute=lambda query, params: statements.append((query, params)),
+            fetchone=lambda: (21,),
+        ),
+        commit=lambda: None,
+        close=lambda: None,
+    )
+    monkeypatch.setattr(app, "_db_conn", lambda: connection)
+    monkeypatch.setattr(app, "_get_system_settings", lambda: {"automatic_ocr_enabled": True})
+    monkeypatch.setattr(app, "_record_student_activity", lambda *args, **kwargs: activity.append(args[1]))
+
+    async def validate(uploaded, limit):
+        return True, {"file_bytes": b"image", "extension": ".jpg"}
+
+    def process(file_bytes, filename):
+        if failure == "unloadable_image":
+            raise RuntimeError("Docling conversion failed: Could not load image for document x.jpg")
+        return {**_ocr_result("Happy weekend at the beach"), "structured_text": "", "extracted_gwa": "",
+                "ocr_status": "needs_review", "ocr_payload": {}, "app_parse_seconds": 0}
+
+    monkeypatch.setattr(app, "validate_upload", validate)
+    monkeypatch.setattr(app, "_process_report_card_bytes", process)
+
+    async def form():
+        return {"report_card": SimpleNamespace(filename="beach.jpg"), "upload_batch": "test-batch"}
+
+    request = SimpleNamespace(form=form, session={"user_id": "student"}, headers={"accept": "application/json"})
+    result = json.loads(asyncio.run(app.ocr_report_card(request)).body)
+
+    assert result == {"success": False, "code": "invalid_report_card", "message": "Upload a valid report card image."}
+    assert "ocr_status = 'failed'" in statements[-1][0]
+    assert statements[-1][1][0].startswith("Not a report card")
+    assert activity == ["report_card_upload_failed"]

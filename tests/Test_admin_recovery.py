@@ -16,6 +16,12 @@ import admin_security
 import fastapi_app as app
 
 
+@pytest.fixture(autouse=True)
+def _default_to_smtp_mail(monkeypatch):
+    for name in ("BREVO_API_KEY", "EMAIL_SENDER", "EMAIL_SENDER_NAME"):
+        monkeypatch.delenv(name, raising=False)
+
+
 class Request:
     def __init__(self, payload, session=None):
         self.payload = payload
@@ -524,3 +530,63 @@ def test_mail_delivery_errors_are_actionable_and_do_not_leak_server_details(exce
     assert result["code"] == code
     assert detail in result["message"]
     assert "private" not in result["message"]
+
+
+class _FakeBrevoResponse:
+    def __init__(self, status_code, data=None):
+        self.status_code = status_code
+        self._data = data or {}
+
+    def json(self):
+        return self._data
+
+
+def _brevo_env(monkeypatch):
+    monkeypatch.delenv("SMTP_PASSWORD", raising=False)
+    monkeypatch.setenv("SMTP_USERNAME", "fallback@gmail.com")
+    monkeypatch.setenv("EMAIL_SENDER", "sender@gmail.com")
+    monkeypatch.setenv("BREVO_API_KEY", "test-brevo-key")
+    monkeypatch.setenv("APP_BASE_URL", "https://pathfinder.example/")
+
+
+def test_brevo_api_sends_security_email_over_https_without_smtp(monkeypatch):
+    _brevo_env(monkeypatch)
+    posts = []
+    monkeypatch.setattr(admin_security.smtplib, "SMTP", lambda *a, **k: pytest.fail("SMTP must not be used"))
+    monkeypatch.setattr(admin_security.httpx, "post", lambda url, **kw: posts.append((url, kw)) or _FakeBrevoResponse(201, {"messageId": "x"}))
+    assert admin_security.mail_configuration() == ("sender@gmail.com", "test-brevo-key", "https://pathfinder.example")
+    admin_security.send_security_email("recovery@gmail.com", "test-token", "verify")
+    url, kwargs = posts[0]
+    assert url == "https://api.brevo.com/v3/smtp/email"
+    assert kwargs["headers"]["api-key"] == "test-brevo-key"
+    assert kwargs["timeout"] == 15
+    payload = kwargs["json"]
+    assert payload["sender"] == {"email": "sender@gmail.com", "name": "PathFinder"}
+    assert payload["to"] == [{"email": "recovery@gmail.com"}]
+    assert "https://pathfinder.example/admin/recovery-verification#verify=test-token" in payload["textContent"]
+    admin_security.send_email("student@gmail.com", "Results", "plain", "<p>html</p>")
+    assert posts[1][1]["json"]["htmlContent"] == "<p>html</p>"
+
+
+@pytest.mark.parametrize(("status", "code"), [(401, "email_api_unauthorized"), (400, "email_api_rejected"), (500, "email_delivery_failed")])
+def test_brevo_api_failures_map_to_actionable_errors(monkeypatch, status, code):
+    _brevo_env(monkeypatch)
+    monkeypatch.setattr(admin_security.httpx, "post", lambda url, **kw: _FakeBrevoResponse(status, {"code": "unauthorized", "message": "private"}))
+    with pytest.raises(admin_security.EmailApiError) as raised:
+        admin_security.send_email("student@gmail.com", "Subject", "Body")
+    assert raised.value.status_code == status
+    response = app._mail_delivery_error(raised.value)
+    result = body(response)
+    assert result["code"] == code
+    assert "private" not in result["message"]
+    assert "test-brevo-key" not in result["message"]
+
+
+def test_brevo_network_failure_is_reported_as_unreachable(monkeypatch):
+    _brevo_env(monkeypatch)
+    def fail(url, **kw):
+        raise admin_security.httpx.ConnectError("private detail")
+    monkeypatch.setattr(admin_security.httpx, "post", fail)
+    with pytest.raises(admin_security.EmailApiError) as raised:
+        admin_security.send_email("student@gmail.com", "Subject", "Body")
+    assert body(app._mail_delivery_error(raised.value))["code"] == "email_api_unreachable"

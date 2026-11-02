@@ -17,7 +17,7 @@ from datetime import datetime, time as dt_time, timedelta, timezone
 from difflib import SequenceMatcher
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from admin_security import (
-    SECURITY_SCHEMA, clear_lockout, clear_recovery_tokens, lock_security_row, mail_configuration,
+    SECURITY_SCHEMA, EmailApiError, clear_lockout, clear_recovery_tokens, lock_security_row, mail_configuration,
     new_token, record_failure, send_email, send_security_email, token_hash, utc_now,
 )
 
@@ -2305,8 +2305,8 @@ def _mail_unavailable(*, not_configured=False):
         {"success": False,
          "code": "email_not_configured" if not_configured else "email_delivery_failed",
          "message": (
-             "Recovery email is not configured. The system owner must set SMTP_USERNAME, "
-             "SMTP_PASSWORD (Google App Password), and APP_BASE_URL in the server's .env, then restart the app."
+             "Recovery email is not configured. The system owner must set BREVO_API_KEY and EMAIL_SENDER "
+             "(or SMTP_USERNAME and SMTP_PASSWORD, a Google App Password), and APP_BASE_URL, then restart the app."
              if not_configured else
              "Recovery email could not be sent. Please contact the system administrator or try again later."
          )},
@@ -2315,7 +2315,26 @@ def _mail_unavailable(*, not_configured=False):
 
 
 def _mail_delivery_error(exc):
-    if isinstance(exc, smtplib.SMTPAuthenticationError):
+    if isinstance(exc, EmailApiError):
+        if exc.status_code in (401, 403):
+            code = "email_api_unauthorized"
+            message = (
+                "Brevo rejected the request. Check that BREVO_API_KEY is a current Brevo API key "
+                "and that EMAIL_SENDER is a verified sender in Brevo."
+            )
+        elif exc.status_code == 400:
+            code = "email_api_rejected"
+            message = (
+                "Brevo did not accept the email. Confirm that EMAIL_SENDER is a verified sender "
+                "in Brevo and that the recipient address is valid."
+            )
+        elif exc.status_code == 0:
+            code = "email_api_unreachable"
+            message = "Could not reach the Brevo email service. Please try again in a moment."
+        else:
+            code = "email_delivery_failed"
+            message = "The email service could not send the message right now. Please try again later."
+    elif isinstance(exc, smtplib.SMTPAuthenticationError):
         code = "smtp_authentication_failed"
         message = (
             "Google rejected the sender login. Check that SMTP_USERNAME is the Gmail account "
@@ -2401,7 +2420,7 @@ async def admin_set_recovery_email(req):
         conn.commit()
         return JSONResponse({"success": True, "message": "Verification link sent. Open it within 30 minutes to confirm your recovery Gmail."})
     except (smtplib.SMTPException, OSError, ValueError) as exc:
-        logging.getLogger(__name__).error("Recovery verification email failed (%s).", type(exc).__name__)
+        logging.getLogger(__name__).error("Recovery verification email failed (%s %s).", type(exc).__name__, getattr(exc, "status_code", ""))
         return _mail_delivery_error(exc)
     finally:
         conn.close()
@@ -2463,7 +2482,7 @@ async def admin_forgot_password(req):
         logging.getLogger(__name__).info("Password reset email accepted for delivery.")
         return response
     except (smtplib.SMTPException, OSError, ValueError) as exc:
-        logging.getLogger(__name__).error("Password reset email failed (%s).", type(exc).__name__)
+        logging.getLogger(__name__).error("Password reset email failed (%s %s).", type(exc).__name__, getattr(exc, "status_code", ""))
         return _mail_delivery_error(exc)
     finally:
         conn.close()
@@ -4953,7 +4972,7 @@ async def email_results(req):
             status_code=503,
         )
     except (smtplib.SMTPException, OSError) as exc:
-        logging.getLogger(__name__).error("Results email failed (%s).", type(exc).__name__)
+        logging.getLogger(__name__).error("Results email failed (%s %s).", type(exc).__name__, getattr(exc, "status_code", ""))
         return JSONResponse(
             {"success": False, "code": "email_delivery_failed",
              "message": "Your results could not be emailed right now. Please try again later."},
@@ -5257,6 +5276,52 @@ def _process_report_card_bytes(file_bytes, filename):
     }
 
 
+INVALID_REPORT_CARD_MESSAGE = "Upload a valid report card image."
+_REPORT_CARD_ACADEMIC_TERMS = re.compile(
+    r"\b(?:math(?:ematics)?|algebra|calculus|statistics|probability|geometry|trigonometry|"
+    r"science|physics|chemistry|biology|english|filipino|literature|oral\s+communication|"
+    r"reading\s+and\s+writing|creative\s+writing|komunikasyon|pagbasa|history|philosophy|"
+    r"araling\s+panlipunan|mapeh|physical\s+education|p\.?\s?e\b|values\s+education|"
+    r"edukasyon|esp|religion|christian\s+living|economics|entrepreneurship|accounting|"
+    r"business\s+(?:math|finance|ethics)|organization\s+and\s+management|research|ict|"
+    r"programming|computer|empowerment\s+technologies|personal\s+development|humanities|"
+    r"social\s+sciences?|tle|technology\s+and\s+livelihood|contemporary|"
+    r"media\s+and\s+information|understanding\s+culture|disciplines?\s+and\s+ideas)\b",
+    re.IGNORECASE,
+)
+_REPORT_CARD_WORDING = re.compile(
+    r"\b(?:report\s+card|progress\s+report|school\s+year|s\.\s?y\.|grade\s+level|final\s+(?:grade|rating)|"
+    r"general\s+(?:average|weighted\s+average)|gen\.?\s+ave|gwa|quarter|semester|learners?|lrn|"
+    r"subjects?|remarks|adviser|principal|registrar|student\s+(?:no|number|name)|deped|"
+    r"senior\s+high|junior\s+high|school\s+form|sf\s?9|form\s+138|promoted|transcript|"
+    r"strand|track|section)\b",
+    re.IGNORECASE,
+)
+
+
+def _looks_like_report_card(processed):
+    """Reject photos, logos, receipts, and other images that contain no report-card evidence."""
+    parsed = processed.get("parsed") or {}
+    raw_ocr = processed.get("raw_ocr") or {}
+    graded_names = [
+        str(item.get("subject_name") or "")
+        for item in parsed.get("subjects") or []
+        if item.get("subject_name") and item.get("grade") is not None
+    ]
+    if any(_REPORT_CARD_ACADEMIC_TERMS.search(name) for name in graded_names):
+        return True
+    text = " ".join([
+        str(raw_ocr.get("raw_text") or ""),
+        " ".join(str(value) for value in raw_ocr.get("student_info_raw") or []),
+    ])
+    wording = {match.group(0).lower() for match in _REPORT_CARD_WORDING.finditer(text)}
+    if parsed.get("student_no"):
+        wording.add("detected student number")
+    if parsed.get("strand"):
+        wording.add("detected cluster")
+    return len(wording) >= 2 or (bool(wording) and bool(graded_names))
+
+
 def _stream_ocr_response(process):
     async def events():
         queue = asyncio.Queue()
@@ -5369,6 +5434,8 @@ def _finish_report_card_upload(req, file_bytes, filename, upload_id, user_id, on
         if on_progress:
             on_progress("processing", "Running Docling OCR and TableFormer...")
         processed = _process_report_card_bytes(file_bytes, filename)
+        if not _looks_like_report_card(processed):
+            return _reject_non_report_card(req, upload_id, filename, "No report card subjects or details were found.")
         if on_progress:
             on_progress("preparing", "OCR finished. Preparing extracted results...")
         ocr_payload = processed["ocr_payload"]
@@ -5425,6 +5492,8 @@ def _finish_report_card_upload(req, file_bytes, filename, upload_id, user_id, on
             "review_required": parsed.get("needs_review", False),
         })
     except Exception as exc:
+        if "could not load image" in str(exc).lower():
+            return _reject_non_report_card(req, upload_id, filename, str(exc))
         if upload_id:
             conn = _db_conn()
             cursor = conn.cursor()
@@ -5436,6 +5505,20 @@ def _finish_report_card_upload(req, file_bytes, filename, upload_id, user_id, on
             conn.close()
         _record_student_activity(req, "report_card_upload_failed", str(exc)[:300], target_label=filename)
         return JSONResponse({"success": False, "message": f"Report card OCR failed: {exc}"})
+
+
+def _reject_non_report_card(req, upload_id, filename, reason):
+    if upload_id:
+        conn = _db_conn()
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE report_card_uploads SET ocr_status = 'failed', ocr_error = ?, processed_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (f"Not a report card: {reason}"[:1000], upload_id),
+        )
+        conn.commit()
+        conn.close()
+    _record_student_activity(req, "report_card_upload_failed", f"Not a report card: {reason}"[:300], target_label=filename)
+    return JSONResponse({"success": False, "code": "invalid_report_card", "message": INVALID_REPORT_CARD_MESSAGE})
 
 
 @fastapi_route("/admin/report_cards", methods=["GET"])

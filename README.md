@@ -190,6 +190,17 @@ Clients can request newline-delimited progress events from the OCR endpoint with
      Python process. In Account settings, send a verification link and check the
      recipient's inbox and spam folder.
 
+  Hosts that block outbound SMTP (for example Railway Free/Trial/Hobby plans,
+  which fail with `OSError`) must use the Brevo HTTPS API instead. When
+  `BREVO_API_KEY` is set, all email is sent through Brevo and `SMTP_PASSWORD`
+  is not needed:
+  1. Create a free Brevo account and add your sender Gmail under
+     **Senders, Domains & Dedicated IPs → Senders**, then confirm it.
+  2. Create a key under **SMTP & API → API Keys**.
+  3. On the host, set `BREVO_API_KEY`, `EMAIL_SENDER=your-verified-sender@gmail.com`
+     (falls back to `SMTP_USERNAME`), optional `EMAIL_SENDER_NAME=PathFinder`,
+     and `APP_BASE_URL=https://your-app-domain`, then redeploy.
+
   The new security table and `users.auth_version` column are created by normal
   app startup (or by applying the corresponding additions in
   `supabase_schema.sql`).

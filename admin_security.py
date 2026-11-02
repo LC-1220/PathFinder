@@ -7,6 +7,19 @@ from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 from urllib.parse import urlsplit
 
+import httpx
+
+BREVO_API_URL = "https://api.brevo.com/v3/smtp/email"
+
+
+class EmailApiError(smtplib.SMTPException):
+    """Raised when the HTTPS email provider rejects or cannot accept a message."""
+
+    def __init__(self, status_code, provider_code=""):
+        super().__init__(f"Email API returned HTTP {status_code}")
+        self.status_code = status_code
+        self.provider_code = provider_code
+
 
 SECURITY_SCHEMA = """
 CREATE TABLE IF NOT EXISTS admin_account_security (
@@ -86,8 +99,10 @@ def clear_recovery_tokens(cursor, user_id):
 
 
 def mail_configuration():
-    username = os.getenv("SMTP_USERNAME", "").strip()
-    password = "".join(os.getenv("SMTP_PASSWORD", "").split())
+    """Return (sender, secret, base_url); the secret is the Brevo API key when set, else the Gmail App Password."""
+    api_key = os.getenv("BREVO_API_KEY", "").strip()
+    username = (os.getenv("EMAIL_SENDER", "").strip() or os.getenv("SMTP_USERNAME", "").strip()) if api_key else os.getenv("SMTP_USERNAME", "").strip()
+    password = api_key or "".join(os.getenv("SMTP_PASSWORD", "").split())
     base_url = os.getenv("APP_BASE_URL", "").strip().rstrip("/")
     parts = urlsplit(base_url)
     local_http = parts.scheme == "http" and parts.hostname in ("localhost", "127.0.0.1", "::1")
@@ -96,12 +111,40 @@ def mail_configuration():
         or (parts.scheme != "https" and not local_http)
         or parts.username or parts.password or parts.query or parts.fragment or parts.path
     ):
-        raise ValueError("Configure SMTP_USERNAME, SMTP_PASSWORD and a valid APP_BASE_URL before sending recovery email.")
+        raise ValueError(
+            "Configure BREVO_API_KEY with EMAIL_SENDER (or SMTP_USERNAME and SMTP_PASSWORD) "
+            "and a valid APP_BASE_URL before sending email."
+        )
     return username, password, base_url
 
 
-def send_email(destination, subject, text_body, html_body=None):
-    username, password, _ = mail_configuration()
+def _deliver(destination, subject, text_body, html_body=None):
+    username, secret, _ = mail_configuration()
+    if os.getenv("BREVO_API_KEY", "").strip():
+        payload = {
+            "sender": {"email": username, "name": os.getenv("EMAIL_SENDER_NAME", "").strip() or "PathFinder"},
+            "to": [{"email": destination}],
+            "subject": subject,
+            "textContent": text_body,
+        }
+        if html_body:
+            payload["htmlContent"] = html_body
+        try:
+            response = httpx.post(
+                BREVO_API_URL,
+                json=payload,
+                headers={"api-key": secret, "accept": "application/json"},
+                timeout=15,
+            )
+        except httpx.HTTPError as exc:
+            raise EmailApiError(0, type(exc).__name__) from exc
+        if response.status_code >= 300:
+            try:
+                provider_code = str(response.json().get("code") or "")
+            except ValueError:
+                provider_code = ""
+            raise EmailApiError(response.status_code, provider_code)
+        return
     message = EmailMessage()
     message["From"] = username
     message["To"] = destination
@@ -111,27 +154,25 @@ def send_email(destination, subject, text_body, html_body=None):
         message.add_alternative(html_body, subtype="html")
     with smtplib.SMTP("smtp.gmail.com", 587, timeout=15) as smtp:
         smtp.starttls(context=ssl.create_default_context())
-        smtp.login(username, password)
+        smtp.login(username, secret)
         smtp.send_message(message)
 
 
+def send_email(destination, subject, text_body, html_body=None):
+    _deliver(destination, subject, text_body, html_body)
+
+
 def send_security_email(destination, token, purpose):
-    username, password, base_url = mail_configuration()
+    _, _, base_url = mail_configuration()
     verification = purpose == "verify"
     subject = "Verify your PathFinder recovery Gmail" if verification else "Reset your PathFinder admin password"
     minutes = 30 if verification else 15
     path = "/admin/recovery-verification" if verification else "/login"
     link = f"{base_url}{path}#{purpose}={token}"
-    message = EmailMessage()
-    message["From"] = username
-    message["To"] = destination
-    message["Subject"] = subject
-    message.set_content(
+    _deliver(
+        destination,
+        subject,
         f"{subject}\n\nOpen this link to continue:\n{link}\n\n"
         f"This link expires in {minutes} minutes and can only be used once. "
-        "If you did not request this, ignore this email."
+        "If you did not request this, ignore this email.",
     )
-    with smtplib.SMTP("smtp.gmail.com", 587, timeout=15) as smtp:
-        smtp.starttls(context=ssl.create_default_context())
-        smtp.login(username, password)
-        smtp.send_message(message)
