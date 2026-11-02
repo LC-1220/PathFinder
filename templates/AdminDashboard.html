@@ -71,7 +71,7 @@
       <div class="stat-card stat-card-reports"><span class="stat-icon"><i class="fa-solid fa-file-arrow-up" aria-hidden="true"></i></span><div class="stat-copy"><div class="stat-label">Students Who Uploaded Reports</div><div class="stat-value" id="statStudentsWithReports">—</div><div class="stat-note">unique student accounts</div></div></div>
       <div class="stat-card stat-card-gwa"><span class="stat-icon"><i class="fa-solid fa-chart-simple" aria-hidden="true"></i></span><div class="stat-copy"><div class="stat-label">Average GWA</div><div class="stat-value" id="statAverageGwa">—</div><div class="stat-note">across recorded grades</div></div></div>
       <div class="stat-card stat-card-top-course"><span class="stat-icon"><i class="fa-solid fa-award" aria-hidden="true"></i></span><div class="stat-copy"><div class="stat-label">Most Recommended Course</div><div class="stat-value stat-value-text" id="statMostRecommendedCourse">—</div><div class="stat-note" id="statMostRecommendedCount">no recommendations yet</div></div></div>
-      <div class="stat-card stat-card-strand"><span class="stat-icon"><i class="fa-solid fa-diagram-project" aria-hidden="true"></i></span><div class="stat-copy"><div class="stat-label">Most Common Academic Strand</div><div class="stat-value stat-value-text" id="statCommonStrand">—</div><div class="stat-note" id="statCommonStrandCount">no profiles yet</div></div></div>
+      <div class="stat-card stat-card-strand"><span class="stat-icon"><i class="fa-solid fa-diagram-project" aria-hidden="true"></i></span><div class="stat-copy"><div class="stat-label">Most Common Academic Cluster</div><div class="stat-value stat-value-text" id="statCommonStrand">—</div><div class="stat-note" id="statCommonStrandCount">no profiles yet</div></div></div>
       <div class="stat-card stat-card-active"><span class="stat-icon"><i class="fa-solid fa-bolt" aria-hidden="true"></i></span><div class="stat-copy"><div class="stat-label">Active Users</div><div class="stat-value" id="statActiveUsers">—</div><div class="stat-note">signed in within 30 days</div></div></div>
     </div>
     <div id="dashboardError" class="admin-dashboard-content" style="margin-top:18px;color:#b91c1c;font-weight:600;display:none"></div>
@@ -107,10 +107,10 @@
             <legend>Academic information</legend>
             <label>University name<input name="university_name" type="text" maxlength="160" required></label>
             <label>School year<input name="school_year" type="text" maxlength="24" placeholder="2026-2027"></label>
-            <div class="system-settings-field"><span>Available academic strands</span><div class="system-strand-options">
+            <div class="system-settings-field"><span>Available academic clusters</span><div class="system-strand-options">
               <label><input type="checkbox" name="available_strands" value="BE"> BE – Business Entrepreneurship</label>
               <label><input type="checkbox" name="available_strands" value="STEM"> STEM</label>
-              <label><input type="checkbox" name="available_strands" value="ICTech"> ICTech</label>
+              <label><input type="checkbox" name="available_strands" value="ICTECH"> ICTECH – Information and Communications Technology</label>
               <label><input type="checkbox" name="available_strands" value="HT"> HT – Hospitality and Tourism</label>
               <label><input type="checkbox" name="available_strands" value="ARSSH"> ARSSH – Arts, Social Sciences, and Humanities</label>
             </div></div>
@@ -140,8 +140,8 @@
           <div class="admin-panel-heading"><div><span class="admin-panel-kicker">ACTIVITY</span><h4>Monthly uploads</h4></div><button class="graph-expand-trigger" type="button" aria-label="Expand Monthly uploads graph" title="Expand graph"><i class="fa-solid fa-up-right-and-down-left-from-center" aria-hidden="true"></i></button></div>
           <div class="chart-wrap"><canvas id="chartMonthly"></canvas></div>
         </div>
-        <div class="card admin-chart-strand" data-expandable-graph tabindex="0" aria-label="Expand Students per strand graph">
-          <div class="admin-panel-heading"><div><span class="admin-panel-kicker">STUDENT MIX</span><h4>Students per strand</h4></div><button class="graph-expand-trigger" type="button" aria-label="Expand Students per strand graph" title="Expand graph"><i class="fa-solid fa-up-right-and-down-left-from-center" aria-hidden="true"></i></button></div>
+        <div class="card admin-chart-strand" data-expandable-graph tabindex="0" aria-label="Expand Students per cluster graph">
+          <div class="admin-panel-heading"><div><span class="admin-panel-kicker">STUDENT MIX</span><h4>Students per cluster</h4></div><button class="graph-expand-trigger" type="button" aria-label="Expand Students per cluster graph" title="Expand graph"><i class="fa-solid fa-up-right-and-down-left-from-center" aria-hidden="true"></i></button></div>
           <div class="chart-wrap"><canvas id="chartStrand"></canvas></div>
         </div>
         <div class="card admin-chart-gwa" data-expandable-graph tabindex="0" aria-label="Expand GWA distribution graph">
@@ -191,7 +191,7 @@
       <div class="admin-student-list-heading"><div><span class="admin-panel-kicker">REPORT CENTER</span><h3>Generate reports</h3></div></div>
       <form id="admin-report-form" class="admin-report-controls">
         <label>Report type<select name="report_type"><option value="all_reports">All reports</option><option value="student_summary" selected>Student summary</option><option value="report_cards">Report-card status</option><option value="recommendations">Recommendation frequency</option></select></label>
-        <label>Academic strand<select name="strand"><option value="">All strands</option>{% for strand in system_settings.available_strands %}<option value="{{ strand }}">{{ strand }}</option>{% endfor %}<option value="Unspecified">Unspecified</option></select></label>
+        <label>Academic cluster<select name="strand"><option value="">All clusters</option>{% for strand in system_settings.available_strands %}<option value="{{ strand }}">{{ strand }}</option>{% endfor %}<option value="Unspecified">Unspecified</option></select></label>
         <div class="admin-report-date-filters">
           <label>From date<input name="from_date" type="date"></label>
           <label>To date<input name="to_date" type="date"></label>
@@ -270,7 +270,7 @@
         <label class="editor-wide">Account email<input name="email" type="email" readonly></label>
         <label>Student number<input name="student_number" type="text"></label>
         <label class="editor-wide">Student name<input name="student_name" type="text"></label>
-        <label>Academic strand<input name="strand" type="text"></label>
+        <label>Academic cluster<input name="strand" type="text"></label>
         <label>GWA<input name="gwa" type="text"></label>
         <div class="editor-wide"><div class="editor-table-heading">Subject grades</div><table class="admin-editor-grade-table"><thead><tr><th>Subject</th><th>Grade</th><th>Action</th></tr></thead><tbody id="student-editor-grade-body"></tbody></table><input name="subjects" type="hidden"><input name="grades" type="hidden"></div>
         <section class="editor-wide admin-report-preview"><div class="editor-table-heading">Uploaded report card</div><a id="student-report-card-link" target="_blank" rel="noopener" hidden>Open original upload</a><div id="student-report-card-pages" class="admin-report-pages" hidden></div><img id="student-report-card-image" alt="Uploaded student report card" hidden><p id="student-report-card-empty">No original report card upload is available for this profile.</p></section>

@@ -22,21 +22,21 @@ from ocr.parser import calculate_gwa, parse_report_card_structure, validate_grad
 def test_schema_tags_catalog_courses_with_active_strands_only():
     schema = (Path(__file__).resolve().parents[1] / "supabase_schema.sql").read_text()
     courses = set(re.findall(r"^\('([^']+)', '\[", schema, re.MULTILINE))
-    tags = re.findall(r"^\('([^']+)', '(BE|STEM|ICTech|HT|ARSSH|[A-Z_]+)'\)", schema, re.MULTILINE)
+    tags = re.findall(r"^\('([^']+)', '(BE|STEM|ICTECH|HT|ARSSH|[A-Z_]+)'\)", schema, re.MULTILINE)
     by_strand = {}
     for course, strand in tags:
         by_strand.setdefault(strand, set()).add(course)
 
     assert set(by_strand) == set(app.SYSTEM_SETTING_STRANDS)
     assert {course for course, _ in tags} <= courses
-    assert "check (strand_code in ('BE', 'STEM', 'ICTech', 'HT', 'ARSSH'))" in schema
+    assert "check (strand_code in ('BE', 'STEM', 'ICTECH', 'HT', 'ARSSH'))" in schema
     assert by_strand["BE"] == {
         "BS in Accountancy", "BS in Business Administration",
         "BS in Business Administration major in Human Resource Management",
         "BS in Business Administration major in Marketing Management", "BS in Entrepreneurship",
     }
     assert by_strand["HT"] == {"BS in Hospitality Management", "BS in Tourism Management"}
-    assert by_strand["ICTech"] == {
+    assert by_strand["ICTECH"] == {
         "BS in Information Technology with Specialization in Game Development",
         "BS in Computer Science with Specialization in Data Science",
         "BS in Computer Engineering", "BS in Digital Engineering",
@@ -315,7 +315,7 @@ def test_missing_strand_ranks_all_courses_from_highest_grades(monkeypatch):
     monkeypatch.setattr(app, "_course_training_data", lambda: [
         {"course": "BS in Accountancy", "features": [80, 80, 80, 80, 96, 80], "description": "Accounting and finance", "strands": ["BE"]},
         {"course": "BS in Nursing", "features": [80, 96, 80, 60, 70, 80], "description": "Patient care", "strands": ["STEM"]},
-        {"course": "BS in Information Technology with Specialization in Game Development", "features": [80, 80, 80, 96, 70, 80], "description": "Computing and software", "strands": ["ICTech"]},
+        {"course": "BS in Information Technology with Specialization in Game Development", "features": [80, 80, 80, 96, 70, 80], "description": "Computing and software", "strands": ["ICTECH"]},
     ])
     subjects = "Mathematics - 80\nScience - 80\nEnglish - 80\nComputer Programming - 80\nAccounting - 96\nSocial Studies - 80"
 
@@ -329,9 +329,9 @@ def test_missing_strand_ranks_all_courses_from_highest_grades(monkeypatch):
         assert "highest grade areas" in recommendations[0]["reason"].lower()
 
 
-def test_retired_tvl_ranks_all_courses_and_ict_maps_to_ictech(monkeypatch):
+def test_retired_tvl_ranks_all_courses_and_ict_maps_to_ICTECH(monkeypatch):
     monkeypatch.setattr(app, "_course_training_data", lambda: [
-        {"course": "BS in Information Technology", "features": [80, 80, 80, 90, 80, 80], "description": "ICT", "strands": ["ICTech"]},
+        {"course": "BS in Information Technology", "features": [80, 80, 80, 90, 80, 80], "description": "ICT", "strands": ["ICTECH"]},
         {"course": "BS in Hospitality Management", "features": [80, 80, 80, 80, 90, 80], "description": "Hospitality", "strands": ["HT"]},
         {"course": "BS in Mechanical Engineering", "features": [90, 90, 80, 80, 70, 70], "description": "Engineering", "strands": ["STEM"]},
         {"course": "BS in Accountancy", "features": [80, 80, 80, 70, 95, 80], "description": "Accountancy", "strands": ["BE"]},
@@ -349,7 +349,7 @@ def test_retired_tvl_ranks_all_courses_and_ict_maps_to_ictech(monkeypatch):
     }
     assert all(not item["strand_label"] for item in broad_tvl)
     assert {item["course"] for item in ict_only} == {"BS in Information Technology"}
-    assert ict_only[0]["strand_label"] == "ICTech"
+    assert ict_only[0]["strand_label"] == "ICTECH"
 
 
 def test_high_nihongo_grade_supports_tourism_courses_for_hospitality_and_tourism(monkeypatch):
@@ -497,7 +497,7 @@ def test_known_strands_filter_out_non_aligned_courses(monkeypatch):
         {"course": "BS in Civil Engineering", "features": profile, "description": "Infrastructure engineering", "strands": ["STEM"]},
         {"course": "BS in Business Administration", "features": profile, "description": "Business operations", "strands": ["BE"]},
         {"course": "Bachelor of Physical Education", "features": profile, "description": "Physical education and sports instruction", "strands": ["ARSSH"]},
-        {"course": "Bachelor of Arts in Multimedia Arts", "features": profile, "description": "Digital media and creative design", "strands": ["ICTech"]},
+        {"course": "Bachelor of Arts in Multimedia Arts", "features": profile, "description": "Digital media and creative design", "strands": ["ICTECH"]},
     ]
     monkeypatch.setattr(app, "_course_training_data", lambda: training_data)
     subjects = "Mathematics - 85\nEnglish - 85"
@@ -506,7 +506,7 @@ def test_known_strands_filter_out_non_aligned_courses(monkeypatch):
         ("STEM", "BS in Civil Engineering"),
         ("BE", "BS in Business Administration"),
         ("ARSSH", "Bachelor of Physical Education"),
-        ("ICTech", "Bachelor of Arts in Multimedia Arts"),
+        ("ICTECH", "Bachelor of Arts in Multimedia Arts"),
     ]:
         recommendations = recommend_course(subjects, strand=strand)
         assert recommendations
@@ -582,7 +582,7 @@ def test_build_student_performance_analytics_rejects_placeholder_course_names(mo
 
 def test_university_catalog_loads_course_strand_assignments(monkeypatch):
     rows = [
-        ("BS in Computer Science with Specialization in Data Science", [80, 80, 80, 80, 80, 80], "STEM profile", ["STEM", "ICTech"]),
+        ("BS in Computer Science with Specialization in Data Science", [80, 80, 80, 80, 80, 80], "STEM profile", ["STEM", "ICTECH"]),
         ("BS in Accountancy", [80, 80, 80, 80, 80, 80], "BE profile", ["BE"]),
     ]
     executed = []
@@ -596,7 +596,7 @@ def test_university_catalog_loads_course_strand_assignments(monkeypatch):
     catalog = load()
     expected = [item["course"] for item in catalog]
     assert expected == ["BS in Computer Science with Specialization in Data Science", "BS in Accountancy"]
-    assert catalog[0]["strands"] == ["STEM", "ICTech"]
+    assert catalog[0]["strands"] == ["STEM", "ICTECH"]
     assert "FROM university_courses" in executed[0]
     assert "university_course_strands" in executed[0]
     assert app._sanitize_recommendations([{"course": "Software Engineering"}, {"course": expected[0]}]) == [

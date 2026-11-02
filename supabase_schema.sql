@@ -180,12 +180,12 @@ create table if not exists public.university_course_strands (
     primary key (course, strand_code)
 );
 delete from public.university_course_strands;
--- Active SHS strands: BE, STEM, ICTech, HT, ARSSH.
+-- Active SHS clusters: BE, STEM, ICTECH, HT, ARSSH.
 alter table public.university_course_strands
     drop constraint if exists university_course_strands_strand_code_check;
 alter table public.university_course_strands
     add constraint university_course_strands_strand_code_check
-    check (strand_code in ('BE', 'STEM', 'ICTech', 'HT', 'ARSSH'));
+    check (strand_code in ('BE', 'STEM', 'ICTECH', 'HT', 'ARSSH'));
 insert into public.university_course_strands (course, strand_code) values
 ('BS in Accountancy', 'BE'),
 ('BS in Business Administration', 'BE'),
@@ -217,12 +217,12 @@ insert into public.university_course_strands (course, strand_code) values
 ('BS in Aviation Electronics Technology', 'STEM'),
 ('Aircraft Maintenance Technology', 'STEM'),
 ('Aviation Electronics Technology', 'STEM'),
-('BS in Information Technology with Specialization in Game Development', 'ICTech'),
-('BS in Computer Science with Specialization in Data Science', 'ICTech'),
-('BS in Computer Engineering', 'ICTech'),
-('BS in Digital Engineering', 'ICTech'),
-('Bachelor of Library and Information Science', 'ICTech'),
-('Bachelor of Arts in Multimedia Arts', 'ICTech'),
+('BS in Information Technology with Specialization in Game Development', 'ICTECH'),
+('BS in Computer Science with Specialization in Data Science', 'ICTECH'),
+('BS in Computer Engineering', 'ICTECH'),
+('BS in Digital Engineering', 'ICTECH'),
+('Bachelor of Library and Information Science', 'ICTECH'),
+('Bachelor of Arts in Multimedia Arts', 'ICTECH'),
 ('BS in Hospitality Management', 'HT'),
 ('BS in Tourism Management', 'HT'),
 ('Bachelor of Arts in Communication', 'ARSSH'),

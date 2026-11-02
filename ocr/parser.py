@@ -7,8 +7,9 @@ def normalize_ocr_text(value):
 
 
 def _is_strand_label(value):
+    # "Cluster" is the current report-card label; Strand/Track remain as legacy fallbacks.
     text = normalize_ocr_text(value).strip(" :-")
-    return bool(re.fullmatch(r"(?:strand(?:\s*/\s*track)?|track(?:\s*/\s*strand)?)", text, flags=re.IGNORECASE))
+    return bool(re.fullmatch(r"(?:cluster|strand(?:\s*/\s*track)?|track(?:\s*/\s*strand)?)", text, flags=re.IGNORECASE))
 
 
 def _is_metadata_label(value):
@@ -33,7 +34,7 @@ def _strand_from_table_rows(table_rows):
         for cell_index, cell in enumerate(cells):
             text = normalize_ocr_text(cell.get("text", ""))
             inline_match = re.fullmatch(
-                r"(?:strand(?:\s*/\s*track)?|track(?:\s*/\s*strand)?)\s*[:\-]\s*(.+)",
+                r"(?:cluster|strand(?:\s*/\s*track)?|track(?:\s*/\s*strand)?)\s*[:\-]\s*(.+)",
                 text,
                 flags=re.IGNORECASE,
             )
@@ -63,7 +64,7 @@ def _strand_words(value):
     return " ".join(re.findall(r"[A-Z0-9]+", normalize_ocr_text(value).upper()))
 
 
-# Older strand names map to the school's current strands; GAS, Sports, plain TVL, and Arts & Design map to none.
+# Older strand/track names map to the school's current clusters; GAS, Sports, plain TVL, and Arts & Design map to none.
 def _strand_from_major(value):
     text = normalize_ocr_text(value)
     if re.match(
@@ -78,7 +79,7 @@ def _strand_from_major(value):
     if "STEM" in tokens or "SCIENCE TECHNOLOGY ENGINEERING AND MATHEMATICS" in words:
         return "STEM"
     if tokens.intersection({"ICTECH", "ICT"}) or "INFORMATION AND COMMUNICATIONS TECHNOLOGY" in words or "INFORMATION AND COMMUNICATION TECHNOLOGY" in words:
-        return "ICTech"
+        return "ICTECH"
     if tokens.intersection({"BE", "ABM"}) or "BUSINESS ENTREPRENEURSHIP" in words or "BUSINESS AND ENTREPRENEURSHIP" in words:
         return "BE"
     if tokens.intersection({"HT", "HE"}) or "HOSPITALITY AND TOURISM" in words or "HOME ECONOMICS" in words:
@@ -135,7 +136,7 @@ def parse_student_metadata(metadata_items):
         elif label_lower in {"student name", "name of student", "full name", "name"}:
             if "student_name" not in info:
                 info["student_name"] = value_clean
-        elif "strand" in label_lower:
+        elif "cluster" in label_lower or "strand" in label_lower:
             info.setdefault("strand", value_clean)
             info.setdefault("strand_raw", value_clean)
             info.setdefault("major", value_clean)
@@ -161,7 +162,7 @@ def parse_student_metadata(metadata_items):
             text = normalize_ocr_text(item.get("text", "") if isinstance(item, dict) else item)
             if _is_strand_label(text):
                 continue
-            match = re.search(r"strand\s*(?:/\s*track)?\s*[:\-]?\s*(.+)$", text, flags=re.IGNORECASE)
+            match = re.search(r"(?:cluster|strand)\s*(?:/\s*track)?\s*[:\-]?\s*(.+)$", text, flags=re.IGNORECASE)
             if match:
                 info["strand"] = match.group(1).strip()
                 info["strand_raw"] = info["strand"]
@@ -169,7 +170,7 @@ def parse_student_metadata(metadata_items):
     if not info.get("major"):
         for item in entries:
             text = normalize_ocr_text(item.get("text", "") if isinstance(item, dict) else item)
-            match = re.search(r"(?:course|major|program|strand)\s*(?:/\s*major)?\s*[:\-]?\s*(.+)$", text, flags=re.IGNORECASE)
+            match = re.search(r"(?:course|major|program|cluster|strand)\s*(?:/\s*major)?\s*[:\-]?\s*(.+)$", text, flags=re.IGNORECASE)
             if match:
                 info["major"] = match.group(1).strip()
                 break
@@ -539,7 +540,7 @@ def parse_report_card_structure(raw_ocr):
                     student_info.setdefault("student_no", value_clean)
                 elif "student name" in label_lower:
                     student_info.setdefault("student_name", value_clean)
-                elif "strand" in label_lower:
+                elif "cluster" in label_lower or "strand" in label_lower:
                     student_info.setdefault("strand", value_clean)
                     student_info.setdefault("strand_raw", value_clean)
                     student_info.setdefault("major", value_clean)
@@ -558,7 +559,7 @@ def parse_report_card_structure(raw_ocr):
                 student_info.setdefault("student_name", normalize_ocr_text(lines[i + 1]))
                 i += 2
                 continue
-            if has_next and "strand" in label_lower:
+            if has_next and ("cluster" in label_lower or "strand" in label_lower):
                 student_info.setdefault("strand", normalize_ocr_text(lines[i + 1]))
                 student_info.setdefault("strand_raw", normalize_ocr_text(lines[i + 1]))
                 student_info.setdefault("major", student_info["strand"])

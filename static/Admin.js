@@ -1008,7 +1008,7 @@ function renderRecommendationHistory(){
     return;
   }
   const pageHistory = paginateAdminList('recommendations', filtered);
-  wrap.innerHTML = `<table class="table-fixed admin-students-table admin-recommendation-history-table"><thead><tr><th>Generated</th><th>Student</th><th>Strand</th><th>GWA</th><th>Top recommendation</th><th>Confidence</th><th>Grade fit</th><th>Actions</th></tr></thead><tbody>${pageHistory.map(item => {
+  wrap.innerHTML = `<table class="table-fixed admin-students-table admin-recommendation-history-table"><thead><tr><th>Generated</th><th>Student</th><th>Cluster</th><th>GWA</th><th>Top recommendation</th><th>Confidence</th><th>Grade fit</th><th>Actions</th></tr></thead><tbody>${pageHistory.map(item => {
     const top = item.recommendations?.[0] || {};
     const confidence = Number(top.confidence);
     const fit = Number(top.core_grade_fit);
@@ -1028,14 +1028,14 @@ function openRecommendationDetail(historyId){
   if(!item) return;
   document.getElementById('recommendation-detail-title').textContent = item.student_name || 'Student recommendations';
   document.getElementById('recommendation-detail-kicker').textContent = `Generated ${formatReportDate(item.generated_at)}`;
-  document.getElementById('recommendation-detail-summary').innerHTML = `<span><strong>Student number</strong>${escapeAdminHtml(item.student_number || '—')}</span><span><strong>Strand</strong>${escapeAdminHtml(item.strand || '—')}</span><span><strong>GWA</strong>${escapeAdminHtml(item.gwa || '—')}</span>`;
+  document.getElementById('recommendation-detail-summary').innerHTML = `<span><strong>Student number</strong>${escapeAdminHtml(item.student_number || '—')}</span><span><strong>Cluster</strong>${escapeAdminHtml(item.strand || '—')}</span><span><strong>GWA</strong>${escapeAdminHtml(item.gwa || '—')}</span>`;
   const gradeRows = parseReportSubjectRows(item.subjects);
   document.getElementById('recommendation-grade-comparison').innerHTML = gradeRows.length
     ? `<table class="recommendation-grade-table"><thead><tr><th>Subject</th><th>Grade</th></tr></thead><tbody>${gradeRows.map(row => `<tr><td>${escapeAdminHtml(row.subject_name)}</td><td>${escapeAdminHtml(row.grade)}</td></tr>`).join('')}</tbody></table>`
     : '<p class="student-detail-empty">No subject grades were saved with this profile.</p>';
   const recommendations = item.recommendations || [];
   document.getElementById('recommendation-detail-list').innerHTML = recommendations.length
-    ? recommendations.map((rec, index) => `<article class="recommendation-detail-item"><div class="recommendation-detail-item-heading"><h4>${index + 1}. ${escapeAdminHtml(rec.course || 'Unspecified course')}</h4><span>${Number.isFinite(Number(rec.confidence)) ? `${Number(rec.confidence).toFixed(1)}% confidence` : 'Confidence unavailable'}</span></div><p>${escapeAdminHtml(rec.description || '')}</p><p class="recommendation-detail-reason"><strong>Reason:</strong> ${escapeAdminHtml(rec.reason || 'No reason saved.')}</p><div class="recommendation-fit-tags"><span>Core grade fit: ${Number.isFinite(Number(rec.core_grade_fit)) ? `${Number(rec.core_grade_fit).toFixed(1)}%` : '—'}</span>    <span>${rec.recommendation_basis === 'grade_alternative' ? 'Grade-based alternative (outside strand)' : rec.strand_alignment ? 'Strand aligned' : 'Grade profile match'}</span></div></article>`).join('')
+    ? recommendations.map((rec, index) => `<article class="recommendation-detail-item"><div class="recommendation-detail-item-heading"><h4>${index + 1}. ${escapeAdminHtml(rec.course || 'Unspecified course')}</h4><span>${Number.isFinite(Number(rec.confidence)) ? `${Number(rec.confidence).toFixed(1)}% confidence` : 'Confidence unavailable'}</span></div><p>${escapeAdminHtml(rec.description || '')}</p><p class="recommendation-detail-reason"><strong>Reason:</strong> ${escapeAdminHtml(rec.reason || 'No reason saved.')}</p><div class="recommendation-fit-tags"><span>Core grade fit: ${Number.isFinite(Number(rec.core_grade_fit)) ? `${Number(rec.core_grade_fit).toFixed(1)}%` : '—'}</span>    <span>${rec.recommendation_basis === 'grade_alternative' ? 'Grade-based alternative (outside cluster)' : rec.strand_alignment ? 'Cluster aligned' : 'Grade profile match'}</span></div></article>`).join('')
     : '<p class="student-detail-empty">No recommendations in this snapshot.</p>';
   document.getElementById('recommendation-detail-modal').hidden = false;
 }
@@ -1054,7 +1054,7 @@ async function loadRecommendationManagement(){
 }
 
 async function recalculateRecommendations(profileId, button){
-  if(!profileId || !confirm('Recalculate recommendations using this student profile’s current grades and strand?')) return;
+  if(!profileId || !confirm('Recalculate recommendations using this student profile’s current grades and cluster?')) return;
   button.disabled = true;
   const previousContent = button.innerHTML;
   button.innerHTML = '<i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i><span>Working...</span>';
@@ -1159,7 +1159,7 @@ function renderAdminStudents(){
   });
   if(!filtered.length){ wrap.innerHTML = '<div class="records-empty">No students found.</div>'; return; }
   const pageStudents = paginateAdminList('students', filtered);
-  wrap.innerHTML = `<table class="table-fixed admin-students-table"><thead><tr><th>Student number</th><th>Student</th><th>Strand</th><th>GWA</th><th>Account</th><th>Report</th></tr></thead><tbody>${pageStudents.map(student => {
+  wrap.innerHTML = `<table class="table-fixed admin-students-table"><thead><tr><th>Student number</th><th>Student</th><th>Cluster</th><th>GWA</th><th>Account</th><th>Report</th></tr></thead><tbody>${pageStudents.map(student => {
     const accountStatus = student.is_active ? 'Active' : 'Deactivated';
     const reportAction = student.report_card_upload_id
       ? `<button class="student-report-button" type="button" data-report-id="${student.report_card_upload_id}" aria-label="View uploaded report card"><i class="fa-solid fa-eye" aria-hidden="true"></i><span>View</span></button>`
@@ -1183,7 +1183,7 @@ function updateStudentFilterOptions(){
     select.innerHTML = `<option value="">All ${label}</option>${options.map(value => `<option value="${escapeAdminHtml(value)}">${escapeAdminHtml(value)}</option>`).join('')}`;
     if(options.includes(selected)) select.value = selected;
   };
-  setOptions('strandFilter', [...systemAvailableStrands, ...adminStudents.map(student => student.strand)], 'strands');
+  setOptions('strandFilter', [...systemAvailableStrands, ...adminStudents.map(student => student.strand)], 'clusters');
 }
 
 function renderEditorGradeRows(subjects){
@@ -1279,7 +1279,7 @@ async function openStudentEditor(studentId){
     }
     const recommendations = document.getElementById('student-editor-recommendations');
     recommendations.innerHTML = student.recommendation?.length
-      ? `<ol>${student.recommendation.map(item => `<li><strong>${escapeAdminHtml(item.course)}</strong><span>${item.recommendation_basis === 'grade_alternative' ? 'Grade-based alternative (outside strand)' : item.strand_alignment ? 'Strand-matched course' : 'Grade-profile match'}</span>${item.description ? `<span>${escapeAdminHtml(item.description)}</span>` : ''}</li>`).join('')}</ol>`
+      ? `<ol>${student.recommendation.map(item => `<li><strong>${escapeAdminHtml(item.course)}</strong><span>${item.recommendation_basis === 'grade_alternative' ? 'Grade-based alternative (outside cluster)' : item.strand_alignment ? 'Cluster-matched course' : 'Grade-profile match'}</span>${item.description ? `<span>${escapeAdminHtml(item.description)}</span>` : ''}</li>`).join('')}</ol>`
       : '<p class="student-detail-empty">No course recommendations saved.</p>';
     modal.hidden = false;
   }catch(error){ alert(error.message || 'Unable to load student record.'); }
@@ -1505,7 +1505,7 @@ function renderAdminGeneratedReport(report){
   filterLine.className = 'admin-generated-report-filters';
   const {from_date: fromDate, to_date: toDate} = report.filters;
   const dateRange = fromDate === 'Any' && toDate === 'Any' ? 'All dates' : `${fromDate === 'Any' ? 'Beginning' : fromDate} to ${toDate === 'Any' ? 'Today' : toDate}`;
-  filterLine.textContent = `Strand: ${report.filters.strand} | Dates: ${dateRange}`;
+  filterLine.textContent = `Cluster: ${report.filters.strand} | Dates: ${dateRange}`;
   output.append(filterLine);
   (report.sections || [report]).forEach(section => {
     const container = document.createElement('section');

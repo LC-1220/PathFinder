@@ -23,7 +23,7 @@ FastHTML serves the website pages and templates. FastAPI provides the versioned 
 
    Apply `supabase_schema.sql` in the Supabase SQL Editor before the first run.
    For an existing database, reapply the schema to replace the old recommendation
-   catalog with 44 university programs and their strand categories. The obsolete
+   catalog with 44 university programs and their cluster categories. The obsolete
    course-training table is removed; student grades and profiles remain in place.
 
    python fastapi_app.py
@@ -58,15 +58,15 @@ The saved-grades view, average, and recommendations use the combined record
 immediately after saving. Review corrections take precedence over the original
 OCR table.
 Recommendations are recalculated and saved after each additional report card.
-College program labels (such as BSCS-DS) are not SHS strands: when no SHS strand
+College program labels (such as BSCS-DS) are not SHS clusters: when no SHS cluster
 is detected, matching uses the combined grades across the course catalog instead
-of inferring an SHS strand from a college program.
-For recognized SHS strands, recommendations include two separate groups:
-strand-matched courses and grade-based alternatives outside that strand's catalog
+of inferring an SHS cluster from a college program.
+For recognized SHS clusters, recommendations include two separate groups:
+cluster-matched courses and grade-based alternatives outside that cluster's catalog
 group. Alternatives use only existing database courses and their stored academic
 profiles. Only Math, Science, English, and their recognized branches determine
 the best grade-based alternative. Technology, business, social studies, and
-foreign-language grades do not influence it; strand-matched scoring is unchanged.
+foreign-language grades do not influence it; cluster-matched scoring is unchanged.
 Recognized branches include algebra, calculus, geometry, statistics, probability,
 physics, chemistry, biology, earth/life sciences, reading, writing, literature,
 speech, and oral communication. Observed core-category grades are compared using weighted root-mean-square
@@ -88,13 +88,15 @@ guest results remain in the current page. Full recommendation payloads are not
 duplicated in session cookies. Regenerate older
 recommendations to include alternatives. Similarity scores are guidance, not
 admission probabilities.
-The active SHS strands are BE (Business Entrepreneurship), STEM, ICTech,
-HT (Hospitality and Tourism), and ARSSH (Arts, Social Sciences, and Humanities).
-Strands are recognized when supplied as standalone student metadata, under a
-Strand label, or under Course/Major. Older labels are converted: ABM → BE,
-HUMSS → ARSSH, ICT / TVL-ICT → ICTech, and HE / Home Economics / TVL-HE → HT.
+The active SHS clusters are BE (Business Entrepreneurship), STEM, ICTECH
+(Information and Communications Technology), HT (Hospitality and Tourism), and
+ARSSH (Arts, Social Sciences, and Humanities).
+Clusters are recognized when supplied as standalone student metadata, under a
+Cluster label (or a legacy Strand/Track label), or under Course/Major. Older
+labels are converted: ABM → BE,
+HUMSS → ARSSH, ICT / TVL-ICT → ICTECH, and HE / Home Economics / TVL-HE → HT.
 GAS, Sports, plain TVL, Industrial Arts, and Arts & Design are no longer offered;
-students with those labels receive grade-based recommendations without a strand
+students with those labels receive grade-based recommendations without a cluster
 filter. The original label is shown in the upload preview.
 During extraction, the upload screen displays server-reported OCR and result
 preparation stages. During processing, the bar displays a clearly labeled
@@ -110,11 +112,11 @@ Clients can request newline-delimited progress events from the OCR endpoint with
 
 ## Notes
 
-- Strand-to-course eligibility lives in `university_course_strands` in
+- Cluster-to-course eligibility lives in `university_course_strands` in
   `supabase_schema.sql`. For an existing database, rerun `supabase_schema.sql`
-  to replace the old strand tags with BE, STEM, ICTech, HT, and ARSSH, then
+  to replace the old tags with BE, STEM, ICTECH, HT, and ARSSH, then
   restart the app to refresh the cached catalog. Saved settings that still list
-  old strands reset to the five active strands on startup. Regenerate
+  old cluster codes reset to the five active clusters on startup. Regenerate
   recommendations for saved profiles to use the updated eligibility.
 - Main app entrypoint: fastapi_app.py
 - Static assets: static/

@@ -1,7 +1,7 @@
 /* ocr */
 let students = [];
 let selectedStudent = null;
-let configuredAcademicStrands = ['BE', 'STEM', 'ICTech', 'HT', 'ARSSH'];
+let configuredAcademicStrands = ['BE', 'STEM', 'ICTECH', 'HT', 'ARSSH'];
 let configuredRecommendationLimit = 3;
  
 
@@ -489,7 +489,7 @@ function parseStudent(text){
         return { firstName, middleInitial: middle, lastName };
     };
 
-    const metadataLinePattern = /\b(student|year|course|program|strand|track|section|semester|term|school|college|department|name|number|id|adviser|registrar|principal|address|birth|gender|sex|page|curriculum|subject code|units|grade)\b/i;
+    const metadataLinePattern = /\b(student|year|course|program|cluster|strand|track|section|semester|term|school|college|department|name|number|id|adviser|registrar|principal|address|birth|gender|sex|page|curriculum|subject code|units|grade)\b/i;
 
     const explicitMetadata = {};
 
@@ -549,7 +549,7 @@ function parseStudent(text){
 
     for(const line of lines){
         const cleaned = line.replace(/\s+/g, ' ').trim();
-        const match = cleaned.match(/^(?:student\s*(?:number|no|id)|student\s*name|course(?:\s*\/\s*major)?|major|program|strand|track|year|section|semester|term)\s*[:\-]?\s*(.+)$/i);
+        const match = cleaned.match(/^(?:student\s*(?:number|no|id)|student\s*name|course(?:\s*\/\s*major)?|major|program|cluster|strand|track|year|section|semester|term)\s*[:\-]?\s*(.+)$/i);
         if(!match) continue;
         const key = cleaned.split(/[:\-]/)[0].trim().toLowerCase();
         const value = match[1].trim();
@@ -559,6 +559,7 @@ function parseStudent(text){
             .replace(/^course(?:\s*\/\s*major)?$/, 'course')
             .replace(/^major$/, 'course')
             .replace(/^program$/, 'course')
+            .replace(/^cluster$/, 'course')
             .replace(/^strand$/, 'course')
             .replace(/^track$/, 'course')
             .replace(/^year$/, 'year')
@@ -949,11 +950,12 @@ function parseStudent(text){
         /course\s*(?:\/\s*major)?\s*[:\-]?\s*(.+)/i,
         /major\s*[:\-]?\s*(.+)/i,
         /program\s*[:\-]?\s*(.+)/i,
+        /cluster\s*[:\-]?\s*(.+)/i,
         /strand\s*[:\-]?\s*(.+)/i,
         /track\s*[:\-]?\s*(.+)/i,
         /^([A-Z0-9]+(?:[-/][A-Z0-9]+)+)$/,
         /^([A-Z]{2,10}\s*[-/]\s*[A-Z0-9]{2,10})$/
-    ]) || findLine(/\b(course|program|strand|track)\b/i).replace(/(?:course\s*[:\-]?|program\s*[:\-]?|strand\s*[:\-]?|track\s*[:\-]?)/i, '').trim();
+    ]) || findLine(/\b(course|program|cluster|strand|track)\b/i).replace(/(?:course\s*[:\-]?|program\s*[:\-]?|cluster\s*[:\-]?|strand\s*[:\-]?|track\s*[:\-]?)/i, '').trim();
     const normalizedCourseText = (courseText || '')
         .replace(/^\/+\s*[A-Za-z]+\s*[:\-]?\s*/i, '')
         .replace(/\.+$/, '')
@@ -1076,7 +1078,7 @@ function splitOcrStudentName(value){
     return { firstName, middleInitial, lastName };
 }
 
-// Older strand names map to the school's current strands; GAS, Sports, plain TVL, and Arts & Design stay unmapped.
+// Older strand/track names map to the school's current clusters; GAS, Sports, plain TVL, and Arts & Design stay unmapped.
 function normalizeOcrStrand(value){
     const text = String(value || '').replace(/\s+/g, ' ').trim();
     if(/^(?:bachelor(?:'s)?\b|(?:bs|ba|bsc|beng|btech|bba|bsa|bscs|bsit|bshm|bstm|bsn|bsed|beed|bped)(?:$|[\s.-]))/i.test(text)) return text;
@@ -1085,7 +1087,7 @@ function normalizeOcrStrand(value){
     const hasToken = (...names) => names.some(name => tokens.has(name));
     let code = '';
     if(hasToken('STEM') || words.includes('SCIENCE TECHNOLOGY ENGINEERING AND MATHEMATICS')) code = 'STEM';
-    else if(hasToken('ICTECH', 'ICT') || /INFORMATION AND COMMUNICATIONS? TECHNOLOGY/.test(words)) code = 'ICTech';
+    else if(hasToken('ICTECH', 'ICT') || /INFORMATION AND COMMUNICATIONS? TECHNOLOGY/.test(words)) code = 'ICTECH';
     else if(hasToken('BE', 'ABM') || /BUSINESS (?:AND )?ENTREPRENEURSHIP/.test(words)) code = 'BE';
     else if(hasToken('HT', 'HE') || words.includes('HOSPITALITY AND TOURISM') || words.includes('HOME ECONOMICS')) code = 'HT';
     else if(hasToken('ARSSH', 'HUMSS', 'HUMMS', 'HUMS') || words.includes('ARTS SOCIAL SCIENCES AND HUMANITIES') || words.includes('HUMANITIES AND SOCIAL SCIENCES')) code = 'ARSSH';
@@ -1117,7 +1119,7 @@ function updateOcrIdentityPreview(metadata){
     const values = [
         ['Student number', metadata?.studentNumber],
         ['Name', [metadata?.firstName, metadata?.middleInitial ? `${metadata.middleInitial}.` : '', metadata?.lastName].filter(Boolean).join(' ')],
-        ['Strand', metadata?.strandDisplay || metadata?.strand]
+        ['Cluster', metadata?.strandDisplay || metadata?.strand]
     ];
     preview.innerHTML = values.map(([label, value]) => `<span><strong>${label}</strong><em>${escapeText(value || 'Not detected')}</em></span>`).join('');
 }
@@ -1297,7 +1299,7 @@ function parseAcademicRecord(text){
     if(cleanSubjectRows.length === 0){
         for(const rawLine of String(text || '').split(/\r?\n/)){
             let line = rawLine.replace(/\s+/g, ' ').trim();
-            if(!line || /\b(?:student|name|number|address|birth|gender|course|strand|track|semester|school year|subject code|subject name|instructor|remarks?|gwa|gpa|general weighted average)\b/i.test(line)) continue;
+            if(!line || /\b(?:student|name|number|address|birth|gender|course|cluster|strand|track|semester|school year|subject code|subject name|instructor|remarks?|gwa|gpa|general weighted average)\b/i.test(line)) continue;
 
             const gradeMatch = line.match(gradeAtEnd) || line.match(/(?:^|\s|-|:|\|)(\d{1,3}(?:\.\d{1,2})?)(?=\s*,)/i);
             if(!gradeMatch) continue;
@@ -1867,7 +1869,7 @@ function clearInputs() {
                 configuredRecommendationLimit = recommendationLimit;
             }
         }catch(error){
-            console.warn('Unable to load configured academic strands.', error);
+            console.warn('Unable to load configured academic clusters.', error);
         }
 
         const isGuest = document.body.dataset.guest === 'true';
@@ -2148,8 +2150,8 @@ function clearInputs() {
             }
             list.innerHTML = items.length
                 ? items.map((item, index) => `
-                    ${index === 0 && primary.length ? `<div class="recommendation-group-heading"><h3>${primary[0].strand_label ? 'Strand-matched courses' : 'Grade-profile matches'}</h3><p>${primary[0].strand_label ? 'Courses listed for your strand, ranked using your grades.' : 'Courses ranked using your available grades.'}</p></div>` : ''}
-                    ${isAlternative(item) && index === primary.length ? '<div class="recommendation-group-heading"><h3>Best grade-based alternative</h3><p>The highest-ranked course outside your strand group, based only on Math, Science, English, and their recognized branches. This is guidance, not an admission guarantee.</p></div>' : ''}
+                    ${index === 0 && primary.length ? `<div class="recommendation-group-heading"><h3>${primary[0].strand_label ? 'Cluster-matched courses' : 'Grade-profile matches'}</h3><p>${primary[0].strand_label ? 'Courses listed for your cluster, ranked using your grades.' : 'Courses ranked using your available grades.'}</p></div>` : ''}
+                    ${isAlternative(item) && index === primary.length ? '<div class="recommendation-group-heading"><h3>Best grade-based alternative</h3><p>The highest-ranked course outside your cluster group, based only on Math, Science, English, and their recognized branches. This is guidance, not an admission guarantee.</p></div>' : ''}
                     <article class="inline-recommendation-card${isAlternative(item) ? ' grade-based-alternative' : index === 0 ? ' best-match' : ''}" data-recommendation-index="${index}">
                         <div class="recommendation-rank">${String(groupRank(index)).padStart(2, '0')}</div>
                         <div class="recommendation-detail">
@@ -2210,7 +2212,7 @@ function clearInputs() {
                     <div class="course-analysis-signals" aria-label="Recommendation signals">
                         <div class="course-analysis-signal"><span>Grade-profile similarity</span><strong>${Number(item.confidence || 0).toFixed(2)}%</strong><small>Based on graded subject categories compared with this course profile.</small></div>
                         <div class="course-analysis-signal"><span>Related-field grades</span><strong>${fieldAverage !== null && Number.isFinite(fieldAverage) ? fieldAverage.toFixed(1) : 'Not available'}</strong><small>${fieldEvidence.length ? fieldEvidence.map(entry => `${escapeHtml(entry.field)} ${Number(entry.grade).toFixed(1)}`).join(' · ') : 'No recognized related-field grades.'}</small></div>
-                        <div class="course-analysis-signal"><span>${strandLabel ? `${escapeHtml(strandLabel)} strand` : 'Strand'}</span><strong>${isAlternative(item) ? 'Grade-based alternative' : strandLabel ? (item.strand_alignment ? 'Aligned' : 'Not aligned') : 'Not provided'}</strong><small>${isAlternative(item) ? 'Ranked by your strongest grades and stored course profiles, not strand eligibility.' : 'Strand alignment helps prioritize results; it does not replace grade evidence.'}</small></div>
+                        <div class="course-analysis-signal"><span>${strandLabel ? `${escapeHtml(strandLabel)} cluster` : 'Cluster'}</span><strong>${isAlternative(item) ? 'Grade-based alternative' : strandLabel ? (item.strand_alignment ? 'Aligned' : 'Not aligned') : 'Not provided'}</strong><small>${isAlternative(item) ? 'Ranked by your strongest grades and stored course profiles, not cluster eligibility.' : 'Cluster alignment helps prioritize results; it does not replace grade evidence.'}</small></div>
                     </div>
                     <div class="course-analysis-summary">
                         <div><span>Your average (graded categories)</span><strong>${hasStudentAverage ? studentAverage.toFixed(2) : 'N/A'}</strong></div>
@@ -2266,8 +2268,8 @@ function clearInputs() {
                 };
                 const fieldExplanation = fieldFitExplanations[item.category] || 'This course overlaps with the strengths shown in your academic profile.';
                 const fitExplanation = isAlternative(item) ? item.reason : subjectList
-                    ? `${index === 0 ? 'This is your strongest course match' : 'This course is a relevant match'} because your grades in ${subjectList} show strengths related to ${item.course}. ${fieldExplanation}${strandLabel && item.strand_alignment ? ` It is also listed for your ${strandLabel} strand.` : !strandLabel ? ' No strand was identified, so the match is based on your grade profile.' : ''}`
-                    : `${index === 0 ? 'This is currently your strongest course match' : 'This course is a relevant match'} based on how your overall grade profile compares with ${item.course}. ${fieldExplanation}${strandLabel && item.strand_alignment ? ` It is also listed for your ${strandLabel} strand.` : ''}`;
+                    ? `${index === 0 ? 'This is your strongest course match' : 'This course is a relevant match'} because your grades in ${subjectList} show strengths related to ${item.course}. ${fieldExplanation}${strandLabel && item.strand_alignment ? ` It is also listed for your ${strandLabel} cluster.` : !strandLabel ? ' No cluster was identified, so the match is based on your grade profile.' : ''}`
+                    : `${index === 0 ? 'This is currently your strongest course match' : 'This course is a relevant match'} based on how your overall grade profile compares with ${item.course}. ${fieldExplanation}${strandLabel && item.strand_alignment ? ` It is also listed for your ${strandLabel} cluster.` : ''}`;
 
                 courseAnalysis.innerHTML = `
                     <div class="course-fit-explanation">
@@ -2279,7 +2281,7 @@ function clearInputs() {
                         <div class="course-analysis-signals" aria-label="Why this course matches">
                             <div class="course-analysis-signal"><span>Recommendation match</span><strong>${matchScore}%</strong><small>${isAlternative(item) ? 'Math, Science, and English only: 85% strongest-area fit and 15% observed core-grade profile fit.' : 'Final ranking score, including course relevance signals.'}</small></div>
                             <div class="course-analysis-signal"><span>Grade-profile similarity</span><strong>${profileSimilarity}%</strong><small>Similarity between your grades and the course reference profile.</small></div>
-                            <div class="course-analysis-signal"><span>${strandLabel ? `${escapeHtml(strandLabel)} strand` : 'Strand'}</span><strong>${isAlternative(item) ? 'Grade-based alternative' : strandLabel ? (item.strand_alignment ? 'Aligned' : 'Not aligned') : 'Not provided'}</strong><small>${isAlternative(item) ? 'This separate list considers courses outside your strand using grades, not strand eligibility.' : strandLabel ? 'Only courses tagged for the selected strand are eligible.' : 'No strand was identified; matches are ranked from your strongest grades.'}</small></div>
+                            <div class="course-analysis-signal"><span>${strandLabel ? `${escapeHtml(strandLabel)} cluster` : 'Cluster'}</span><strong>${isAlternative(item) ? 'Grade-based alternative' : strandLabel ? (item.strand_alignment ? 'Aligned' : 'Not aligned') : 'Not provided'}</strong><small>${isAlternative(item) ? 'This separate list considers courses outside your cluster using grades, not cluster eligibility.' : strandLabel ? 'Only courses tagged for the selected cluster are eligible.' : 'No cluster was identified; matches are ranked from your strongest grades.'}</small></div>
                         </div>
                         <p class="course-analysis-disclaimer">This is a relative academic match, not an admission probability or eligibility decision.</p>
                     </div>
@@ -2403,7 +2405,7 @@ function clearInputs() {
             const identityCard = document.getElementById('ocr-identity-status');
             if(identityCard){
                 identityCard.querySelector('.review-section-title').textContent = 'Student details are read from your report card';
-                identityCard.querySelector('p').textContent = 'OCR will extract the student number, first name, middle initial, last name, and SHS strand or track together with the subjects and grades.';
+                identityCard.querySelector('p').textContent = 'OCR will extract the student number, first name, middle initial, last name, and SHS cluster together with the subjects and grades.';
             }
             setJourneyStep(1);
             document.getElementById('dropzone')?.scrollIntoView({behavior:'smooth',block:'center'});
@@ -3076,7 +3078,7 @@ function loadSavedProfile(savedProfile = null) {
             const identityCard = document.getElementById('ocr-identity-status');
             if(identityCard){
                 identityCard.querySelector('.review-section-title').textContent = 'Saved student details restored';
-                identityCard.querySelector('p').textContent = 'Your latest student number, name, and strand were loaded from the database.';
+                identityCard.querySelector('p').textContent = 'Your latest student number, name, and cluster were loaded from the database.';
             }
             window.restoreSavedProfileView?.(data);
 
@@ -3093,7 +3095,7 @@ function loadSavedProfile(savedProfile = null) {
 
                 <div id="profileDetails" class="profile-details">
 
-                    <p><strong>SHS strand / track:</strong> ${data.strand || 'N/A'}</p>
+                    <p><strong>SHS cluster:</strong> ${data.strand || 'N/A'}</p>
                     <p><strong>GWA:</strong> ${data.gwa || 'N/A'}</p>
                     <p><strong>Grades:</strong> ${data.grades || 'N/A'}</p>
 

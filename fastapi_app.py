@@ -77,7 +77,7 @@ ROLE_SUPER_ADMIN = ROLE_ADMIN
 PASSWORD_MIN_LENGTH = 8
 PASSWORD_MAX_BYTES = 72
 PASSWORD_POLICY_MESSAGE = "Use at least 8 characters with an uppercase letter and a symbol. Passwords must be no more than 72 UTF-8 bytes."
-SYSTEM_SETTING_STRANDS = ("BE", "STEM", "ICTech", "HT", "ARSSH")
+SYSTEM_SETTING_STRANDS = ("BE", "STEM", "ICTECH", "HT", "ARSSH")
 SYSTEM_SETTING_DEFAULTS = {
     "university_name": "University of Perpetual Help System Dalta Las Pinas",
     "school_year": "",
@@ -324,7 +324,7 @@ def _validate_system_settings(data):
     if len(university_name) > 160 or len(school_year) > 24:
         raise ValueError("University name or school year is too long.")
     if not isinstance(strands, list) or not strands or any(strand not in SYSTEM_SETTING_STRANDS for strand in strands):
-        raise ValueError("Select at least one valid academic strand.")
+        raise ValueError("Select at least one valid academic cluster.")
     if type(max_file_size) is not int or not 1 <= max_file_size <= 50:
         raise ValueError("Maximum file size must be between 1 and 50 MB.")
     if type(automatic_ocr) is not bool:
@@ -380,7 +380,13 @@ def _course_training_data():
     finally:
         conn.close()
     _COURSE_TRAINING_DATA_CACHE = [
-        {"course": row[0], "features": row[1], "description": row[2], "strands": row[3] or []}
+        {
+            "course": row[0],
+            "features": row[1],
+            "description": row[2],
+            # Upper-case the codes so legacy 'ICTech' tags keep matching the ICTECH cluster.
+            "strands": [str(code).upper() for code in (row[3] if isinstance(row[3], (list, tuple)) else [])],
+        }
         for row in rows
     ]
     return _COURSE_TRAINING_DATA_CACHE
@@ -986,14 +992,14 @@ def categorize_course(course_name, description=""):
         return "Arts & Design"
     return "Other"
 
-#  Infer Academic Strand Based on Course Name (assigns a strand like BE, STEM, ICTech, HT, ARSSH, or Other) 
+#  Infer Academic Cluster Based on Course Name (assigns a cluster like BE, STEM, ICTECH, HT, ARSSH, or Other) 
 # help in recommending suitable courses for students based on their academic track
 def _infer_strand(course_name=""):
     course_name = (course_name or "").lower()
     if any(tok in course_name for tok in ("tourism", "hospitality")):
         return "HT"
     if any(tok in course_name for tok in ("computer", "information", "technology", "multimedia")):
-        return "ICTech"
+        return "ICTECH"
     if any(tok in course_name for tok in ("engineering", "science", "math", "nurs", "health", "medical", "clinical", "therapy", "pharmacy")):
         return "STEM"
     if any(tok in course_name for tok in ("business", "accounting", "accountancy", "management", "marketing", "economics", "entrepreneur")):
@@ -1007,7 +1013,7 @@ def _infer_strengths_from_features(features):
     ranked = sorted(zip(CATEGORY_NAMES, features), key=lambda t: t[1], reverse=True)
     return [name for name, value in ranked if value >= 75][:3]
 
-# Generate Reason for Course Match (explains why a course is suitable based on category, student's strengths, and academic strand)
+# Generate Reason for Course Match (explains why a course is suitable based on category, student's strengths, and academic cluster)
 #TODO:Enhance the reasoning by incorporating more nuanced analysis of student's strengths and course requirements
 def _course_match_reason(course_name, category, strongest, strand):
     focus = {
@@ -1022,7 +1028,7 @@ def _course_match_reason(course_name, category, strongest, strand):
         "Arts & Design": "communication, creativity, and visual thinking",
     }.get(category, "your overall academic profile")
     strength_text = ", ".join(strongest[:2]) if strongest else "your balanced grades"
-    strand_text = f" It is also compatible with your {strand} strand." if strand else ""
+    strand_text = f" It is also compatible with your {strand} cluster." if strand else ""
     return f"{course_name} draws on {focus}. Your strongest areas are {strength_text}.{strand_text}"
 
 # Validate Recommendation Course Name (checks if the course name is suitable for recommendation)
@@ -1114,7 +1120,7 @@ def _strand_words(strand):
     return set(tokens), " ".join(tokens)
 
 
-# Older strand names map to the school's current strands; retired strands (GAS, Sports, etc.) map to none.
+# Older strand/track names map to the school's current clusters; retired labels (GAS, Sports, etc.) map to none.
 def _recommendation_strand_code(strand):
     if _is_degree_program(strand):
         return ""
@@ -1122,7 +1128,7 @@ def _recommendation_strand_code(strand):
     if "stem" in tokens or "science technology engineering and mathematics" in words:
         return "STEM"
     if tokens & {"ictech", "ict"} or "information and communications technology" in words or "information and communication technology" in words:
-        return "ICTech"
+        return "ICTECH"
     if tokens & {"be", "abm"} or "business entrepreneurship" in words or "business and entrepreneurship" in words or "accountancy and business management" in words:
         return "BE"
     if tokens & {"ht", "he"} or "hospitality and tourism" in words or "home economics" in words:
@@ -1154,7 +1160,7 @@ def _recommendation_subjects_only(subjects_text):
     )
 
 
-# Recommend only courses cataloged for the student's strand.
+# Recommend only courses cataloged for the student's cluster.
 def recommend_course(subjects_text, current_course="", strand=""):
     subjects_text = _recommendation_subjects_only(subjects_text)
     training_data = _course_training_data()
@@ -1261,7 +1267,7 @@ def recommend_course(subjects_text, current_course="", strand=""):
             "_ranking_score": ranking_score,
         }
         if strand_alignment:
-            item["reason"] += f" It aligns with the {strand_key} strand."
+            item["reason"] += f" It aligns with the {strand_key} cluster."
         recommendations.append(item)
 
     recommendations.sort(
@@ -1272,7 +1278,7 @@ def recommend_course(subjects_text, current_course="", strand=""):
     if recommendations:
         recommendations[0]["strand_grade_based"] = bool(strand_key)
         if strand_key:
-            recommendations[0]["reason"] += f" This result is limited to catalog courses for the {strand_key} strand."
+            recommendations[0]["reason"] += f" This result is limited to catalog courses for the {strand_key} cluster."
         else:
             area_labels = {
                 "math": "Math", "science": "Science", "english": "English",
@@ -1288,7 +1294,7 @@ def recommend_course(subjects_text, current_course="", strand=""):
                 reverse=True,
             )[:2]
             area_summary = " and ".join(f"{name} ({grade:.1f})" for name, grade in strongest_areas)
-            recommendations[0]["reason"] += f" No strand was detected, so this ranking uses your highest grade areas: {area_summary}."
+            recommendations[0]["reason"] += f" No cluster was detected, so this ranking uses your highest grade areas: {area_summary}."
     for item in recommendations:
         item.pop("_ranking_score", None)
     return recommendations[:5]
@@ -1372,7 +1378,7 @@ def _grade_based_alternatives(subjects_text, strand):
                 "giving higher weight to your strongest areas (85% of the ranking) "
                 "and using all observed Math, Science, and English grades for the remaining 15% "
                 "to distinguish close matches. "
-                f"It is outside your {strand_key} catalog group; strand eligibility did not determine its ranking."
+                f"It is outside your {strand_key} catalog group; cluster eligibility did not determine its ranking."
             ),
             "category": categorize_course(sample["course"], sample.get("description", "")),
             "confidence": round(max(0.0, 100.0 - profile_distance), 2),
@@ -1572,7 +1578,7 @@ def init_database():
         try:
             saved_settings = json.loads(saved_settings_row[0])
             saved_strands = saved_settings.get("available_strands", [])
-            # Settings saved before the BE/STEM/ICTech/HT/ARSSH strands reset to the current strand list.
+            # Settings saved before the BE/STEM/ICTECH/HT/ARSSH clusters reset to the current cluster list.
             if not isinstance(saved_strands, list) or not saved_strands or any(strand not in SYSTEM_SETTING_STRANDS for strand in saved_strands):
                 saved_settings["available_strands"] = list(SYSTEM_SETTING_STRANDS)
                 cursor.execute(
@@ -3273,7 +3279,7 @@ async def admin_generate_report(req, data=None):
 
     strand = str(data.get("strand") or "").strip()
     if strand and strand not in SYSTEM_SETTING_STRANDS and strand != "Unspecified":
-        return JSONResponse({"success": False, "message": "Choose a configured academic strand."}, status_code=400)
+        return JSONResponse({"success": False, "message": "Choose a configured academic cluster."}, status_code=400)
 
     def parse_report_date(value, field_name):
         if not value:
@@ -3296,7 +3302,7 @@ async def admin_generate_report(req, data=None):
     to_instant = datetime.combine(to_date + timedelta(days=1), dt_time.min, APP_TIMEZONE) if to_date else None
 
     filters = {
-        "strand": strand or "All strands",
+        "strand": strand or "All clusters",
         "from_date": from_date.isoformat() if from_date else "Any",
         "to_date": to_date.isoformat() if to_date else "Any",
     }
@@ -3379,7 +3385,7 @@ async def admin_generate_report(req, data=None):
             {"label": "Deactivated accounts", "value": sum(row[6] for row in data_rows)},
         ]
         columns = [
-            {"key": "strand", "label": "Academic strand"},
+            {"key": "strand", "label": "Academic cluster"},
             {"key": "students", "label": "Student accounts"},
             {"key": "profiles", "label": "Profiles"},
             {"key": "average_gwa", "label": "Average GWA"},
@@ -3626,7 +3632,7 @@ def _admin_report_pdf(report):
                 f"{'Beginning' if filters['from_date'] == 'Any' else filters['from_date']} to "
                 f"{'Today' if filters['to_date'] == 'Any' else filters['to_date']}"
             )
-        canvas.drawString(left, A4[1] - 133, f"Strand: {filters['strand']}  |  Dates: {date_range}")
+        canvas.drawString(left, A4[1] - 133, f"Cluster: {filters['strand']}  |  Dates: {date_range}")
         canvas.drawRightString(right, 25, f"Page {doc.page}")
         canvas.restoreState()
 

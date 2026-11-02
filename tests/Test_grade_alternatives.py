@@ -19,7 +19,7 @@ def catalog(monkeypatch):
         {"course": "BS in Pharmacy", "features": [80, 97, 75, 75, 75, 75],
          "description": "Pharmacy", "strands": ["STEM"]},
         {"course": "BS in Information Technology", "features": [80, 75, 75, 97, 75, 75],
-         "description": "Information technology", "strands": ["ICTech"]},
+         "description": "Information technology", "strands": ["ICTECH"]},
     ]
     monkeypatch.setattr(app, "_course_training_data", lambda: courses)
     monkeypatch.setattr(app, "_get_system_settings", lambda: {

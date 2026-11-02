@@ -330,7 +330,7 @@ def test_guest_recommendations_use_reviewed_subjects(monkeypatch):
 def test_new_upload_recalculates_real_recommendations_and_persists_them(monkeypatch):
     catalog = [
         {"course": "BS in Computer Science", "features": [95, 85, 80, 95, 70, 80],
-         "description": "Computer science", "strands": ["STEM", "ICTech"]},
+         "description": "Computer science", "strands": ["STEM", "ICTECH"]},
         {"course": "BS in Hospitality Management", "features": [80, 80, 85, 70, 96, 80],
          "description": "Tourism and hospitality", "strands": ["HT"]},
         {"course": "BS in Nursing", "features": [80, 95, 80, 70, 70, 80],
@@ -433,7 +433,7 @@ def test_ocr_keeps_program_and_shs_strand_separate(strand):
     [
         ("STEM", "STEM"),
         ("BE", "BE"),
-        ("ICTech", "ICTech"),
+        ("ICTECH", "ICTECH"),
         ("HT", "HT"),
         ("ARSSH", "ARSSH"),
         ("Business Entrepreneurship", "BE"),
@@ -441,8 +441,8 @@ def test_ocr_keeps_program_and_shs_strand_separate(strand):
         ("Arts, Social Sciences, and Humanities", "ARSSH"),
         ("HUMMS", "ARSSH"),
         ("ABM", "BE"),
-        ("ICT", "ICTech"),
-        ("TVL-ICT", "ICTech"),
+        ("ICT", "ICTECH"),
+        ("TVL-ICT", "ICTECH"),
         ("HE", "HT"),
         ("Home Economics", "HT"),
         ("Home Economics (HE)", "HT"),
@@ -477,7 +477,7 @@ def test_ocr_recognizes_shs_strand_in_course_major_field(course_major, expected_
     [
         ("STEM", "STEM"),
         ("BE", "BE"),
-        ("ICTech", "ICTech"),
+        ("ICTECH", "ICTECH"),
         ("HT", "HT"),
         ("ARSSH", "ARSSH"),
         ("Business Entrepreneurship", "BE"),
@@ -487,8 +487,8 @@ def test_ocr_recognizes_shs_strand_in_course_major_field(course_major, expected_
         ("HUMSS", "ARSSH"),
         ("HUMMS", "ARSSH"),
         ("HUMS", "ARSSH"),
-        ("ICT", "ICTech"),
-        ("TVL-ICT", "ICTech"),
+        ("ICT", "ICTECH"),
+        ("TVL-ICT", "ICTECH"),
         ("HE", "HT"),
         ("he", "HT"),
         ("Home Economics", "HT"),
