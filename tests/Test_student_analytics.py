@@ -500,7 +500,7 @@ def test_known_strands_filter_out_non_aligned_courses(monkeypatch):
         {"course": "Bachelor of Arts in Multimedia Arts", "features": profile, "description": "Digital media and creative design", "strands": ["ICTECH"]},
     ]
     monkeypatch.setattr(app, "_course_training_data", lambda: training_data)
-    subjects = "Mathematics - 85\nEnglish - 85"
+    subjects = "Mathematics - 85\nEnglish - 85\nBusiness - 85\nBiology - 85\nComputer Programming - 85"
 
     for strand, expected in [
         ("STEM", "BS in Civil Engineering"),

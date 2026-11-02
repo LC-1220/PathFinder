@@ -3,10 +3,12 @@ import asyncio
 import json
 import html
 import inspect
+import logging
 from io import BytesIO
 import math
 import os
 import re
+import smtplib
 import tempfile
 import threading
 import time
@@ -14,6 +16,10 @@ from json import dumps
 from datetime import datetime, time as dt_time, timedelta, timezone
 from difflib import SequenceMatcher
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+from admin_security import (
+    SECURITY_SCHEMA, clear_lockout, clear_recovery_tokens, lock_security_row, mail_configuration,
+    new_token, record_failure, send_email, send_security_email, token_hash, utc_now,
+)
 
 # Standard Library Imports
 import cv2
@@ -77,6 +83,7 @@ ROLE_SUPER_ADMIN = ROLE_ADMIN
 PASSWORD_MIN_LENGTH = 8
 PASSWORD_MAX_BYTES = 72
 PASSWORD_POLICY_MESSAGE = "Use at least 8 characters with an uppercase letter and a symbol. Passwords must be no more than 72 UTF-8 bytes."
+ADMIN_PASSWORD_POLICY_MESSAGE = "Use at least 8 characters with an uppercase letter, a lowercase letter, a number, and a symbol. Passwords must be no more than 72 UTF-8 bytes."
 SYSTEM_SETTING_STRANDS = ("BE", "STEM", "ICTECH", "HT", "ARSSH")
 SYSTEM_SETTING_DEFAULTS = {
     "university_name": "University of Perpetual Help System Dalta Las Pinas",
@@ -396,15 +403,20 @@ def _hash_password(password):
     return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
 
-def _password_policy_error(password):
+def _password_policy_error(password, *, admin=False):
+    policy_message = ADMIN_PASSWORD_POLICY_MESSAGE if admin else PASSWORD_POLICY_MESSAGE
     if not isinstance(password, str) or len(password) < PASSWORD_MIN_LENGTH:
-        return "Password must be at least 8 characters long. " + PASSWORD_POLICY_MESSAGE
+        return "Password must be at least 8 characters long. " + policy_message
     if len(password.encode("utf-8")) > PASSWORD_MAX_BYTES:
-        return "Password is too long for secure hashing. " + PASSWORD_POLICY_MESSAGE
+        return "Password is too long for secure hashing. " + policy_message
     if not any(character.isupper() for character in password):
-        return "Password needs an uppercase letter. " + PASSWORD_POLICY_MESSAGE
+        return "Password needs an uppercase letter. " + policy_message
+    if admin and not any(character.islower() for character in password):
+        return "Password needs a lowercase letter. " + policy_message
+    if admin and not re.search(r"[0-9]", password):
+        return "Password needs a number. " + policy_message
     if not any(not character.isalnum() and not character.isspace() for character in password):
-        return "Password needs a symbol. " + PASSWORD_POLICY_MESSAGE
+        return "Password needs a symbol. " + policy_message
     return None
 
 #Password Verification
@@ -477,20 +489,30 @@ def _extract_subject_scores(subjects_text):
             continue
 
         lowered = label.lower()
-        if any(token in lowered for token in ["math", "algebra", "calculus", "statistics", "trigonometry", "geometry", "probability", "arithmetic", "precalculus", "equations", "analytics"]):
-            score_map["math"].append(grade)
-        elif any(token in lowered for token in ["science", "physics", "chemistry", "biology", "environment", "agriculture", "health", "anatomy", "physiology", "botany", "zoology", "geology", "astronomy", "ecology", "biochemistry", "microbiology", "meteorology", "oceanography", "earth science", "life science", "natural science"]):
-            score_map["science"].append(grade)
-        elif any(token in lowered for token in ["english", "communication", "speech", "writing", "literature", "oral", "reading", "nihongo", "japanese", "chinese", "korean", "spanish", "french", "german", "foreign language"]):
-            score_map["english"].append(grade)
-        elif any(token in lowered for token in ["program", "computer", "ict", "information", "technology", "software", "database", "digital", "web", "network", "coding"]):
+        if re.search(r"\b(?:social\s+(?:sciences?|studies)|political\s+sciences?)\b", lowered):
+            score_map["social"].append(grade)
+        elif re.search(r"\b(?:computer|computing|data|information)\s+sciences?\b|\bprogramming\s+languages?\b", lowered):
             score_map["technology"].append(grade)
-        elif any(token in lowered for token in ["business", "accounting", "management", "marketing", "economics", "entrepreneur", "finance", "tourism", "hospitality", "public administration", "legal"]):
+        elif any(token in lowered for token in ["math", "algebra", "calculus", "statistics", "trigonometry", "geometry", "probability", "arithmetic", "precalculus", "equations", "analytics"]):
+            score_map["math"].append(grade)
+        elif any(token in lowered for token in ["science", "physics", "chemistry", "biology", "biological", "environment", "agriculture", "health", "nursing", "medical", "patient care", "first aid", "nutrition", "anatomy", "physiology", "botany", "zoology", "geology", "astronomy", "ecology", "ecosystem", "fisheries", "forestry", "crop", "soil", "biochemistry", "microbiology", "meteorology", "oceanography", "earth science", "life science", "natural science"]):
+            score_map["science"].append(grade)
+        elif any(token in lowered for token in ["english", "communication", "speech", "writing", "literature", "oral", "reading", "nihongo", "japanese", "chinese", "korean", "spanish", "french", "german", "language"]):
+            score_map["english"].append(grade)
+        elif any(token in lowered for token in ["program", "computer", "ict", "information", "technology", "software", "database", "digital", "web", "network", "coding", "engineering", "electronics", "robotics"]):
+            score_map["technology"].append(grade)
+        elif any(token in lowered for token in ["business", "accounting", "management", "marketing", "economics", "entrepreneur", "finance", "tourism", "hospitality", "tour operations", "tour guiding", "travel services", "public administration", "legal"]):
             score_map["business"].append(grade)
-        elif any(token in lowered for token in ["history", "sociology", "psych", "political", "social", "criminology", "education", "culture", "governance", "filipino"]):
+        elif any(token in lowered for token in ["history", "sociology", "psych", "political", "social", "criminology", "education", "culture", "governance", "filipino", "philosophy", "humanities", "religion"]) or re.search(r"\b(?:arts?|design|music|media|creative|visual|performing)\b", lowered):
             score_map["social"].append(grade)
 
     return score_map
+
+
+def _contains_subject_term(label, term):
+    pattern = rf"(?<![a-z0-9]){re.escape(term)}(?![a-z0-9])"
+    return re.search(pattern, label) is not None
+
 
 #Feature Vector Construction from Extracted Subject Scores(from OCR text). Helps with Course Recommendation
 def _build_feature_vector(subjects_text):
@@ -508,6 +530,7 @@ def _build_feature_vector(subjects_text):
 def _extract_subject_field_scores(subjects_text):
     fields = {
         "quantitative": [],
+        "general_sciences": [],
         "physical_sciences": [],
         "life_sciences": [],
         "health_studies": [],
@@ -534,8 +557,8 @@ def _extract_subject_field_scores(subjects_text):
     cleaned_text = _clean_subjects_for_recommendation(source_text)
     lines = list(dict.fromkeys(cleaned_text.splitlines() + source_text.splitlines()))
     field_terms = {
-        "quantitative": ("math", "algebra", "calculus", "statistics", "trigonometry", "geometry", "probability"),
-        "physical_sciences": ("physics", "chemistry", "earth science", "physical science", "geology", "astronomy"),
+        "quantitative": ("math", "mathematics", "algebra", "calculus", "statistics", "trigonometry", "geometry", "probability"),
+        "physical_sciences": ("physics", "chemistry", "earth science", "earth and space science", "physical science", "geology", "astronomy"),
         "life_sciences": ("biology", "biological", "life science", "anatomy", "physiology", "botany", "zoology", "microbiology", "biochemistry"),
         "health_studies": ("health", "nursing", "medical", "patient care", "first aid", "nutrition"),
         "environmental_sciences": ("environment", "agriculture", "fisheries", "ecology", "ecosystem", "forestry", "crop", "soil"),
@@ -551,10 +574,10 @@ def _extract_subject_field_scores(subjects_text):
         "math_statistics": ("statistics", "probability"),
         "math_general": ("general mathematics", "mathematics in the modern world", "mathematics", "math"),
         "communication": ("english", "filipino", "language", "communication", "speech", "writing", "literature", "reading", "oral", "nihongo", "japanese", "chinese", "korean", "spanish", "french", "german"),
-        "business": ("business", "accounting", "management", "marketing", "economics", "entrepreneur", "finance", "tourism", "hospitality"),
+        "business": ("business", "account", "accounting", "accountancy", "management", "marketing", "economics", "entrepreneur", "entrepreneurship", "finance", "tourism", "hospitality"),
         "tourism_hospitality": ("tourism", "hospitality", "tour operations", "tour guiding", "travel services"),
         "social_humanities": ("history", "sociology", "psychology", "political", "social", "criminology", "education", "philosophy", "governance", "culture", "humanities", "religion"),
-        "arts_humanities": ("art", "design", "music", "media", "creative", "visual", "performing"),
+        "arts_humanities": ("art", "arts", "design", "music", "media", "creative", "visual", "performing"),
     }
     seen = set()
     for raw_line in lines:
@@ -574,8 +597,10 @@ def _extract_subject_field_scores(subjects_text):
         seen.add(key)
         matched_fields = []
         for field, terms in field_terms.items():
-            if any(term in label for term in terms):
+            if any(_contains_subject_term(label, term) for term in terms):
                 matched_fields.append(field)
+        if re.fullmatch(r"(?:(?:general|integrated|natural|basic)\s+)?sciences?(?:\s*\d+)?", label):
+            matched_fields.append("general_sciences")
         if "physical education" in label:
             matched_fields = [field for field in matched_fields if field != "health_studies"]
             matched_fields.append("physical_education")
@@ -584,9 +609,64 @@ def _extract_subject_field_scores(subjects_text):
     return fields
 
 
+COURSE_FIELD_PRIORITIES = {
+    "Engineering": {
+        "quantitative": "major", "general_sciences": "major", "physical_sciences": "major",
+        "technology": "supporting", "environmental_sciences": "supporting",
+    },
+    "Maritime & Transportation": {
+        "quantitative": "major", "physical_sciences": "major",
+        "technology": "supporting", "communication": "supporting",
+    },
+    "Allied Health": {
+        "life_sciences": "major", "health_studies": "major", "general_sciences": "major",
+        "physical_sciences": "major",
+        "communication": "supporting", "physical_education": "supporting",
+    },
+    "Agriculture": {
+        "life_sciences": "major", "environmental_sciences": "major", "general_sciences": "major",
+        "physical_sciences": "supporting", "quantitative": "supporting",
+    },
+    "Computer Studies": {
+        "technology": "major", "quantitative": "major", "communication": "supporting",
+    },
+    "Business & Management": {
+        "business": "major", "quantitative": "supporting", "communication": "supporting",
+    },
+    "Social Sciences & Education": {
+        "social_humanities": "major", "communication": "major",
+        "physical_education": "supporting",
+    },
+    "Hospitality & Tourism": {
+        "business": "major", "communication": "major", "foreign_languages": "major",
+        "arts_humanities": "supporting",
+    },
+    "Public Service & Governance": {
+        "social_humanities": "major", "communication": "supporting", "business": "supporting",
+    },
+    "Arts & Design": {
+        "arts_humanities": "major", "technology": "major", "communication": "supporting",
+    },
+    "Sports & Physical Education": {
+        "physical_education": "major", "life_sciences": "major",
+        "health_studies": "major", "communication": "supporting",
+    },
+}
+
+COURSE_PROFILE_FIELD_LABELS = {
+    "math": "Math and quantitative subjects",
+    "science": "Science subjects",
+    "english": "Communication and languages",
+    "technology": "Technology subjects",
+    "business": "Business subjects",
+    "social": "Social sciences and humanities",
+}
+
+
 def _course_subject_field_evidence(category, field_scores):
     field_labels = {
         "quantitative": "Math and quantitative subjects",
+        "general_sciences": "General sciences",
         "physical_sciences": "Physics and physical sciences",
         "life_sciences": "Biology and life sciences",
         "health_studies": "Health studies",
@@ -599,44 +679,7 @@ def _course_subject_field_evidence(category, field_scores):
         "social_humanities": "Social sciences and humanities",
         "arts_humanities": "Arts and creative subjects",
     }
-    field_priorities = {
-        "Engineering": {
-            "quantitative": "major", "physical_sciences": "major",
-            "technology": "supporting", "environmental_sciences": "supporting",
-        },
-        "Allied Health": {
-            "life_sciences": "major", "health_studies": "major", "physical_sciences": "major",
-            "communication": "supporting", "physical_education": "supporting",
-        },
-        "Agriculture": {
-            "life_sciences": "major", "environmental_sciences": "major",
-            "physical_sciences": "supporting", "quantitative": "supporting",
-        },
-        "Computer Studies": {
-            "technology": "major", "quantitative": "major", "communication": "supporting",
-        },
-        "Business & Management": {
-            "business": "major", "quantitative": "supporting", "communication": "supporting",
-        },
-        "Social Sciences & Education": {
-            "social_humanities": "major", "communication": "major",
-            "physical_education": "supporting",
-        },
-        "Hospitality & Tourism": {
-            "business": "major", "communication": "major", "foreign_languages": "major",
-            "arts_humanities": "supporting",
-        },
-        "Public Service & Governance": {
-            "social_humanities": "major", "communication": "supporting", "business": "supporting",
-        },
-        "Arts & Design": {
-            "arts_humanities": "major", "technology": "major", "communication": "supporting",
-        },
-        "Sports & Physical Education": {
-            "physical_education": "major", "life_sciences": "supporting",
-            "health_studies": "supporting", "communication": "supporting",
-        },
-    }.get(category, {})
+    field_priorities = COURSE_FIELD_PRIORITIES.get(category, {})
     return [
         {
             "field": field_labels[field],
@@ -648,13 +691,36 @@ def _course_subject_field_evidence(category, field_scores):
     ]
 
 
-def _course_subject_field_fit(category, field_scores):
+def _recommendation_field_evidence(category, field_scores, subject_scores, course_features):
     evidence = _course_subject_field_evidence(category, field_scores)
+    if category in COURSE_FIELD_PRIORITIES:
+        return evidence
+
+    values = [float(value) for value in course_features]
+    if not values or max(values) == min(values):
+        return []
+    highest = max(values)
+    return [
+        {
+            "field": COURSE_PROFILE_FIELD_LABELS[subject],
+            "grade": round(_average(subject_scores[subject]), 2),
+            "priority": "major",
+        }
+        for subject, value in zip(CATEGORY_NAMES, values)
+        if value == highest and subject_scores.get(subject)
+    ]
+
+
+def _field_evidence_fit(evidence):
     if not evidence:
         return None
     weights = {"major": 3.0, "supporting": 1.0}
     total_weight = sum(weights[item["priority"]] for item in evidence)
     return sum(item["grade"] * weights[item["priority"]] for item in evidence) / total_weight
+
+
+def _course_subject_field_fit(category, field_scores):
+    return _field_evidence_fit(_course_subject_field_evidence(category, field_scores))
 
 
 def _relative_subject_strength(subject_average, overall_average):
@@ -955,6 +1021,71 @@ def _observed_weighted_distance(subject_scores, course_features):
     return math.sqrt(weighted_squared_error / observed_weight)
 
 
+PROFILE_SHAPE_WEIGHT = 0.35
+PROFILE_SHAPE_FULL_SPREAD = 4.0
+FIELD_FIT_WEIGHT = 0.30
+MISSING_KEY_SUBJECT_PENALTY = 12.0
+MAX_SUBJECT_BONUS = 6.0
+CATEGORY_LABELS = {
+    "math": "Math", "science": "Science", "english": "English",
+    "technology": "Technology", "business": "Business", "social": "Social Studies",
+}
+
+
+# Compares which subjects the student is strongest in with which subjects the course emphasizes,
+# independent of overall grade level. Returns (fit 0-100 or None, student grade spread).
+def _profile_shape_alignment(subject_scores, course_features):
+    observed = [
+        (index, _average(subject_scores[category]))
+        for index, category in enumerate(CATEGORY_NAMES)
+        if subject_scores.get(category)
+    ]
+    if len(observed) < 2:
+        return None, 0.0
+    student = [grade for _, grade in observed]
+    course = [float(course_features[index]) for index, _ in observed]
+    student_mean = _average(student)
+    course_mean = _average(course)
+    student_dev = [grade - student_mean for grade in student]
+    course_dev = [value - course_mean for value in course]
+    student_norm = math.sqrt(sum(value ** 2 for value in student_dev))
+    course_norm = math.sqrt(sum(value ** 2 for value in course_dev))
+    spread = student_norm / math.sqrt(len(student_dev))
+    if student_norm < 1e-9 or course_norm < 1e-9:
+        return None, spread
+    cosine = sum(s * c for s, c in zip(student_dev, course_dev)) / (student_norm * course_norm)
+    return 50.0 + 50.0 * max(-1.0, min(1.0, cosine)), spread
+
+
+# Share of a course's above-average subject emphasis that the student has grades for.
+def _course_key_subject_coverage(subject_scores, course_features):
+    values = [float(value) for value in course_features]
+    course_mean = _average(values)
+    emphasis = [max(0.0, value - course_mean) for value in values]
+    total = sum(emphasis)
+    if total <= 0:
+        return 1.0, []
+    covered = sum(value for index, value in enumerate(emphasis) if subject_scores.get(CATEGORY_NAMES[index]))
+    missing = [
+        CATEGORY_LABELS[CATEGORY_NAMES[index]]
+        for index in sorted(range(len(emphasis)), key=lambda i: emphasis[i], reverse=True)
+        if emphasis[index] >= total * 0.2 and not subject_scores.get(CATEGORY_NAMES[index])
+    ]
+    return covered / total, missing
+
+
+def _course_key_areas(course_features, count=2):
+    ranked = sorted(range(len(CATEGORY_NAMES)), key=lambda index: float(course_features[index]), reverse=True)
+    return [CATEGORY_NAMES[index] for index in ranked[:count]]
+
+
+# Scores above 95 approach 100 smoothly, so strong matches stay distinguishable instead of tying at 100%.
+def _display_match_score(ranking_score):
+    if ranking_score <= 95.0:
+        return round(max(0.0, ranking_score), 2)
+    return round(min(99.99, 95.0 + 5.0 * (1.0 - math.exp(-(ranking_score - 95.0) / 5.0))), 2)
+
+
 #Core Grade Fit Calculation (compares student's core feature grades with course core features)
 def _core_grade_fit(student_features, course_features):
     observed = [value for value in student_features[:3] if value > 0]
@@ -966,30 +1097,35 @@ def _core_grade_fit(student_features, course_features):
 
 #Course Categorization Based on Name and Description (assigns a course to a predefined category)
 #TODO:try to move this area to SupaBase to Reduce hardcoded course categorization   
+COURSE_CATEGORY_RULES = (
+    ("Allied Health", ("nurse", "health", "medical", "pharm", "midwife", "clinical", "medtech", "radiologic", "respiratory", "nutrition", "dietetic", "biology", "biological"), ("health", "patient", "clinical", "nurse", "medical", "laboratory", "nutrition", "therapy", "biology", "biological science")),
+    ("Computer Studies", ("computer", "information technology", "software", "ict", "bsit", "bscs", "data", "systems", "programming", "digital"), ("computer", "software", "programming", "information technology", "ict", "systems", "database", "digital")),
+    ("Sports & Physical Education", ("sports", "sport science", "physical education", "athletic", "fitness", "exercise", "kinesiology"), ("sports science", "athletic conditioning", "physical education", "fitness instruction", "kinesiology")),
+    ("Engineering", ("engineer", "civil", "mechanical", "electrical", "chemical", "architecture", "construction"), ("engineering", "infrastructure", "construction", "architecture")),
+    ("Maritime & Transportation", ("marine transportation", "maritime transport", "nautical science"), ("maritime", "navigation", "ship operations", "seafaring")),
+    ("Agriculture", ("agriculture", "fisheries", "farm", "crop", "soil", "environmental science", "ecosystem", "sustainability", "forest"), ("agriculture", "fisheries", "farm", "crop", "soil", "environmental science", "ecosystem", "sustainability", "forest")),
+    ("Hospitality & Tourism", ("tourism", "hotel", "hospitality", "travel", "culinary"), ("tourism", "hospitality", "travel", "service")),
+    ("Business & Management", ("business", "management", "account", "accounting", "marketing", "finance", "administration", "economics", "entrepreneur"), ("business", "management", "accounting", "finance", "marketing", "operations")),
+    ("Social Sciences & Education", ("education", "teacher", "teaching", "psychology", "social", "humanities", "communication"), ("education", "teaching", "psychology", "social", "communication", "humanities")),
+    ("Public Service & Governance", ("law", "political", "public administration", "governance", "criminology"), ("law", "public service", "governance", "politics")),
+    ("Arts & Design", ("art", "design", "architecture", "creative", "media"), ("design", "creative", "art", "visual")),
+)
+
+
 def categorize_course(course_name, description=""):
     name = (course_name or "").lower()
     desc = (description or "").lower()
 
-    if any(tok in name for tok in ("nurse", "health", "medical", "pharm", "midwife", "clinical", "medtech", "radiologic", "respiratory", "nutrition", "dietetic", "biology", "biological")) or any(tok in desc for tok in ("health", "patient", "clinical", "nurse", "medical", "laboratory", "nutrition", "therapy", "biology", "biological science")):
-        return "Allied Health"
-    if any(tok in name for tok in ("computer", "information technology", "software", "ict", "bsit", "bscs", "data", "systems", "programming", "digital")) or any(tok in desc for tok in ("computer", "software", "programming", "information technology", "ict", "systems", "database", "digital")):
-        return "Computer Studies"
-    if any(tok in name for tok in ("sports", "sport science", "physical education", "athletic", "fitness", "exercise", "kinesiology")) or any(tok in desc for tok in ("sports science", "athletic conditioning", "physical education", "fitness instruction", "kinesiology")):
-        return "Sports & Physical Education"
-    if any(tok in name for tok in ("engineer", "civil", "mechanical", "electrical", "chemical", "architecture", "construction")) or any(tok in desc for tok in ("engineering", "infrastructure", "construction", "architecture")):
+    # Degree names are more reliable than description words, so every name rule is checked first
+    # (e.g. "Criminology" mentions justice "systems" and "Biomedical Engineering" contains "medical").
+    if "engineer" in name or "aircraft" in name or "aviation" in name:
         return "Engineering"
-    if any(tok in name for tok in ("agriculture", "fisheries", "farm", "crop", "soil", "environmental science", "ecosystem", "sustainability", "forest")) or any(tok in desc for tok in ("agriculture", "fisheries", "farm", "crop", "soil", "environmental science", "ecosystem", "sustainability", "forest")):
-        return "Agriculture"
-    if any(tok in name for tok in ("tourism", "hotel", "hospitality", "travel", "culinary")) or any(tok in desc for tok in ("tourism", "hospitality", "travel", "service")):
-        return "Hospitality & Tourism"
-    if any(tok in name for tok in ("business", "management", "account", "accounting", "marketing", "finance", "administration", "economics", "entrepreneur")) or any(tok in desc for tok in ("business", "management", "accounting", "finance", "marketing", "operations")):
-        return "Business & Management"
-    if any(tok in name for tok in ("education", "teacher", "teaching", "psychology", "social", "humanities", "communication")) or any(tok in desc for tok in ("education", "teaching", "psychology", "social", "communication", "humanities")):
-        return "Social Sciences & Education"
-    if any(tok in name for tok in ("law", "political", "public administration", "governance", "criminology")) or any(tok in desc for tok in ("law", "public service", "governance", "politics")):
-        return "Public Service & Governance"
-    if any(tok in name for tok in ("art", "design", "architecture", "creative", "media")) or any(tok in desc for tok in ("design", "creative", "art", "visual")):
-        return "Arts & Design"
+    for category, name_tokens, _ in COURSE_CATEGORY_RULES:
+        if any(tok in name for tok in name_tokens):
+            return category
+    for category, _, description_tokens in COURSE_CATEGORY_RULES:
+        if any(tok in desc for tok in description_tokens):
+            return category
     return "Other"
 
 #  Infer Academic Cluster Based on Course Name (assigns a cluster like BE, STEM, ICTECH, HT, ARSSH, or Other) 
@@ -1026,6 +1162,7 @@ def _course_match_reason(course_name, category, strongest, strand):
         "Hospitality & Tourism": "communication, service, and organized operations",
         "Public Service & Governance": "social awareness, communication, and civic problem-solving",
         "Arts & Design": "communication, creativity, and visual thinking",
+        "Sports & Physical Education": "fitness, movement, and life and health sciences",
     }.get(category, "your overall academic profile")
     strength_text = ", ".join(strongest[:2]) if strongest else "your balanced grades"
     strand_text = f" It is also compatible with your {strand} cluster." if strand else ""
@@ -1160,14 +1297,15 @@ def _recommendation_subjects_only(subjects_text):
     )
 
 
-# Recommend only courses cataloged for the student's cluster.
-def recommend_course(subjects_text, current_course="", strand=""):
+def _rank_course_recommendations(subjects_text, current_course="", strand="", *, outside_strand=False):
     subjects_text = _recommendation_subjects_only(subjects_text)
     training_data = _course_training_data()
     if _is_degree_program(strand):
         strand = ""
     strand_text = str(strand or "").strip()
     strand_key = _recommendation_strand_code(strand)
+    if outside_strand and not strand_key:
+        return []
     missing_strand_values = {"other", "unknown", "not detected", "not available", "not specified", "n/a", "na", "none"}
     if strand_text and not strand_key and strand_text.casefold() not in missing_strand_values and not _is_retired_strand(strand_text):
         return []
@@ -1201,14 +1339,17 @@ def recommend_course(subjects_text, current_course="", strand=""):
         "math_general": "General Mathematics",
         "physics": "Physics",
     }
+    # General Mathematics is in every engineering focus, so only specific subtopics can single out a program.
     observed_math_subjects = {
         field: _average(field_scores[field])
         for field in math_subject_labels
-        if field_scores[field]
+        if field_scores[field] and field != "math_general"
     }
     highest_math_subject = max(observed_math_subjects, key=observed_math_subjects.get) if observed_math_subjects else None
     highest_math_grade = observed_math_subjects.get(highest_math_subject) if highest_math_subject else None
     math_subject_strength = _relative_subject_strength(highest_math_grade, overall_grade_average)
+    observed_areas = [category for category in CATEGORY_NAMES if subject_scores[category]]
+    student_top_area = max(observed_areas, key=lambda category: _average(subject_scores[category])) if len(observed_areas) > 1 else None
     recommendations = []
     for sample in training_data:
         distance = _observed_weighted_distance(subject_scores, sample["features"])
@@ -1216,27 +1357,63 @@ def recommend_course(subjects_text, current_course="", strand=""):
             continue
         category = categorize_course(sample["course"], sample.get("description", ""))
         strand_alignment = bool(strand_key and strand_key in sample.get("strands", []))
-        if strand_key and not strand_alignment:
+        if strand_key and strand_alignment == outside_strand:
             continue
-        field_evidence = _course_subject_field_evidence(category, field_scores)
-        field_fit = _course_subject_field_fit(category, field_scores)
+        field_evidence = _recommendation_field_evidence(
+            category, field_scores, subject_scores, sample["features"]
+        )
+        major_evidence = [entry for entry in field_evidence if entry["priority"] == "major"]
+        # A similar reference profile cannot qualify a course on supporting grades alone.
+        if not major_evidence:
+            continue
+        field_fit = _field_evidence_fit(field_evidence)
+        major_fit = _average([entry["grade"] for entry in major_evidence])
         grade_similarity = max(0.0, 100.0 - distance)
-        confidence = grade_similarity
-        reason = _course_match_reason(sample["course"], category, strongest, strand)
-        ranking_score = confidence
-        if field_fit is not None:
-            confidence = confidence * 0.8 + field_fit * 0.2
-            reason += f" Your grades in related subject fields average {field_fit:.1f}."
-            ranking_score = confidence
+        reason = _course_match_reason(
+            sample["course"], category, strongest, "" if outside_strand else strand
+        )
+        major_summary = ", ".join(
+            f"{entry['field']} ({entry['grade']:.1f})" for entry in major_evidence
+        )
+        if category in COURSE_FIELD_PRIORITIES:
+            reason += f" Your major-related grades include {major_summary}."
+        else:
+            reason += f" Your grades match the course's highest reference area: {major_summary}."
+        shape_fit, student_spread = _profile_shape_alignment(subject_scores, sample["features"])
+        # A flat report card says little about relative strengths, so shape counts less.
+        shape_weight = PROFILE_SHAPE_WEIGHT * min(1.0, student_spread / PROFILE_SHAPE_FULL_SPREAD) if shape_fit is not None else 0.0
+        ranking_score = (
+            grade_similarity * (1.0 - shape_weight - FIELD_FIT_WEIGHT)
+            + (shape_fit or 0.0) * shape_weight
+            + major_fit * FIELD_FIT_WEIGHT
+        )
+        reason += f" Your grades in related subject fields average {field_fit:.1f}."
+        if shape_fit is not None and shape_weight >= PROFILE_SHAPE_WEIGHT * 0.5 and student_top_area:
+            key_areas = _course_key_areas(sample["features"])
+            if student_top_area in key_areas:
+                reason += f" Your strongest area, {CATEGORY_LABELS[student_top_area]}, is one of this course's key subjects."
+            elif shape_fit < 50:
+                reason += (
+                    f" This course leans on {' and '.join(CATEGORY_LABELS[area] for area in key_areas)}, "
+                    f"while your strongest area is {CATEGORY_LABELS[student_top_area]}."
+                )
+        coverage, missing_key_areas = _course_key_subject_coverage(subject_scores, sample["features"])
+        ranking_score -= (1.0 - coverage) * MISSING_KEY_SUBJECT_PENALTY
+        if missing_key_areas:
+            reason += (
+                f" No {' or '.join(missing_key_areas)} grades were found for this course's key "
+                f"{'area' if len(missing_key_areas) == 1 else 'areas'}, so this match is less certain."
+            )
+        subject_bonus = 0.0
         if sample["course"] == "BS in Hospitality Management" and tourism_average >= 80:
             tourism_priority = min(12.0, (tourism_average - 80) * 0.6)
-            ranking_score += tourism_priority
+            subject_bonus += tourism_priority
             reason += f" Your tourism-related subject average is {tourism_average:.1f}, prioritizing this hospitality match."
         if category == "Hospitality & Tourism" and foreign_language_average is not None and foreign_language_strength > 0:
-            ranking_score += 4.0 + foreign_language_strength
+            subject_bonus += 4.0 + foreign_language_strength
             reason += f" Your foreign-language subject average is {foreign_language_average:.1f}, supporting this tourism and hospitality match."
         if category == "Allied Health" and biology_average is not None:
-            ranking_score += biology_strength
+            subject_bonus += biology_strength
             if biology_strength:
                 direction = "above" if biology_strength > 0 else "below"
                 reason += f" Your Biology subject average of {biology_average:.1f} is {direction} your overall subject average, influencing this health-care match."
@@ -1244,21 +1421,23 @@ def recommend_course(subjects_text, current_course="", strand=""):
         chemistry_related_terms = ("chemistry", "chemical", "biochemistry", "pharmacy", "pharmaceutical", "medical technology")
         is_chemistry_related = any(term in course_text for term in chemistry_related_terms)
         if is_chemistry_related and chemistry_average is not None:
-            ranking_score += chemistry_strength
+            subject_bonus += chemistry_strength
             if chemistry_strength:
                 direction = "above" if chemistry_strength > 0 else "below"
                 reason += f" Your Chemistry subject average of {chemistry_average:.1f} is {direction} your overall subject average, influencing this chemistry-related match."
         engineering_focus = ENGINEERING_SUBJECT_FOCUS.get(sample["course"], set())
         if highest_math_subject in engineering_focus and math_subject_strength > 0:
-            ranking_score += 4.0 + math_subject_strength
+            subject_bonus += 4.0 + math_subject_strength
             reason += f" Your highest math-related subject is {math_subject_labels[highest_math_subject]} ({highest_math_grade:.1f}), supporting this engineering match."
+        # Capped so specific-subject boosts reorder close matches without pinning scores at 100%.
+        ranking_score += max(-MAX_SUBJECT_BONUS, min(MAX_SUBJECT_BONUS, subject_bonus))
         item = {
             "course": sample["course"],
             "description": sample.get("description", ""),
             "reason": reason,
             "category": category,
             "confidence": round(grade_similarity, 2),
-            "match_score": round(max(0.0, min(100.0, ranking_score)), 2),
+            "match_score": _display_match_score(ranking_score),
             "core_grade_fit": round(_core_grade_fit(features, sample["features"]), 2),
             "field_fit": round(field_fit, 2) if field_fit is not None else None,
             "subject_field_evidence": field_evidence,
@@ -1268,6 +1447,12 @@ def recommend_course(subjects_text, current_course="", strand=""):
         }
         if strand_alignment:
             item["reason"] += f" It aligns with the {strand_key} cluster."
+        elif outside_strand:
+            item["recommendation_basis"] = "grade_alternative"
+            item["reason"] += (
+                f" It is outside your {strand_key} cluster catalog; "
+                "its ranking uses your grades rather than cluster eligibility."
+            )
         recommendations.append(item)
 
     recommendations.sort(
@@ -1275,7 +1460,7 @@ def recommend_course(subjects_text, current_course="", strand=""):
         reverse=True,
     )
 
-    if recommendations:
+    if recommendations and not outside_strand:
         recommendations[0]["strand_grade_based"] = bool(strand_key)
         if strand_key:
             recommendations[0]["reason"] += f" This result is limited to catalog courses for the {strand_key} cluster."
@@ -1297,7 +1482,12 @@ def recommend_course(subjects_text, current_course="", strand=""):
             recommendations[0]["reason"] += f" No cluster was detected, so this ranking uses your highest grade areas: {area_summary}."
     for item in recommendations:
         item.pop("_ranking_score", None)
-    return recommendations[:5]
+    return recommendations
+
+
+# Recommend only courses cataloged for the student's cluster.
+def recommend_course(subjects_text, current_course="", strand=""):
+    return _rank_course_recommendations(subjects_text, current_course, strand)[:5]
 
 
 def _recommendation_limit():
@@ -1320,83 +1510,7 @@ def _limit_recommendations(payload, limit=None):
 
 
 def _grade_based_alternatives(subjects_text, strand):
-    subjects_text = _recommendation_subjects_only(subjects_text)
-    non_core_subjects = re.compile(
-        r"\b(?:nihongo|japanese|chinese|korean|spanish|french|german|"
-        r"foreign\s+language|filipino|computer|programming|ict|"
-        r"social\s+sciences?|political\s+science|business|accounting|"
-        r"entrepreneurship|tourism|hospitality)\b",
-        re.IGNORECASE,
-    )
-    subjects_text = "\n".join(
-        line for line in subjects_text.splitlines()
-        if not non_core_subjects.search(line)
-    )
-    strand_key = _recommendation_strand_code(strand)
-    if not strand_key:
-        return []
-    subject_scores = _extract_subject_scores(subjects_text)
-    observed = [
-        (index, category, _average(subject_scores[category]))
-        for index, category in enumerate(CATEGORY_NAMES[:3])
-        if subject_scores[category]
-    ]
-    if not observed:
-        return []
-    lowest_grade = min(grade for _, _, grade in observed)
-    # Relative grade strengths supply the weights, not course names or strand rules.
-    weighted = [
-        (index, (grade - lowest_grade + 1) ** 2, grade)
-        for index, _, grade in observed
-    ]
-    total_weight = sum(weight for _, weight, _ in weighted)
-    features = _build_feature_vector(subjects_text)
-    strengths = sorted(observed, key=lambda entry: entry[2], reverse=True)[:2]
-    strength_text = ", ".join(f"{category.title()} ({grade:.1f})" for _, category, grade in strengths)
-    alternatives = []
-    for sample in _course_training_data():
-        if strand_key in sample.get("strands", []):
-            continue
-        distance = math.sqrt(sum(
-            weight * (grade - sample["features"][index]) ** 2
-            for index, weight, grade in weighted
-        ) / total_weight)
-        profile_distance = math.sqrt(sum(
-            (grade - sample["features"][index]) ** 2
-            for index, _, grade in observed
-        ) / len(observed))
-        # Strengths dominate; overall fit separates otherwise similar candidates.
-        ranking_distance = 0.85 * distance + 0.15 * profile_distance
-        match_score = round(max(0.0, 100.0 - ranking_distance), 2)
-        alternatives.append({
-            "course": sample["course"],
-            "description": sample.get("description", ""),
-            "reason": (
-                f"Your strongest graded areas are {strength_text}. "
-                "Only Math, Science, English, and their recognized branches are used to compare "
-                "your grades with the course's stored academic profile, "
-                "giving higher weight to your strongest areas (85% of the ranking) "
-                "and using all observed Math, Science, and English grades for the remaining 15% "
-                "to distinguish close matches. "
-                f"It is outside your {strand_key} catalog group; cluster eligibility did not determine its ranking."
-            ),
-            "category": categorize_course(sample["course"], sample.get("description", "")),
-            "confidence": round(max(0.0, 100.0 - profile_distance), 2),
-            "match_score": match_score,
-            "core_grade_fit": round(_core_grade_fit(features, sample["features"]), 2),
-            "strand_alignment": False,
-            "strand_label": strand_key,
-            "recommendation_basis": "grade_alternative",
-            "_ranking_distance": ranking_distance,
-            "_profile_distance": profile_distance,
-        })
-    alternatives.sort(key=lambda item: (
-        item["_ranking_distance"], item["_profile_distance"], item["course"].casefold(),
-    ))
-    for item in alternatives:
-        item.pop("_ranking_distance")
-        item.pop("_profile_distance")
-    return alternatives
+    return _rank_course_recommendations(subjects_text, strand=strand, outside_strand=True)
 
 
 def _configured_recommendations(subjects_text, current_course="", strand=""):
@@ -1446,7 +1560,7 @@ def _build_student_performance_analytics(course_name, subjects_text):
         selected_course = training_data[0]["course"]
 
     course_profile = _course_average_profile(selected_course)
-    student_scores = _extract_subject_scores(subjects_text)
+    student_scores = _extract_subject_scores(_recommendation_subjects_only(subjects_text))
 
     subject_breakdown = []
     for subject in CATEGORY_NAMES:
@@ -1556,6 +1670,8 @@ def init_database():
     cursor.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ")
     cursor.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN NOT NULL DEFAULT FALSE")
     cursor.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS username TEXT")
+    cursor.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS auth_version INTEGER NOT NULL DEFAULT 0")
+    cursor.execute(SECURITY_SCHEMA)
     cursor.execute("ALTER TABLE users ALTER COLUMN email DROP NOT NULL")
     cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS users_username_lower_unique ON users (LOWER(username)) WHERE username IS NOT NULL")
     cursor.execute(
@@ -1700,7 +1816,7 @@ def init_database():
         cursor.execute("SELECT id, COALESCE(role, 'student') FROM users WHERE email = ?", (ADMIN_USERNAME,))
         bootstrap_user = cursor.fetchone()
         if not bootstrap_user:
-            password_error = _password_policy_error(ADMIN_PASSWORD)
+            password_error = _password_policy_error(ADMIN_PASSWORD, admin=True)
             if password_error:
                 conn.close()
                 raise RuntimeError(f"BOOTSTRAP_ADMIN_PASSWORD does not meet policy: {password_error}")
@@ -1757,12 +1873,12 @@ def _is_admin_session(sess, allow_password_change=False):
     try:
         conn = _db_conn()
         cursor = conn.cursor()
-        cursor.execute("SELECT COALESCE(role, 'student'), COALESCE(is_active, TRUE), COALESCE(must_change_password, FALSE) FROM users WHERE id = ?", (user_id,))
+        cursor.execute("SELECT COALESCE(role, 'student'), COALESCE(is_active, TRUE), COALESCE(must_change_password, FALSE), auth_version FROM users WHERE id = ?", (user_id,))
         row = cursor.fetchone()
         conn.close()
     except Exception:
         return False
-    if not row or not row[1] or row[0] not in (ROLE_ADMIN, ROLE_SEMI_ADMIN):
+    if not row or not row[1] or row[0] not in (ROLE_ADMIN, ROLE_SEMI_ADMIN) or row[3] != sess.get("auth_version", 0):
         sess.clear()
         return False
     sess["role"] = row[0]
@@ -1901,6 +2017,7 @@ _HTML_PAGE_METHODS = {
     "/admin/logout": {"GET"},
     "/admin": {"GET"},
     "/admin/dashboard": {"GET"},
+    "/admin/recovery-verification": {"GET"},
     "/admin/force-password-change": {"GET"},
     "/admin/students": {"GET"},
     "/google-login": {"GET"},
@@ -1927,10 +2044,16 @@ class _FirstLoginPasswordChangeMiddleware:
             session = scope.get("session", {})
             path = scope.get("path", "")
             allowed_paths = {
+                "/",
+                "/login",
                 "/admin/force-password-change",
                 "/admin/dashboard",
+                "/admin/recovery-verification",
                 "/admin/change_password",
                 "/api/v1/admin/change_password",
+                "/api/v1/admin/forgot-password",
+                "/api/v1/admin/verify-recovery",
+                "/api/v1/admin/reset-password",
                 "/admin/logout",
                 "/logout",
             }
@@ -1973,6 +2096,11 @@ def login_page_alias(req):
     return _render(req, "Login.html")
 
 
+@fastapi_route("/admin/recovery-verification", methods=["GET"])
+def admin_recovery_verification_page(req):
+    return _render(req, "Login.html", recovery_verification_page=True)
+
+
 # Define the route for the home page
 @fastapi_route("/home", methods=["GET"])
 def home(req):
@@ -1982,6 +2110,16 @@ def home(req):
         "StudentManagement.html",
         home_mode=True,
         is_guest=bool(sess.get("is_guest")),
+        can_email_results=_can_email_results(sess),
+    )
+
+
+def _can_email_results(sess):
+    return bool(
+        sess.get("user_id")
+        and not sess.get("is_guest")
+        and sess.get("auth_provider") == "google"
+        and sess.get("email")
     )
 
 
@@ -2077,48 +2215,63 @@ async def login(req):
     data = await req.json()
     identifier = str(data.get("username") or data.get("email") or "").strip().lower()
     password = data.get("password", "")
+    if not identifier or not isinstance(password, str) or not password:
+        return JSONResponse({"success": False, "message": "Enter your username and password."}, status_code=400)
 
     conn = _db_conn()
     cursor = conn.cursor()
     cursor.execute(
         """
-        SELECT id, name, password_hash, COALESCE(role, 'student'), COALESCE(profile_picture, ''), COALESCE(is_active, TRUE), COALESCE(must_change_password, FALSE), email, username
+        SELECT id, name, password_hash, COALESCE(role, 'student'), COALESCE(profile_picture, ''), COALESCE(is_active, TRUE), COALESCE(must_change_password, FALSE), email, username, auth_version
         FROM users
         WHERE LOWER(email) = ? OR LOWER(username) = ?
         """,
         (identifier, identifier),
     )
     result = cursor.fetchone()
-    conn.close()
-
     if not result:
+        conn.close()
         return JSONResponse({"success": False, "message": "Account not found"})
 
-    user_id, name, stored_hash, role, profile_picture, is_active, must_change_password, email, username = result
+    user_id, name, stored_hash, role, profile_picture, is_active, must_change_password, email, username, auth_version = result
 
     if not is_active:
+        conn.close()
         return JSONResponse({"success": False, "message": "This account has been deactivated."})
 
+    is_admin = role in (ROLE_ADMIN, ROLE_SEMI_ADMIN)
     try:
-        valid = _check_password(stored_hash, password)
-    except Exception:
-        valid = False
-
-    if not valid:
-        return JSONResponse({"success": False, "message": "Incorrect Password"})
-
-    conn = _db_conn()
-    conn.execute("UPDATE users SET last_login_at = CURRENT_TIMESTAMP WHERE id = ?", (user_id,))
-    conn.commit()
-    conn.close()
+        if is_admin:
+            failures, level, locked_until = lock_security_row(cursor, user_id)
+            now = utc_now()
+            if locked_until and locked_until > now:
+                return _lockout_response(math.ceil((locked_until - now).total_seconds()))
+            # Re-read after acquiring the account lock in case recovery changed the password.
+            cursor.execute("SELECT password_hash, auth_version FROM users WHERE id = ?", (user_id,))
+            stored_hash, auth_version = cursor.fetchone()
+        if not _check_password(stored_hash, password):
+            retry_after = record_failure(cursor, user_id, failures, level, utc_now()) if is_admin else 0
+            conn.commit()
+            if retry_after:
+                return _lockout_response(retry_after)
+            message = f"Incorrect password. {3 - (failures + 1)} attempt(s) remaining before cooldown." if is_admin else "Incorrect Password"
+            return JSONResponse({"success": False, "message": message})
+        if is_admin:
+            clear_lockout(cursor, user_id)
+        cursor.execute("UPDATE users SET last_login_at = CURRENT_TIMESTAMP WHERE id = ?", (user_id,))
+        conn.commit()
+    finally:
+        conn.close()
 
     sess = req.session
+    sess.clear()
     sess["user_id"] = user_id
     sess["name"] = name
     sess["email"] = email or ""
     sess["username"] = username or ""
     sess["role"] = role
     sess["must_change_password"] = bool(must_change_password)
+    sess["auth_version"] = auth_version
     if role in (ROLE_ADMIN, ROLE_SEMI_ADMIN):
         sess["is_admin"] = True
         sess["admin_user"] = name or username or email
@@ -2136,6 +2289,253 @@ async def login(req):
         resp["semi_admin"] = True
         resp["must_change_password"] = bool(must_change_password)
     return JSONResponse(resp)
+
+
+def _lockout_response(seconds):
+    return JSONResponse(
+        {"success": False, "code": "admin_locked", "retry_after": seconds,
+         "message": f"Too many failed attempts. Try again in {seconds} seconds."},
+        status_code=429,
+        headers={"Retry-After": str(seconds)},
+    )
+
+
+def _mail_unavailable(*, not_configured=False):
+    return JSONResponse(
+        {"success": False,
+         "code": "email_not_configured" if not_configured else "email_delivery_failed",
+         "message": (
+             "Recovery email is not configured. The system owner must set SMTP_USERNAME, "
+             "SMTP_PASSWORD (Google App Password), and APP_BASE_URL in the server's .env, then restart the app."
+             if not_configured else
+             "Recovery email could not be sent. Please contact the system administrator or try again later."
+         )},
+        status_code=503,
+    )
+
+
+def _mail_delivery_error(exc):
+    if isinstance(exc, smtplib.SMTPAuthenticationError):
+        code = "smtp_authentication_failed"
+        message = (
+            "Google rejected the sender login. Check that SMTP_USERNAME is the Gmail account "
+            "that generated SMTP_PASSWORD, and use that account's current 16-character Google App Password."
+        )
+    elif isinstance(exc, smtplib.SMTPServerDisconnected):
+        code = "smtp_connection_closed"
+        message = (
+            "Google closed the SMTP connection during delivery. Verify the sender's Google App Password "
+            "and check that the network allows outgoing Gmail SMTP on port 587."
+        )
+    elif isinstance(exc, (OSError, TimeoutError)):
+        code = "smtp_connection_failed"
+        message = (
+            "Could not reach Gmail SMTP. Check the internet connection and confirm the network allows "
+            "outgoing Gmail SMTP on port 587."
+        )
+    else:
+        code = "email_delivery_failed"
+        message = "Recovery email delivery failed. Please try again or contact the system administrator."
+    return JSONResponse({"success": False, "code": code, "message": message}, status_code=503)
+
+
+@fastapi_route("/admin/recovery-email", methods=["GET"])
+def admin_recovery_email(req):
+    if not _is_admin_session(req.session):
+        return JSONResponse({"success": False, "message": "Admin session required."}, status_code=401)
+    conn = _db_conn()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT recovery_email, pending_email FROM admin_account_security WHERE user_id = ?", (req.session["user_id"],))
+        row = cursor.fetchone()
+        return JSONResponse({"success": True, "recovery_email": row[0] if row else None, "pending_email": row[1] if row else None})
+    finally:
+        conn.close()
+
+
+@fastapi_route("/admin/recovery-email", methods=["POST"])
+async def admin_set_recovery_email(req):
+    if not _is_admin_session(req.session):
+        return JSONResponse({"success": False, "message": "Admin session required."}, status_code=401)
+    data = await req.json()
+    email = str(data.get("email") or "").strip().lower()
+    password = data.get("current_password")
+    if not re.fullmatch(r"[a-z0-9](?:[a-z0-9.]*[a-z0-9])?@gmail\.com", email) or len(email) > 254:
+        return JSONResponse({"success": False, "message": "Enter a valid @gmail.com recovery address."}, status_code=400)
+    if not isinstance(password, str) or not password:
+        return JSONResponse({"success": False, "message": "Enter your current password to add or change recovery Gmail."}, status_code=400)
+    try:
+        mail_configuration()
+    except ValueError as exc:
+        logging.getLogger(__name__).error("%s", exc)
+        return _mail_unavailable(not_configured=True)
+    conn = _db_conn()
+    try:
+        cursor = conn.cursor()
+        user_id = req.session["user_id"]
+        failures, level, locked_until = lock_security_row(cursor, user_id)
+        now = utc_now()
+        if locked_until and locked_until > now:
+            return _lockout_response(math.ceil((locked_until - now).total_seconds()))
+        cursor.execute("SELECT password_hash, auth_version FROM users WHERE id = ?", (user_id,))
+        row = cursor.fetchone()
+        if not row or row[1] != req.session.get("auth_version", 0):
+            return JSONResponse({"success": False, "message": "Please sign in again."}, status_code=401)
+        if not _check_password(row[0], password):
+            retry_after = record_failure(cursor, user_id, failures, level, now)
+            conn.commit()
+            return _lockout_response(retry_after) if retry_after else JSONResponse(
+                {"success": False, "message": "Current password is incorrect."}, status_code=400,
+            )
+        cursor.execute("SELECT verification_sent_at FROM admin_account_security WHERE user_id = ?", (user_id,))
+        sent_at = cursor.fetchone()[0]
+        if sent_at and (now - sent_at).total_seconds() < 60:
+            return JSONResponse({"success": False, "message": "Wait one minute before requesting another verification email."}, status_code=429)
+        token, digest = new_token()
+        await asyncio.to_thread(send_security_email, email, token, "verify")
+        cursor.execute(
+            """UPDATE admin_account_security SET pending_email = ?, verification_hash = ?,
+               verification_expires_at = ?, verification_sent_at = ? WHERE user_id = ?""",
+            (email, digest, now + timedelta(minutes=30), now, user_id),
+        )
+        conn.commit()
+        return JSONResponse({"success": True, "message": "Verification link sent. Open it within 30 minutes to confirm your recovery Gmail."})
+    except (smtplib.SMTPException, OSError, ValueError) as exc:
+        logging.getLogger(__name__).error("Recovery verification email failed (%s).", type(exc).__name__)
+        return _mail_delivery_error(exc)
+    finally:
+        conn.close()
+
+
+@fastapi_route("/admin/forgot-password", methods=["POST"])
+async def admin_forgot_password(req):
+    data = await req.json()
+    identifier = str(data.get("username") or "").strip().lower()
+    if not identifier or len(identifier) > 320:
+        return JSONResponse({"success": False, "message": "Enter your admin username, sign-in email, or verified recovery Gmail."}, status_code=400)
+    try:
+        mail_configuration()
+    except ValueError as exc:
+        logging.getLogger(__name__).error("%s", exc)
+        return _mail_unavailable(not_configured=True)
+    response = JSONResponse({
+        "success": True,
+        "message": "If an active admin account matches and has a verified recovery Gmail, a reset link will be sent. Check your inbox and spam folder. Allow one minute before requesting another link.",
+    })
+    conn = _db_conn()
+    try:
+        cursor = conn.cursor()
+        # Select the account before checking recovery eligibility so a login
+        # identifier cannot fall through to another admin's recovery Gmail.
+        cursor.execute(
+            """SELECT s.user_id, s.recovery_email, s.reset_sent_at
+               FROM admin_account_security s JOIN users u ON u.id = s.user_id
+               WHERE s.user_id = (
+                   SELECT candidate.id
+                   FROM users candidate
+                   LEFT JOIN admin_account_security recovery ON recovery.user_id = candidate.id
+                   WHERE candidate.role IN (?, ?)
+                     AND (LOWER(candidate.username) = ? OR LOWER(candidate.email) = ?
+                          OR LOWER(recovery.recovery_email) = ?)
+                   ORDER BY CASE WHEN LOWER(candidate.username) = ? OR LOWER(candidate.email) = ?
+                                 THEN 0 ELSE 1 END, candidate.id
+                   LIMIT 1
+               )
+                 AND u.is_active = TRUE AND s.recovery_email IS NOT NULL
+               FOR UPDATE OF s""",
+            (ROLE_ADMIN, ROLE_SEMI_ADMIN, identifier, identifier, identifier, identifier, identifier),
+        )
+        row = cursor.fetchone()
+        now = utc_now()
+        if not row:
+            logging.getLogger(__name__).info("Password reset request did not match an active admin with verified recovery Gmail.")
+            return response
+        if row[2] and (now - row[2]).total_seconds() < 60:
+            logging.getLogger(__name__).info("Password reset email request throttled.")
+            return response
+        token, digest = new_token()
+        await asyncio.to_thread(send_security_email, row[1], token, "reset")
+        cursor.execute(
+            "UPDATE admin_account_security SET reset_hash = ?, reset_expires_at = ?, reset_sent_at = ? WHERE user_id = ?",
+            (digest, now + timedelta(minutes=15), now, row[0]),
+        )
+        conn.commit()
+        logging.getLogger(__name__).info("Password reset email accepted for delivery.")
+        return response
+    except (smtplib.SMTPException, OSError, ValueError) as exc:
+        logging.getLogger(__name__).error("Password reset email failed (%s).", type(exc).__name__)
+        return _mail_delivery_error(exc)
+    finally:
+        conn.close()
+
+
+async def _complete_admin_recovery(req, verification):
+    data = await req.json()
+    token = data.get("token")
+    if not isinstance(token, str) or not re.fullmatch(r"[A-Za-z0-9_-]{43}", token):
+        return JSONResponse({"success": False, "message": "This link is invalid or expired. Request a new link."}, status_code=400)
+    password = data.get("new_password")
+    if not verification:
+        error = _password_policy_error(password, admin=True) if isinstance(password, str) else "Enter a new password."
+        if error or password != data.get("confirm_password"):
+            return JSONResponse({"success": False, "message": error or "New passwords do not match."}, status_code=400)
+    conn = _db_conn()
+    try:
+        cursor = conn.cursor()
+        hash_column = "verification_hash" if verification else "reset_hash"
+        expiry_column = "verification_expires_at" if verification else "reset_expires_at"
+        cursor.execute(
+            f"""SELECT s.user_id, s.pending_email, s.{expiry_column}, u.password_hash, u.auth_version
+                FROM admin_account_security s JOIN users u ON u.id = s.user_id
+                WHERE s.{hash_column} = ? AND u.role IN (?, ?) AND u.is_active = TRUE
+                FOR UPDATE OF s""",
+            (token_hash(token), ROLE_ADMIN, ROLE_SEMI_ADMIN),
+        )
+        row = cursor.fetchone()
+        if not row or not row[2] or row[2] <= utc_now() or (verification and not row[1]):
+            return JSONResponse({"success": False, "message": "This link is invalid or expired. Request a new link."}, status_code=400)
+        if verification:
+            cursor.execute(
+                """UPDATE admin_account_security SET recovery_email = pending_email, pending_email = NULL,
+                   verification_hash = NULL, verification_expires_at = NULL,
+                   reset_hash = NULL, reset_expires_at = NULL WHERE user_id = ?""",
+                (row[0],),
+            )
+            message = "Recovery Gmail verified. You can now use Forgot password."
+        else:
+            if _check_password(row[3], password):
+                return JSONResponse({"success": False, "message": "Choose a password different from your current password."}, status_code=400)
+            cursor.execute(
+                "UPDATE users SET password_hash = ?, must_change_password = FALSE, auth_version = auth_version + 1 WHERE id = ?",
+                (_hash_password(password), row[0]),
+            )
+            clear_recovery_tokens(cursor, row[0])
+            clear_lockout(cursor, row[0])
+            message = "Password reset. Sign in with your new password."
+        conn.commit()
+        if not verification:
+            req.session.clear()
+            return JSONResponse({"success": True, "message": message})
+        return_to_dashboard = (
+            req.session.get("user_id") == row[0]
+            and req.session.get("role") in (ROLE_ADMIN, ROLE_SEMI_ADMIN)
+            and req.session.get("auth_version", 0) == row[4]
+        )
+        return JSONResponse({"success": True, "message": message, "return_to_dashboard": return_to_dashboard})
+    except UniqueViolation:
+        return JSONResponse({"success": False, "message": "That Gmail is already used by another admin. Add a different recovery Gmail in Account settings."}, status_code=400)
+    finally:
+        conn.close()
+
+
+@fastapi_route("/admin/verify-recovery", methods=["POST"])
+async def admin_verify_recovery(req):
+    return await _complete_admin_recovery(req, verification=True)
+
+
+@fastapi_route("/admin/reset-password", methods=["POST"])
+async def admin_reset_password(req):
+    return await _complete_admin_recovery(req, verification=False)
 
 
 @fastapi_route("/logout", methods=["GET"])
@@ -2257,6 +2657,191 @@ async def admin_save_system_settings(req):
     return JSONResponse({"success": True, "settings": settings})
 
 
+def _reset_course_catalog_cache():
+    global _COURSE_TRAINING_DATA_CACHE, _NEAREST_NEIGHBOR_MODEL
+    _COURSE_TRAINING_DATA_CACHE = None
+    _NEAREST_NEIGHBOR_MODEL = None
+
+
+def _validate_course_payload(data):
+    if not isinstance(data, dict):
+        raise ValueError("Invalid course details.")
+    course = " ".join(str(data.get("course") or "").split())
+    description = " ".join(str(data.get("description") or "").split())
+    if not 3 <= len(course) <= 200:
+        raise ValueError("Course name must be 3 to 200 characters.")
+    if not 10 <= len(description) <= 500:
+        raise ValueError("Description must be 10 to 500 characters.")
+    features = data.get("features")
+    if not isinstance(features, list) or len(features) != len(CATEGORY_NAMES):
+        raise ValueError("Enter a score for each of the six subject areas.")
+    scores = []
+    for name, value in zip(CATEGORY_NAMES, features):
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or not 0 <= value <= 100:
+            raise ValueError(f"The {name} score must be a number from 0 to 100.")
+        scores.append(round(float(value), 2))
+    strands = data.get("strands")
+    if not isinstance(strands, list) or not strands:
+        raise ValueError("Select at least one academic cluster.")
+    strands = sorted({str(code).upper() for code in strands})
+    if any(code not in SYSTEM_SETTING_STRANDS for code in strands):
+        raise ValueError("Select only supported academic clusters.")
+    return course, description, scores, strands
+
+
+def _parse_course_id(course_id):
+    try:
+        value = int(course_id)
+    except (TypeError, ValueError):
+        return None
+    return value if value > 0 else None
+
+
+def _stored_strand_codes(cursor, codes):
+    # Older databases store ICTECH as "ICTech"; match whatever spelling the check constraint allows.
+    cursor.execute(
+        """
+        SELECT pg_get_constraintdef(oid) FROM pg_constraint
+        WHERE conrelid = 'university_course_strands'::regclass AND contype = 'c'
+        """
+    )
+    allowed = {}
+    for row in cursor.fetchall() or []:
+        for value in re.findall(r"'([^']+)'", str(row[0])):
+            allowed.setdefault(value.upper(), value)
+    return [allowed.get(code, code) for code in codes]
+
+
+@fastapi_route("/admin/courses", methods=["GET"])
+def admin_list_courses(req):
+    if not _is_full_admin_session(req.session):
+        return JSONResponse({"success": False, "error": "forbidden"}, status_code=403)
+    conn = _db_conn()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT courses.id, courses.course, courses.description, courses.features,
+                   COALESCE(
+                       ARRAY_AGG(DISTINCT course_strands.strand_code)
+                           FILTER (WHERE course_strands.strand_code IS NOT NULL),
+                       ARRAY[]::TEXT[]
+                   )
+            FROM university_courses courses
+            LEFT JOIN university_course_strands course_strands ON course_strands.course = courses.course
+            GROUP BY courses.id, courses.course, courses.description, courses.features
+            ORDER BY LOWER(courses.course)
+            """
+        )
+        rows = cursor.fetchall()
+    finally:
+        conn.close()
+    courses = [
+        {
+            "id": row[0],
+            "course": row[1],
+            "description": row[2] or "",
+            "features": list(row[3] or []),
+            "strands": sorted(str(code).upper() for code in (row[4] or [])),
+        }
+        for row in rows
+    ]
+    return JSONResponse({"success": True, "courses": courses, "categories": CATEGORY_NAMES})
+
+
+async def _save_course(req, course_id=None):
+    if not _is_full_admin_session(req.session):
+        return JSONResponse({"success": False, "error": "forbidden"}, status_code=403)
+    try:
+        course, description, scores, strands = _validate_course_payload(await req.json())
+    except (ValueError, TypeError) as exc:
+        return JSONResponse({"success": False, "message": str(exc)}, status_code=400)
+    duplicate = JSONResponse({"success": False, "message": "A course with that name already exists."}, status_code=409)
+    conn = _db_conn()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT 1 FROM university_courses WHERE LOWER(course) = LOWER(?) AND id <> ?",
+            (course, course_id or 0),
+        )
+        if cursor.fetchone():
+            return duplicate
+        if course_id is None:
+            cursor.execute(
+                "INSERT INTO university_courses (course, features, description) VALUES (?, CAST(? AS JSONB), ?) RETURNING id",
+                (course, json.dumps(scores), description),
+            )
+            course_id = cursor.fetchone()[0]
+            action = "course_created"
+        else:
+            cursor.execute("SELECT course FROM university_courses WHERE id = ? FOR UPDATE", (course_id,))
+            existing = cursor.fetchone()
+            if not existing:
+                return JSONResponse({"success": False, "message": "Course not found."}, status_code=404)
+            # Cluster rows reference the course name without ON UPDATE CASCADE, so rewrite them around a rename.
+            cursor.execute("DELETE FROM university_course_strands WHERE course = ?", (existing[0],))
+            cursor.execute(
+                "UPDATE university_courses SET course = ?, features = CAST(? AS JSONB), description = ? WHERE id = ?",
+                (course, json.dumps(scores), description, course_id),
+            )
+            action = "course_updated"
+        for code in _stored_strand_codes(cursor, strands):
+            cursor.execute(
+                "INSERT INTO university_course_strands (course, strand_code) VALUES (?, ?)",
+                (course, code),
+            )
+        conn.commit()
+    except UniqueViolation:
+        conn.rollback()
+        return duplicate
+    finally:
+        conn.close()
+    _reset_course_catalog_cache()
+    _record_admin_activity(req.session, action, target_label=course)
+    return JSONResponse({
+        "success": True,
+        "course": {"id": course_id, "course": course, "description": description, "features": scores, "strands": strands},
+    })
+
+
+@fastapi_route("/admin/courses", methods=["POST"])
+async def admin_create_course(req):
+    return await _save_course(req)
+
+
+async def admin_update_course(req, course_id):
+    parsed_id = _parse_course_id(course_id)
+    if parsed_id is None:
+        return JSONResponse({"success": False, "message": "Course not found."}, status_code=404)
+    return await _save_course(req, parsed_id)
+
+
+def admin_delete_course(req, course_id):
+    if not _is_full_admin_session(req.session):
+        return JSONResponse({"success": False, "error": "forbidden"}, status_code=403)
+    parsed_id = _parse_course_id(course_id)
+    if parsed_id is None:
+        return JSONResponse({"success": False, "message": "Course not found."}, status_code=404)
+    conn = _db_conn()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT course FROM university_courses WHERE id = ? FOR UPDATE", (parsed_id,))
+        existing = cursor.fetchone()
+        if not existing:
+            return JSONResponse({"success": False, "message": "Course not found."}, status_code=404)
+        cursor.execute("SELECT COUNT(*) FROM university_courses")
+        if cursor.fetchone()[0] <= 1:
+            return JSONResponse({"success": False, "message": "Keep at least one course in the recommendation catalog."}, status_code=400)
+        cursor.execute("DELETE FROM university_course_strands WHERE course = ?", (existing[0],))
+        cursor.execute("DELETE FROM university_courses WHERE id = ?", (parsed_id,))
+        conn.commit()
+    finally:
+        conn.close()
+    _reset_course_catalog_cache()
+    _record_admin_activity(req.session, "course_deleted", target_label=existing[0])
+    return JSONResponse({"success": True})
+
+
 ADMIN_ACTIVITY_LIMIT = 1000
 STUDENT_ACTIVITY_LABELS = {
     "login": "Signed in",
@@ -2266,19 +2851,33 @@ STUDENT_ACTIVITY_LABELS = {
     "report_card_upload_failed": "Report card upload failed",
     "grades_saved": "Saved grades and profile",
     "recommendations_generated": "Generated course recommendations",
+    "results_emailed": "Emailed course recommendations",
     "account_name_changed": "Changed account name",
     "profile_picture_changed": "Changed profile picture",
 }
 ADMIN_ACTIVITY_EXPORT_COLUMNS = (
     ("When", "when", 22),
-    ("User", "user", 26),
-    ("Email", "email", 30),
-    ("Role", "role", 10),
-    ("Action", "action", 30),
-    ("Target", "target", 30),
+    ("User", "user", 21),
+    ("Email", "email", 26),
+    ("Role", "role", 9),
+    ("Action", "action", 24),
+    ("Target", "target", 22),
     ("Session IP", "session_ip", 16),
-    ("Details", "details", 50),
+    ("Details", "details", 40),
 )
+PATHFINDER_SCHOOL_NAME = "University of Perpetual Help System Dalta"
+
+
+def _maroon_pathfinder_logo():
+    logo_path = os.path.join(os.path.dirname(__file__), "static", "images", "PathFinder2.png")
+    with PILImage.open(logo_path) as source:
+        alpha = source.convert("RGBA").getchannel("A")
+        tinted = PILImage.new("RGBA", source.size, (128, 0, 0, 0))
+        tinted.putalpha(alpha)
+        logo_bytes = BytesIO()
+        tinted.save(logo_bytes, format="PNG")
+    logo_bytes.seek(0)
+    return logo_bytes
 
 
 def _fetch_admin_activity():
@@ -2392,35 +2991,113 @@ def _admin_activity_pdf(rows, filter_summary, generated):
 
 def _admin_activity_xlsx(rows, filter_summary, generated):
     from openpyxl import Workbook
-    from openpyxl.styles import Alignment, Font, PatternFill
+    from openpyxl.drawing.image import Image as SpreadsheetImage
+    from openpyxl.drawing.spreadsheet_drawing import AnchorMarker, OneCellAnchor
+    from openpyxl.drawing.xdr import XDRPositiveSize2D
+    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+    from openpyxl.utils import get_column_letter
+    from openpyxl.utils.units import pixels_to_EMU
+    from openpyxl.worksheet.page import PageMargins
+    from openpyxl.worksheet.properties import PageSetupProperties
 
     workbook = Workbook()
+    workbook.properties.creator = "PathFinder"
+    workbook.properties.title = "Activity Log"
     sheet = workbook.active
     sheet.title = "Activity Log"
-    sheet.append(["PathFinder Activity Log"])
-    sheet.append([f"Generated {generated:%b %d, %Y %I:%M %p}  |  {filter_summary}  |  {len(rows)} entries"])
-    sheet.append([])
-    sheet.append([label for label, _, _ in ADMIN_ACTIVITY_EXPORT_COLUMNS])
-    sheet["A1"].font = Font(bold=True, size=14, color="800000")
-    sheet["A2"].font = Font(italic=True, color="766E70")
-    header_row = 4
+    sheet.sheet_view.showGridLines = False
+    sheet.sheet_view.zoomScale = 85
+    last_column = get_column_letter(len(ADMIN_ACTIVITY_EXPORT_COLUMNS))
+    for index, (_, _, width) in enumerate(ADMIN_ACTIVITY_EXPORT_COLUMNS, start=1):
+        sheet.column_dimensions[get_column_letter(index)].width = width
+
+    logo = SpreadsheetImage(_maroon_pathfinder_logo())
+    logo.width = logo.height = 60
+    logo.anchor = OneCellAnchor(
+        _from=AnchorMarker(col=0, row=0, colOff=pixels_to_EMU(75), rowOff=pixels_to_EMU(1)),
+        ext=XDRPositiveSize2D(cx=pixels_to_EMU(logo.width), cy=pixels_to_EMU(logo.height)),
+    )
+    sheet.add_image(logo)
+    sheet.merge_cells(f"B1:{last_column}1")
+    sheet.merge_cells(f"B2:{last_column}2")
+    sheet["B1"] = "PathFinder"
+    sheet["B1"].font = Font(name="Calibri", bold=True, size=20, color="FF800000")
+    sheet["B1"].alignment = Alignment(vertical="center")
+    sheet["B2"] = PATHFINDER_SCHOOL_NAME
+    sheet["B2"].font = Font(name="Calibri", bold=True, size=11, color="FF262122")
+    sheet["B2"].alignment = Alignment(vertical="center")
+    sheet.row_dimensions[1].height = 25
+    sheet.row_dimensions[2].height = 21
+    sheet.row_dimensions[3].height = 3
+    for cell in sheet[3]:
+        cell.fill = PatternFill("solid", fgColor="FF800000")
+
+    sheet.merge_cells("A4:F4")
+    sheet.merge_cells(f"G4:{last_column}4")
+    sheet["A4"] = "Activity Log"
+    sheet["A4"].font = Font(name="Calibri", bold=True, size=16, color="FF262122")
+    sheet["A4"].alignment = Alignment(vertical="center")
+    sheet["G4"] = f"Generated {generated:%b %d, %Y %I:%M %p}"
+    sheet["G4"].font = Font(name="Calibri", size=11, color="FF766E70")
+    sheet["G4"].alignment = Alignment(horizontal="right", vertical="center")
+    sheet.row_dimensions[4].height = 28
+
+    sheet.merge_cells(f"A5:{last_column}5")
+    filter_text = f"Filters: {filter_summary}"
+    sheet["A5"] = filter_text
+    sheet["A5"].font = Font(name="Calibri", size=11, color="FF766E70")
+    sheet["A5"].alignment = Alignment(vertical="center", wrap_text=True)
+    filter_lines = sum(max(1, math.ceil(len(line) / 150)) for line in filter_text.split("\n"))
+    sheet.row_dimensions[5].height = min(200, 8 + 14 * filter_lines)
+    sheet.merge_cells(f"A6:{last_column}6")
+    sheet["A6"] = f"{len(rows)} {'entry' if len(rows) == 1 else 'entries'}"
+    sheet["A6"].font = Font(name="Calibri", bold=True, size=11, color="FF766E70")
+    sheet["A6"].alignment = Alignment(vertical="center")
+    sheet.row_dimensions[6].height = 18
+    sheet.row_dimensions[7].height = 8
+
+    header_row = 8
+    for index, (label, _, _) in enumerate(ADMIN_ACTIVITY_EXPORT_COLUMNS, start=1):
+        sheet.cell(row=header_row, column=index, value=label)
     for cell in sheet[header_row]:
-        cell.font = Font(bold=True, color="800000")
-        cell.fill = PatternFill("solid", fgColor="F5E9E9")
-    for row in rows:
-        sheet.append([row[key] for _, key, _ in ADMIN_ACTIVITY_EXPORT_COLUMNS])
-        # Log text is user-controlled; keep values like "=..." as inert text, never formulas.
-        for cell in sheet[sheet.max_row]:
+        cell.font = Font(name="Calibri", bold=True, size=11, color="FFFFFFFF")
+        cell.fill = PatternFill("solid", fgColor="FF800000")
+        cell.alignment = Alignment(vertical="center", wrap_text=True)
+    sheet.row_dimensions[header_row].height = 24
+
+    body_font = Font(name="Calibri", size=11, color="FF262122")
+    body_alignment = Alignment(vertical="top", wrap_text=True)
+    stripe_fill = PatternFill("solid", fgColor="FFFAF8F8")
+    row_border = Border(bottom=Side(style="thin", color="FFE4DDDD"))
+    for row_number, row in enumerate(rows, start=header_row + 1):
+        for column_number, (_, key, _) in enumerate(ADMIN_ACTIVITY_EXPORT_COLUMNS, start=1):
+            cell = sheet.cell(row=row_number, column=column_number, value=row[key])
+            # Log text is user-controlled; keep values like "=..." as inert text, never formulas.
             if cell.data_type == "f":
                 cell.data_type = "s"
-    for index, (_, _, width) in enumerate(ADMIN_ACTIVITY_EXPORT_COLUMNS, start=1):
-        sheet.column_dimensions[sheet.cell(row=header_row, column=index).column_letter].width = width
-    for row in sheet.iter_rows(min_row=header_row + 1):
-        for cell in row:
-            cell.alignment = Alignment(vertical="top", wrap_text=True)
+            cell.font = body_font
+            cell.alignment = body_alignment
+            cell.border = row_border
+            if row_number % 2 == 0:
+                cell.fill = stripe_fill
+    if not rows:
+        sheet.merge_cells(f"A{header_row + 1}:{last_column}{header_row + 1}")
+        sheet.cell(row=header_row + 1, column=1, value="No activity matches the selected filters.")
+        sheet.cell(row=header_row + 1, column=1).font = Font(name="Calibri", italic=True, size=11, color="FF766E70")
+        sheet.row_dimensions[header_row + 1].height = 22
     sheet.freeze_panes = sheet.cell(row=header_row + 1, column=1)
     if rows:
-        sheet.auto_filter.ref = f"A{header_row}:{sheet.cell(row=header_row, column=len(ADMIN_ACTIVITY_EXPORT_COLUMNS)).column_letter}{header_row + len(rows)}"
+        sheet.auto_filter.ref = f"A{header_row}:{last_column}{header_row + len(rows)}"
+    sheet.print_title_rows = f"1:{header_row}"
+    sheet.print_area = f"A1:{last_column}{header_row + max(1, len(rows))}"
+    sheet.sheet_properties.pageSetUpPr = PageSetupProperties(fitToPage=True)
+    sheet.page_setup.orientation = sheet.ORIENTATION_LANDSCAPE
+    sheet.page_setup.paperSize = sheet.PAPERSIZE_A4
+    sheet.page_setup.fitToWidth = 1
+    sheet.page_setup.fitToHeight = 0
+    sheet.page_margins = PageMargins(left=0.3, right=0.3, top=0.4, bottom=0.4, header=0.15, footer=0.2)
+    sheet.oddFooter.left.text = f"PathFinder | {PATHFINDER_SCHOOL_NAME}"
+    sheet.oddFooter.right.text = "Page &P of &N"
     stream = BytesIO()
     workbook.save(stream)
     return stream.getvalue()
@@ -2486,7 +3163,7 @@ async def admin_update_user(req):
     if not uid:
         return JSONResponse({"success": False, "message": "Missing id"})
     if password:
-        password_error = _password_policy_error(password)
+        password_error = _password_policy_error(password, admin=True)
         if password_error:
             return JSONResponse({"success": False, "message": password_error}, status_code=400)
 
@@ -2499,8 +3176,11 @@ async def admin_update_user(req):
             conn.close()
             return JSONResponse({"success": False, "message": "Admin account not found."}, status_code=404)
         if password:
+            lock_security_row(cursor, uid)
             hashed = _hash_password(password)
-            cursor.execute('UPDATE users SET name = ?, email = ?, password_hash = ?, must_change_password = ? WHERE id = ?', (name, email, hashed, account[0] == ROLE_SEMI_ADMIN, uid))
+            cursor.execute('UPDATE users SET name = ?, email = ?, password_hash = ?, must_change_password = ?, auth_version = auth_version + 1 WHERE id = ?', (name, email, hashed, account[0] == ROLE_SEMI_ADMIN, uid))
+            clear_recovery_tokens(cursor, uid)
+            clear_lockout(cursor, uid)
         else:
             cursor.execute('UPDATE users SET name = ?, email = ? WHERE id = ?', (name, email, uid))
         conn.commit()
@@ -2643,7 +3323,7 @@ async def admin_create_coordinator(req):
     if not name or not email or not password:
         return JSONResponse({"success": False, "message": "Name, email, and password are required"}, status_code=400)
 
-    password_error = _password_policy_error(password)
+    password_error = _password_policy_error(password, admin=True)
     if password_error:
         return JSONResponse({"success": False, "message": password_error}, status_code=400)
 
@@ -2684,7 +3364,7 @@ async def admin_create_user(req):
         return JSONResponse({"success": False, "message": "Username must start with a letter and contain 3-32 letters, numbers, dots, underscores, or hyphens."}, status_code=400)
     if role not in (ROLE_SUPER_ADMIN, ROLE_SEMI_ADMIN):
         return JSONResponse({"success": False, "message": "Choose Super Admin or Semi Admin."}, status_code=400)
-    password_error = _password_policy_error(password)
+    password_error = _password_policy_error(password, admin=True)
     if password_error:
         return JSONResponse({"success": False, "message": password_error}, status_code=400)
 
@@ -3525,7 +4205,7 @@ async def admin_generate_report(req, data=None):
 def _admin_report_pdf(report):
     stream = BytesIO()
     document = SimpleDocTemplate(
-        stream, pagesize=A4, leftMargin=42, rightMargin=42, topMargin=162,
+        stream, pagesize=A4, leftMargin=42, rightMargin=42, topMargin=170,
         bottomMargin=48, title=report["title"], author="PathFinder",
     )
     content_width = document.width - 12
@@ -3540,16 +4220,7 @@ def _admin_report_pdf(report):
     numeric_heading_style = ParagraphStyle("Report numeric heading", parent=label_style, fontSize=8, leading=11, alignment=TA_RIGHT)
     muted_style = ParagraphStyle("Report muted", fontName="Helvetica", fontSize=8, leading=12, textColor=muted)
 
-    logo_path = os.path.join(os.path.dirname(__file__), "static", "images", "PathFinder2.png")
-    with PILImage.open(logo_path) as source:
-        alpha = source.convert("RGBA").getchannel("A")
-        tinted = PILImage.new("RGBA", source.size, (128, 0, 0, 0))
-        tinted.putalpha(alpha)
-        logo_bytes = BytesIO()
-        tinted.save(logo_bytes, format="PNG")
-        logo_bytes.seek(0)
-
-    logo_image = ImageReader(logo_bytes)
+    logo_image = ImageReader(_maroon_pathfinder_logo())
     generated = datetime.fromisoformat(report["generated_at"]).strftime("%b %d, %Y %I:%M %p")
     filters = report["filters"]
     story = []
@@ -3610,19 +4281,25 @@ def _admin_report_pdf(report):
         canvas.saveState()
         left = doc.leftMargin + 6
         right = left + content_width
-        canvas.drawImage(logo_image, left, A4[1] - 72, width=32, height=32, mask="auto")
+        canvas.drawImage(logo_image, left, A4[1] - 86, width=48, height=48, mask="auto")
         canvas.setFillColor(maroon)
-        canvas.setFont("Helvetica-Bold", 9)
-        canvas.drawString(left + 40, A4[1] - 58, "PathFinder")
-        canvas.setFont("Helvetica", 8)
+        canvas.setFont("Helvetica-Bold", 20)
+        canvas.drawString(left + 58, A4[1] - 58, "PathFinder")
+        canvas.setFont("Helvetica-Bold", 10)
+        canvas.setFillColor(text_color)
+        canvas.drawString(left + 58, A4[1] - 76, PATHFINDER_SCHOOL_NAME)
         canvas.setFillColor(muted)
+        canvas.setFont("Helvetica", 8)
         canvas.drawRightString(right, A4[1] - 58, f"Generated {generated}")
+        canvas.setStrokeColor(line_color)
+        canvas.setLineWidth(0.6)
+        canvas.line(left, A4[1] - 92, right, A4[1] - 92)
         canvas.setFont("Helvetica-Bold", 17)
         canvas.setFillColor(text_color)
-        canvas.drawString(left, A4[1] - 102, report["title"])
+        canvas.drawString(left, A4[1] - 116, report["title"])
         canvas.setStrokeColor(maroon)
-        canvas.setLineWidth(1)
-        canvas.line(left, A4[1] - 116, right, A4[1] - 116)
+        canvas.setLineWidth(1.2)
+        canvas.line(left, A4[1] - 128, right, A4[1] - 128)
         canvas.setFont("Helvetica", 8)
         canvas.setFillColor(muted)
         if filters["from_date"] == "Any" and filters["to_date"] == "Any":
@@ -3632,7 +4309,8 @@ def _admin_report_pdf(report):
                 f"{'Beginning' if filters['from_date'] == 'Any' else filters['from_date']} to "
                 f"{'Today' if filters['to_date'] == 'Any' else filters['to_date']}"
             )
-        canvas.drawString(left, A4[1] - 133, f"Cluster: {filters['strand']}  |  Dates: {date_range}")
+        canvas.drawString(left, A4[1] - 144, f"Cluster: {filters['strand']}  |  Dates: {date_range}")
+        canvas.drawString(left, 25, f"PathFinder  |  {PATHFINDER_SCHOOL_NAME}")
         canvas.drawRightString(right, 25, f"Page {doc.page}")
         canvas.restoreState()
 
@@ -4024,7 +4702,7 @@ async def admin_change_password(req):
 
     if not current_password or not new_password or not confirm_password:
         return JSONResponse({"success": False, "message": "Complete all password fields."}, status_code=400)
-    password_error = _password_policy_error(new_password)
+    password_error = _password_policy_error(new_password, admin=True)
     if password_error:
         return JSONResponse({"success": False, "message": password_error}, status_code=400)
     if new_password != confirm_password:
@@ -4033,8 +4711,12 @@ async def admin_change_password(req):
 
     conn = _db_conn()
     cursor = conn.cursor()
-    cursor.execute("SELECT password_hash FROM users WHERE id = ?", (sess["user_id"],))
+    lock_security_row(cursor, sess["user_id"])
+    cursor.execute("SELECT password_hash, auth_version FROM users WHERE id = ?", (sess["user_id"],))
     row = cursor.fetchone()
+    if not row or row[1] != sess.get("auth_version", 0):
+        conn.close()
+        return JSONResponse({"success": False, "message": "Please sign in again."}, status_code=401)
     if not row or not _check_password(row[0], current_password):
         conn.close()
         return JSONResponse({"success": False, "message": "Current password is incorrect."}, status_code=400)
@@ -4043,6 +4725,7 @@ async def admin_change_password(req):
         return JSONResponse({"success": False, "message": "Choose a password different from your current password."}, status_code=400)
 
     cursor.execute("UPDATE users SET password_hash = ?, must_change_password = FALSE WHERE id = ?", (_hash_password(new_password), sess["user_id"]))
+    clear_recovery_tokens(cursor, sess["user_id"])
     conn.commit()
     conn.close()
     sess["must_change_password"] = False
@@ -4086,7 +4769,7 @@ def get_profile(req):
     cursor = conn.cursor()
     cursor.execute(
         """
-        SELECT student_number, first_name, middle_initial, last_name, course, gwa, grades, subjects, recommendation, strand
+        SELECT student_number, first_name, middle_initial, last_name, course, gwa, grades, subjects, recommendation, strand, id
         FROM student_profiles
         WHERE user_id = ?
         ORDER BY id DESC
@@ -4095,9 +4778,9 @@ def get_profile(req):
         (sess["user_id"],),
     )
     profile = cursor.fetchone()
-    conn.close()
 
     if not profile:
+        conn.close()
         return JSONResponse({"success": False})
 
     recommendation_value = profile[8]
@@ -4106,9 +4789,20 @@ def get_profile(req):
     except (TypeError, ValueError):
         recommendation_data = recommendation_value
     saved_recommendations = _limit_recommendations(recommendation_data)
-    if not saved_recommendations and profile[7]:
+    if profile[7]:
+        # Saved results may come from an older ranking model, so rebuild them from the saved grades.
         subjects = _clean_subjects_for_recommendation(profile[7]) or profile[7]
-        saved_recommendations = _configured_recommendations(subjects, profile[4] or "", profile[9] or "")
+        current_recommendations = _configured_recommendations(subjects, profile[4] or "", profile[9] or "")
+        if current_recommendations != saved_recommendations:
+            saved_recommendations = current_recommendations
+            payload = json.dumps(current_recommendations)
+            cursor.execute("UPDATE student_profiles SET recommendation = ? WHERE id = ?", (payload, profile[10]))
+            cursor.execute(
+                "INSERT INTO course_recommendation_history (profile_id, recommendations) VALUES (?, ?)",
+                (profile[10], payload),
+            )
+            conn.commit()
+    conn.close()
     saved_comparisons = {
         item["course"]: _build_student_performance_analytics(item["course"], profile[7] or "")
         for item in saved_recommendations
@@ -4131,6 +4825,143 @@ def get_profile(req):
             "strand": profile[9],
         }
     )
+
+
+def _results_email_content(profile, recommendations):
+    name = " ".join(part for part in (
+        profile.get("first_name") or "",
+        f"{profile['middle_initial']}." if profile.get("middle_initial") else "",
+        profile.get("last_name") or "",
+    ) if part).strip() or "Student"
+
+    def score_text(item):
+        try:
+            return f"{float(item.get('match_score', 0)):.2f}%"
+        except (TypeError, ValueError):
+            return ""
+
+    text_lines = [
+        f"Hi {name},",
+        "",
+        "Here are your PathFinder course recommendations:",
+        "",
+    ]
+    for index, item in enumerate(recommendations, start=1):
+        text_lines.append(f"{index}. {item.get('course', '')} - {score_text(item)} match")
+        if item.get("reason"):
+            text_lines.append(f"   {item['reason']}")
+    text_lines += [
+        "",
+        "Course matches are academic guidance based on the grades provided. They do not guarantee "
+        "admission, eligibility, or career outcomes. Consider your interests and speak with a guidance "
+        "counselor before deciding.",
+    ]
+
+    esc = html.escape
+
+    def recommendation_card(index, item):
+        course = esc(item.get("course", ""))
+        score = esc(score_text(item))
+        rank_color = "#b8c2ff" if index == 1 else "#d7dcf2"
+        rank_text = "#273bc5" if index == 1 else "#4b5875"
+        reason = (
+                f"<p style='margin:8px 0 0;color:#58657d;font-size:13px;"
+                f"line-height:1.5'>{esc(item['reason'])}</p>"
+            ) if item.get("reason") else ""
+        return (
+            "<tr><td style='padding:0 0 12px'>"
+            "<table role='presentation' width='100%' cellpadding='0' cellspacing='0' "
+            f"style='border:1px solid #e3e7f4;border-radius:12px;background:#ffffff'>"
+            "<tr>"
+            f"<td width='52' valign='top' style='padding:16px 0 16px 16px'>"
+            f"<div style='width:34px;height:34px;line-height:34px;text-align:center;"
+            f"border-radius:10px;background:{rank_color};color:{rank_text};"
+            f"font-size:14px;font-weight:700'>{index:02d}</div></td>"
+            f"<td valign='top' style='padding:16px 8px 16px 12px'>"
+            f"<div style='color:#17213b;font-size:16px;font-weight:700;line-height:1.35'>{course}</div>"
+            f"{reason}</td>"
+            f"<td width='96' valign='top' align='right' style='padding:16px 16px 16px 8px'>"
+            f"<div style='display:inline-block;padding:7px 10px;border-radius:20px;"
+            f"background:#eef0ff;color:#3548d4;font-size:13px;font-weight:700;white-space:nowrap'>"
+            f"{score}</div><div style='margin-top:5px;color:#7a849a;font-size:10px;"
+            f"text-transform:uppercase;letter-spacing:.5px'>match</div></td>"
+            "</tr></table></td></tr>"
+        )
+
+    cards = "".join(
+        recommendation_card(index, item)
+        for index, item in enumerate(recommendations, start=1)
+    )
+    html_body = f"""<!doctype html>
+<html lang="en"><body style="margin:0;padding:0;background:#f3f5fb;font-family:Arial,Helvetica,sans-serif;color:#1d2433">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f3f5fb;padding:28px 12px">
+<tr><td align="center">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:620px">
+<tr><td style="padding:24px 26px;border-radius:16px 16px 0 0;background:#3548d4;color:#ffffff">
+<div style="font-size:12px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;opacity:.85">PATHFINDER</div>
+<h1 style="margin:10px 0 0;font-size:25px;line-height:1.25">Your course matches</h1>
+</td></tr>
+<tr><td style="padding:26px;background:#ffffff">
+<p style="margin:0 0 8px;color:#26324a;font-size:16px">Hi {esc(name)},</p>
+<p style="margin:0 0 20px;color:#667085;font-size:14px;line-height:1.5">Here are the courses that best match your profile:</p>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0">{cards}</table>
+<div style="margin-top:10px;padding:14px 16px;border-radius:10px;background:#f5f7ff;color:#52607a;font-size:12px;line-height:1.6">
+These recommendations are for academic guidance only. They do not guarantee admission, eligibility, or career outcomes. Consider your interests and speak with a guidance counselor before deciding.
+</div>
+</td></tr>
+<tr><td align="center" style="padding:16px;color:#8992a6;font-size:11px">Sent by PathFinder</td></tr>
+</table>
+</td></tr></table>
+</body></html>"""
+    return "\n".join(text_lines), html_body
+
+
+RESULTS_EMAIL_COOLDOWN_SECONDS = 60
+
+
+@fastapi_route("/email_results", methods=["POST"])
+async def email_results(req):
+    sess = req.session
+    if not _can_email_results(sess):
+        return JSONResponse(
+            {"success": False, "message": "Emailing results is available only when you sign in with Google."},
+            status_code=403,
+        )
+    last_sent = sess.get("results_email_sent_at") or 0
+    wait = RESULTS_EMAIL_COOLDOWN_SECONDS - int(time.time() - float(last_sent))
+    if wait > 0:
+        return JSONResponse(
+            {"success": False, "message": f"Please wait {wait} seconds before sending another email."},
+            status_code=429,
+        )
+    profile = _get_user_latest_profile(sess["user_id"])
+    if not profile or not profile.get("subjects"):
+        return JSONResponse({"success": False, "message": "Save your report card first to get recommendations."}, status_code=400)
+    subjects = _clean_subjects_for_recommendation(profile["subjects"]) or profile["subjects"]
+    recommendations = _configured_recommendations(subjects, profile.get("course") or "", profile.get("strand") or "")
+    if not recommendations:
+        return JSONResponse({"success": False, "message": "No course recommendations are available to email yet."}, status_code=400)
+    text_body, html_body = _results_email_content(profile, recommendations)
+    destination = sess["email"]
+    try:
+        await asyncio.to_thread(send_email, destination, "Your PathFinder course recommendations", text_body, html_body)
+    except ValueError as exc:
+        logging.getLogger(__name__).error("%s", exc)
+        return JSONResponse(
+            {"success": False, "code": "email_not_configured",
+             "message": "Email is not configured on the server yet. Please contact the administrator."},
+            status_code=503,
+        )
+    except (smtplib.SMTPException, OSError) as exc:
+        logging.getLogger(__name__).error("Results email failed (%s).", type(exc).__name__)
+        return JSONResponse(
+            {"success": False, "code": "email_delivery_failed",
+             "message": "Your results could not be emailed right now. Please try again later."},
+            status_code=503,
+        )
+    sess["results_email_sent_at"] = time.time()
+    _record_student_activity(req, "results_emailed", f"{len(recommendations)} recommendations")
+    return JSONResponse({"success": True, "message": f"Your results were sent to {destination}."})
 
 # Define the route for uploading a profile picture
 @fastapi_route("/upload_profile_picture", methods=["POST"])
@@ -4300,16 +5131,21 @@ async def google_authorize(req):
                 current_picture = google_picture
 
     cursor.execute("UPDATE users SET last_login_at = CURRENT_TIMESTAMP WHERE id = ?", (user_id,))
+    cursor.execute("SELECT auth_version FROM users WHERE id = ?", (user_id,))
+    auth_version = cursor.fetchone()[0]
     conn.commit()
     conn.close()
     # Set the session variables for the logged-in user
     sess = req.session
+    sess.clear()
     sess["user_id"] = user_id
     sess["name"] = name
     sess["email"] = email
     sess["username"] = username
     sess["role"] = role
     sess["must_change_password"] = must_change_password
+    sess["auth_version"] = auth_version
+    sess["auth_provider"] = "google"
     if role in (ROLE_ADMIN, ROLE_SEMI_ADMIN):
         sess["is_admin"] = True
         sess["admin_user"] = name or email
@@ -4980,11 +5816,20 @@ def _fastapi_handler(handler, path_parameters=()):
 _FASTAPI_ENDPOINTS = (
     ("/register", ["POST"], register, ()),
     ("/login", ["POST"], login, ()),
+    ("/admin/recovery-email", ["GET"], admin_recovery_email, ()),
+    ("/admin/recovery-email", ["POST"], admin_set_recovery_email, ()),
+    ("/admin/forgot-password", ["POST"], admin_forgot_password, ()),
+    ("/admin/verify-recovery", ["POST"], admin_verify_recovery, ()),
+    ("/admin/reset-password", ["POST"], admin_reset_password, ()),
     ("/generate_recommendations", ["POST"], generate_recommendations, ()),
     ("/system-settings/public", ["GET"], public_system_settings, ()),
     ("/admin/users", ["GET"], admin_get_users, ()),
     ("/admin/system-settings", ["GET"], admin_get_system_settings, ()),
     ("/admin/system-settings", ["POST"], admin_save_system_settings, ()),
+    ("/admin/courses", ["GET"], admin_list_courses, ()),
+    ("/admin/courses", ["POST"], admin_create_course, ()),
+    ("/admin/courses/{course_id}", ["PUT"], admin_update_course, ("course_id",)),
+    ("/admin/courses/{course_id}", ["DELETE"], admin_delete_course, ("course_id",)),
     ("/admin/activity", ["GET"], admin_get_activity, ()),
     ("/admin/activity/export", ["POST"], admin_export_activity, ()),
     ("/admin/update_user", ["POST"], admin_update_user, ()),
@@ -5009,6 +5854,7 @@ _FASTAPI_ENDPOINTS = (
     ("/admin/change_password", ["POST"], admin_change_password, ()),
     ("/recommend_anonymous", ["POST"], recommend_anonymous, ()),
     ("/get_profile", ["GET"], get_profile, ()),
+    ("/email_results", ["POST"], email_results, ()),
     ("/upload_profile_picture", ["POST"], upload_profile_picture, ()),
     ("/get_profile_picture", ["GET"], get_profile_picture, ()),
     ("/profile-image/{user_id}/{version}", ["GET"], get_profile_image, ("user_id", "version")),

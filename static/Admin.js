@@ -124,6 +124,333 @@ document.getElementById('system-settings-form')?.addEventListener('submit', asyn
   }
 });
 
+const COURSE_SCORE_FIELDS = ['math', 'science', 'english', 'technology', 'business', 'social'];
+let courseCatalog = [];
+
+function setCourseStatus(element, message, isError = false){
+  if(!element) return;
+  element.textContent = message || '';
+  element.hidden = !message;
+  element.classList.toggle('is-error', Boolean(isError));
+}
+
+function renderCourseCatalog(){
+  const body = document.getElementById('course-catalog-body');
+  if(!body) return;
+  const query = (document.getElementById('course-catalog-search')?.value || '').trim().toLowerCase();
+  const cluster = document.getElementById('course-catalog-cluster')?.value || '';
+  const filtered = courseCatalog.filter(course => {
+    const matchesQuery = !query || course.course.toLowerCase().includes(query)
+      || course.description.toLowerCase().includes(query)
+      || course.strands.some(strand => strand.toLowerCase().includes(query));
+    return matchesQuery && (!cluster || course.strands.includes(cluster));
+  });
+  const pageCourses = paginateAdminList('courses', filtered);
+  const count = document.getElementById('course-catalog-count');
+  if(count) count.textContent = query || cluster ? `${filtered.length} of ${courseCatalog.length} courses` : `${courseCatalog.length} courses`;
+  body.replaceChildren();
+  const pager = document.getElementById('course-catalog-pager');
+  if(pager){
+    pager.innerHTML = buildAdminPager('courses', filtered.length, 'courses');
+    bindAdminPager(pager, 'courses');
+  }
+  if(!filtered.length){
+    const row = body.insertRow();
+    const cell = row.insertCell();
+    cell.colSpan = 3;
+    cell.textContent = courseCatalog.length ? 'No courses match your filters.' : 'No courses in the catalog yet.';
+    return;
+  }
+  for(const course of pageCourses){
+    const row = body.insertRow();
+    const nameCell = row.insertCell();
+    const name = document.createElement('strong');
+    name.textContent = course.course;
+    const description = document.createElement('small');
+    description.textContent = course.description;
+    nameCell.append(name, description);
+
+    const tags = document.createElement('div');
+    tags.className = 'course-strand-tags';
+    for(const strand of course.strands){
+      const tag = document.createElement('span');
+      tag.textContent = strand;
+      tags.append(tag);
+    }
+    row.insertCell().append(tags);
+
+    const actions = document.createElement('div');
+    actions.className = 'course-row-actions';
+    actions.innerHTML = '<button type="button" data-course-action="edit"><i class="fa-solid fa-pen" aria-hidden="true"></i><span>Edit</span></button><button type="button" class="is-danger" data-course-action="delete"><i class="fa-solid fa-trash" aria-hidden="true"></i><span>Remove</span></button>';
+    actions.querySelectorAll('button').forEach(button => {
+      button.dataset.courseId = course.id;
+      button.setAttribute('aria-label', `${button.dataset.courseAction === 'edit' ? 'Edit' : 'Remove'} ${course.course}`);
+    });
+    row.insertCell().append(actions);
+  }
+}
+
+function fillCourseTemplateOptions(excludeId){
+  const select = document.getElementById('course-template-select');
+  if(!select) return;
+  select.length = 1;
+  for(const course of courseCatalog){
+    if(String(course.id) === String(excludeId)) continue;
+    select.add(new Option(course.course, course.id));
+  }
+  select.value = '';
+}
+
+function setCourseScores(form, features){
+  COURSE_SCORE_FIELDS.forEach((field, index) => {
+    const value = features?.[index];
+    form.elements.namedItem(`score_${field}`).value = value === undefined || value === null ? '' : Math.round(Number(value) * 100) / 100;
+  });
+}
+
+async function loadCourseCatalog(keepStatus = false){
+  if(!canManageStudents) return;
+  const status = document.getElementById('course-catalog-status');
+  if(!document.getElementById('course-catalog-body')) return;
+  try{
+    const result = await fetchJsonOrThrow('/admin/courses');
+    courseCatalog = result.courses || [];
+    renderCourseCatalog();
+    if(!keepStatus) setCourseStatus(status, '');
+  }catch(error){
+    setCourseStatus(status, error.message || 'Unable to load courses.', true);
+  }
+}
+
+function openCourseEditor(course = null){
+  const dialog = document.getElementById('course-editor-dialog');
+  const form = document.getElementById('course-editor-form');
+  if(!dialog || !form) return;
+  form.reset();
+  form.querySelectorAll('[aria-invalid]').forEach(input => input.removeAttribute('aria-invalid'));
+  setCourseStatus(document.getElementById('course-editor-status'), '');
+  document.getElementById('course-editor-title').textContent = course ? 'Edit course' : 'Add new course';
+  form.elements.namedItem('id').value = course?.id || '';
+  form.elements.namedItem('course').value = course?.course || '';
+  form.elements.namedItem('description').value = course?.description || '';
+  form.querySelectorAll('input[name="strands"]').forEach(input => { input.checked = Boolean(course?.strands.includes(input.value)); });
+  setCourseScores(form, course?.features);
+  fillCourseTemplateOptions(course?.id);
+  dialog.showModal();
+  form.elements.namedItem('course').focus();
+}
+
+function readCourseForm(form){
+  const invalid = [];
+  const name = form.elements.namedItem('course');
+  const description = form.elements.namedItem('description');
+  const course = name.value.trim().replace(/\s+/g, ' ');
+  const text = description.value.trim().replace(/\s+/g, ' ');
+  if(course.length < 3) invalid.push([name, 'Enter a course name with at least 3 characters.']);
+  if(text.length < 10) invalid.push([description, 'Enter a description with at least 10 characters.']);
+  const strands = [...form.querySelectorAll('input[name="strands"]:checked')].map(input => input.value);
+  if(!strands.length) invalid.push([form.querySelector('input[name="strands"]'), 'Select at least one academic cluster.']);
+  const features = COURSE_SCORE_FIELDS.map(field => {
+    const input = form.elements.namedItem(`score_${field}`);
+    const value = input.value.trim() === '' ? NaN : Number(input.value);
+    if(!Number.isFinite(value) || value < 0 || value > 100) invalid.push([input, 'Each subject-area score must be a number from 0 to 100.']);
+    return value;
+  });
+  form.querySelectorAll('[aria-invalid]').forEach(input => input.removeAttribute('aria-invalid'));
+  invalid.forEach(([input]) => { if(input.type !== 'checkbox') input.setAttribute('aria-invalid', 'true'); });
+  if(invalid.length){
+    invalid[0][0].focus();
+    throw new Error(invalid[0][1]);
+  }
+  return {course, description: text, strands, features};
+}
+
+const COURSE_DELETE_PHRASE = 'delete';
+let resolveCourseConfirm = null;
+
+function finishCourseConfirm(confirmed){
+  const dialog = document.getElementById('course-confirm-dialog');
+  const resolve = resolveCourseConfirm;
+  resolveCourseConfirm = null;
+  if(dialog?.open) dialog.close();
+  if(resolve) resolve(confirmed);
+}
+
+function syncCourseConfirmSubmit(){
+  const typed = document.getElementById('course-confirm-typed');
+  const input = document.getElementById('course-confirm-input');
+  const submit = document.getElementById('course-confirm-submit');
+  if(!submit) return;
+  submit.disabled = Boolean(typed && !typed.hidden && input?.value.trim().toLowerCase() !== COURSE_DELETE_PHRASE);
+}
+
+function confirmCourseAction({kicker, title, message, details = [], confirmLabel, danger = false, requireTyped = false}){
+  const dialog = document.getElementById('course-confirm-dialog');
+  if(!dialog) return Promise.resolve(false);
+  if(resolveCourseConfirm) finishCourseConfirm(false);
+  const returnFocus = document.activeElement;
+  document.getElementById('course-confirm-kicker').textContent = kicker;
+  document.getElementById('course-confirm-title').textContent = title;
+  document.getElementById('course-confirm-message').textContent = message;
+  const list = document.getElementById('course-confirm-details');
+  list.replaceChildren(...details.map(text => {
+    const item = document.createElement('li');
+    item.textContent = text;
+    return item;
+  }));
+  list.hidden = !details.length;
+  const typed = document.getElementById('course-confirm-typed');
+  const input = document.getElementById('course-confirm-input');
+  typed.hidden = !requireTyped;
+  input.value = '';
+  const submit = document.getElementById('course-confirm-submit');
+  submit.textContent = confirmLabel;
+  submit.classList.toggle('btn-danger', danger);
+  submit.classList.toggle('btn-primary', !danger);
+  syncCourseConfirmSubmit();
+  return new Promise(resolve => {
+    resolveCourseConfirm = confirmed => {
+      if(returnFocus && document.contains(returnFocus) && typeof returnFocus.focus === 'function') returnFocus.focus();
+      resolve(confirmed);
+    };
+    dialog.showModal();
+    (requireTyped ? input : submit).focus();
+  });
+}
+
+function describeCourseChanges(original, payload){
+  const changes = [];
+  if(original.course !== payload.course) changes.push(`Name: "${original.course}" → "${payload.course}"`);
+  if((original.description || '') !== payload.description) changes.push('Description updated');
+  const before = [...(original.strands || [])].sort().join(', ');
+  const after = [...payload.strands].sort().join(', ');
+  if(before !== after) changes.push(`Clusters: ${before || 'none'} → ${after}`);
+  COURSE_SCORE_FIELDS.forEach((field, index) => {
+    const previous = Math.round(Number(original.features?.[index]) * 100) / 100;
+    const next = Math.round(Number(payload.features[index]) * 100) / 100;
+    if(previous !== next) changes.push(`${field[0].toUpperCase()}${field.slice(1)} score: ${previous} → ${next}`);
+  });
+  return changes;
+}
+
+document.getElementById('course-confirm-input')?.addEventListener('input', syncCourseConfirmSubmit);
+document.getElementById('course-confirm-form')?.addEventListener('submit', event => {
+  event.preventDefault();
+  const submit = document.getElementById('course-confirm-submit');
+  syncCourseConfirmSubmit();
+  if(submit.disabled){
+    document.getElementById('course-confirm-input')?.focus();
+    return;
+  }
+  finishCourseConfirm(true);
+});
+document.querySelectorAll('[data-course-confirm-cancel]').forEach(button => {
+  button.addEventListener('click', () => finishCourseConfirm(false));
+});
+document.getElementById('course-confirm-dialog')?.addEventListener('cancel', event => {
+  event.preventDefault();
+  finishCourseConfirm(false);
+});
+document.getElementById('course-confirm-dialog')?.addEventListener('keydown', event => {
+  if(event.key !== 'Escape') return;
+  event.preventDefault();
+  event.stopPropagation();
+  finishCourseConfirm(false);
+});
+document.getElementById('course-confirm-dialog')?.addEventListener('close', () => {
+  if(resolveCourseConfirm) finishCourseConfirm(false);
+});
+
+document.getElementById('add-course-button')?.addEventListener('click', () => openCourseEditor());
+document.getElementById('course-catalog-search')?.addEventListener('input', () => resetAdminPage('courses'));
+document.getElementById('course-catalog-cluster')?.addEventListener('change', () => resetAdminPage('courses'));
+document.querySelectorAll('[data-course-editor-close]').forEach(button => {
+  button.addEventListener('click', () => document.getElementById('course-editor-dialog')?.close());
+});
+
+document.getElementById('course-template-select')?.addEventListener('change', event => {
+  const template = courseCatalog.find(course => String(course.id) === event.target.value);
+  if(template) setCourseScores(document.getElementById('course-editor-form'), template.features);
+});
+
+document.getElementById('course-catalog-body')?.addEventListener('click', async event => {
+  const button = event.target.closest('button[data-course-action]');
+  if(!button) return;
+  const course = courseCatalog.find(item => String(item.id) === button.dataset.courseId);
+  if(!course) return;
+  if(button.dataset.courseAction === 'edit'){
+    openCourseEditor(course);
+    return;
+  }
+  const confirmed = await confirmCourseAction({
+    kicker: 'REMOVE COURSE',
+    title: `Remove ${course.course}?`,
+    message: 'Students will no longer be recommended this course, and it will be hidden from previously saved results. This cannot be undone from the dashboard.',
+    confirmLabel: 'Remove course',
+    danger: true,
+    requireTyped: true,
+  });
+  if(!confirmed) return;
+  const status = document.getElementById('course-catalog-status');
+  button.disabled = true;
+  setCourseStatus(status, `Removing ${course.course}...`);
+  try{
+    await fetchJsonOrThrow(`/admin/courses/${encodeURIComponent(course.id)}`, {method:'DELETE'});
+    setCourseStatus(status, `Removed ${course.course}.`);
+    await loadCourseCatalog(true);
+  }catch(error){
+    setCourseStatus(status, error.message || 'Unable to remove the course.', true);
+    button.disabled = false;
+  }
+});
+
+document.getElementById('course-editor-form')?.addEventListener('submit', async event => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const status = document.getElementById('course-editor-status');
+  const submit = form.querySelector('button[type="submit"]');
+  let payload;
+  try{
+    payload = readCourseForm(form);
+  }catch(error){
+    setCourseStatus(status, error.message, true);
+    return;
+  }
+  const id = form.elements.namedItem('id').value;
+  if(id){
+    const original = courseCatalog.find(course => String(course.id) === id);
+    const changes = original ? describeCourseChanges(original, payload) : [];
+    if(original && !changes.length){
+      setCourseStatus(status, 'No changes to save.');
+      return;
+    }
+    const confirmed = await confirmCourseAction({
+      kicker: 'CONFIRM EDIT',
+      title: `Save changes to ${original?.course || payload.course}?`,
+      message: 'Recommendations will use the updated course details right away.',
+      details: changes,
+      confirmLabel: 'Save changes',
+    });
+    if(!confirmed) return;
+  }
+  submit.disabled = true;
+  setCourseStatus(status, 'Saving course...');
+  try{
+    await fetchJsonOrThrow(id ? `/admin/courses/${encodeURIComponent(id)}` : '/admin/courses', {
+      method: id ? 'PUT' : 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload),
+    });
+    document.getElementById('course-editor-dialog').close();
+    setCourseStatus(document.getElementById('course-catalog-status'), `${id ? 'Updated' : 'Added'} ${payload.course}. Recommendations now include this change.`);
+        await loadCourseCatalog(true);
+  }catch(error){
+    setCourseStatus(status, error.message || 'Unable to save the course.', true);
+  }finally{
+    submit.disabled = false;
+  }
+});
+
 async function fetchStats(){
   return fetchJsonOrThrow('/admin/stats');
 }
@@ -393,19 +720,74 @@ const adminNameStatus = document.getElementById('admin-name-status');
 const adminPasswordForm = document.getElementById('admin-password-form');
 const adminPasswordStatus = document.getElementById('admin-password-status');
 const adminSettingsTabButtons = document.querySelectorAll('[data-settings-tab]');
+const adminSettingsAccountGroup = document.getElementById('admin-settings-tab-account');
+const adminSettingsSubtabs = document.getElementById('admin-settings-subtabs');
+const adminAccountSettingsTabs = ['password', 'recovery'];
+
+function setAdminAccountSubmenuExpanded(expanded){
+  if(adminSettingsSubtabs) adminSettingsSubtabs.hidden = !expanded;
+  adminSettingsAccountGroup?.setAttribute('aria-expanded', String(expanded));
+}
 
 function selectAdminSettingsTab(tabName){
+  if(tabName === 'account') tabName = 'password';
   adminSettingsTabButtons.forEach(button => {
     const active = button.dataset.settingsTab === tabName;
     button.classList.toggle('active', active);
     button.setAttribute('aria-selected', String(active));
   });
+  const accountActive = adminAccountSettingsTabs.includes(tabName);
+  adminSettingsAccountGroup?.classList.toggle('active', accountActive);
+  setAdminAccountSubmenuExpanded(accountActive);
   document.querySelectorAll('[data-settings-panel]').forEach(panel => {
     panel.hidden = panel.dataset.settingsPanel !== tabName;
   });
+  if(tabName === 'recovery' && !mustChangePassword) loadAdminRecoveryEmail();
+  return tabName;
 }
 
+async function loadAdminRecoveryEmail(){
+  const status = document.getElementById('admin-recovery-current');
+  try{
+    const result = await fetchJsonOrThrow('/admin/recovery-email');
+    status.dataset.state = result.recovery_email ? 'verified' : 'unverified';
+    status.textContent = result.recovery_email ? `Verified: ${result.recovery_email}` : 'No verified recovery Gmail yet.';
+    if(result.pending_email) status.textContent += ` Awaiting verification: ${result.pending_email}.`;
+  }catch(error){
+    status.dataset.state = 'error';
+    status.textContent = error.message || 'Could not load recovery Gmail.';
+  }
+}
+
+document.getElementById('admin-recovery-form')?.addEventListener('submit', async event => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const button = form.querySelector('button[type="submit"]');
+  const status = document.getElementById('admin-recovery-status');
+  button.disabled = true;
+  status.dataset.state = 'pending';
+  status.textContent = 'Sending verification email...';
+  try{
+    const result = await fetchJsonOrThrow('/admin/recovery-email', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(Object.fromEntries(new FormData(form).entries()))
+    });
+    form.reset();
+    status.dataset.state = 'success';
+    status.textContent = result.message;
+    await loadAdminRecoveryEmail();
+  }catch(error){
+    status.dataset.state = 'error';
+    status.textContent = error.message || 'Could not send verification email.';
+  }finally{
+    button.disabled = false;
+  }
+});
+
 adminSettingsTabButtons.forEach(button => button.addEventListener('click', () => selectAdminSettingsTab(button.dataset.settingsTab)));
+adminSettingsAccountGroup?.addEventListener('click', () => {
+  setAdminAccountSubmenuExpanded(adminSettingsAccountGroup.getAttribute('aria-expanded') !== 'true');
+});
 const logoutConfirmModal = document.getElementById('logout-confirm-modal');
 const logoutReturnFocus = {element: null};
 let pendingLogoutHref = '';
@@ -510,10 +892,24 @@ document.getElementById('first-password-form')?.addEventListener('submit', async
 
 adminPictureInput?.addEventListener('change', async () => {
   const file = adminPictureInput.files[0];
+  adminPictureInput.value = '';
   if(!file) return;
+  let picture = file;
+  if(window.PathFinderCropper){
+    try{
+      picture = await window.PathFinderCropper.open(file);
+    }catch(error){
+      adminPictureStatus.textContent = error.message || 'This image could not be opened.';
+      return;
+    }
+    if(!picture){
+      adminPictureStatus.textContent = '';
+      return;
+    }
+  }
   adminPictureStatus.textContent = 'Uploading...';
   const formData = new FormData();
-  formData.append('profile_picture', file);
+  formData.append('profile_picture', picture, picture === file ? file.name : 'profile-picture.png');
   try{
     const response = await fetch('/api/v1/upload_profile_picture', {method:'POST', body:formData});
     const result = await response.json();
@@ -530,8 +926,9 @@ function setAdminSettings(open, tabName = 'profile'){
   if(!adminSettingsPanel) return;
   adminSettingsPanel.hidden = !open;
   if(open){
-    selectAdminSettingsTab(tabName);
-    if(tabName === 'account') document.getElementById('admin-current-password')?.focus();
+    const selectedTab = selectAdminSettingsTab(tabName);
+    if(selectedTab === 'password') document.getElementById('admin-current-password')?.focus();
+    if(selectedTab === 'recovery') document.getElementById('admin-recovery-gmail')?.focus();
   }
   adminSettingsTriggers.forEach(trigger => trigger.setAttribute('aria-expanded', String(open)));
 }
@@ -602,7 +999,7 @@ const escapeAdminHtml = value => String(value || '').replace(/&/g, '&amp;').repl
 
 const ADMIN_ROWS_PER_PAGE = 10;
 const ADMIN_EXTRA_PAGE_SIZES = [50, 100];
-const adminListPages = {students: 1, reports: 1, accounts: 1, subadmins: 1, recommendations: 1, activity: 1};
+const adminListPages = {students: 1, reports: 1, accounts: 1, subadmins: 1, recommendations: 1, activity: 1, courses: 1};
 const adminListConfig = {
   students: {render: () => renderAdminStudents(), section: 'view-students'},
   reports: {render: () => renderReportCards(), section: 'manage-reports'},
@@ -610,6 +1007,7 @@ const adminListConfig = {
   subadmins: {render: () => renderSubadminProfiles(), section: 'view-subadmins'},
   recommendations: {render: () => renderRecommendationHistory(), section: 'manage-recommendations'},
   activity: {render: () => renderAdminActivity(), section: 'admin-activity', defaultPerPage: 20},
+  courses: {render: () => renderCourseCatalog(), section: 'course-catalog'},
 };
 
 const adminDefaultPageSize = key => adminListConfig[key]?.defaultPerPage || ADMIN_ROWS_PER_PAGE;
@@ -749,6 +1147,7 @@ const studentActivityLabels = {
   report_card_upload_failed: 'Report card upload failed',
   grades_saved: 'Saved grades and profile',
   recommendations_generated: 'Generated course recommendations',
+  results_emailed: 'Emailed course recommendations',
   account_name_changed: 'Changed account name',
   profile_picture_changed: 'Changed profile picture',
 };
@@ -1464,6 +1863,15 @@ document.getElementById('student-editor-grade-body')?.addEventListener('click', 
   if(removeButton && !removeButton.disabled) removeButton.closest('tr')?.remove();
 });
 
+document.querySelectorAll('.admin-nav-disclosure').forEach(disclosure => {
+  const toggle = disclosure.querySelector('.admin-nav-toggle');
+  const syncExpandedState = () => {
+    toggle.setAttribute('aria-expanded', String(disclosure.open));
+  };
+  disclosure.addEventListener('toggle', syncExpandedState);
+  syncExpandedState();
+});
+
 function showAdminView(view){
   document.querySelectorAll('.admin-dashboard-content').forEach(section => {
     section.style.display = view === 'dashboard' ? '' : 'none';
@@ -1471,6 +1879,12 @@ function showAdminView(view){
   document.querySelectorAll('[data-admin-view]').forEach(link => {
     if(link.dataset.adminView === view) link.setAttribute('aria-current', 'page');
     else link.removeAttribute('aria-current');
+  });
+  document.querySelectorAll('.admin-nav-parent').forEach(parent => {
+    const activeChild = parent.querySelector('.admin-nav-submenu [aria-current="page"]');
+    parent.classList.toggle('has-active-child', Boolean(activeChild));
+    const disclosure = parent.querySelector('details');
+    if(activeChild && disclosure) disclosure.open = true;
   });
   document.querySelectorAll('.admin-section-card, .admin-students-section').forEach(section => {
     section.style.display = section.id === view ? 'block' : 'none';
@@ -1489,11 +1903,17 @@ function renderAdminGeneratedReport(report){
   const logo = document.createElement('img');
   logo.src = '/static/images/PathFinder2.png';
   logo.alt = '';
-  logo.width = 38;
-  logo.height = 38;
+  logo.width = 48;
+  logo.height = 48;
+  const brandCopy = document.createElement('div');
   const brand = document.createElement('p');
+  brand.className = 'admin-generated-report-name';
   brand.textContent = 'PathFinder';
-  brandRow.append(logo, brand);
+  const school = document.createElement('p');
+  school.className = 'admin-generated-report-school';
+  school.textContent = 'University of Perpetual Help System Dalta';
+  brandCopy.append(brand, school);
+  brandRow.append(logo, brandCopy);
   const title = document.createElement('h2');
   title.textContent = report.title;
   const generated = document.createElement('p');
@@ -1661,19 +2081,22 @@ document.querySelectorAll('[data-admin-view]').forEach(link => {
     if(link.dataset.adminView === 'manage-admin-accounts') loadAdminAccounts();
     if(link.dataset.adminView === 'admin-activity') loadAdminActivity();
     if(link.dataset.adminView === 'system-settings') loadSystemSettings();
+    if(link.dataset.adminView === 'course-catalog') loadCourseCatalog();
   });
 });
 
 const availableAdminViews = ['dashboard'];
 if(canViewAdminData) availableAdminViews.push('view-students', 'manage-reports', 'manage-recommendations', 'admin-reports');
-if(canManageStudents) availableAdminViews.push('add-users', 'view-subadmins', 'manage-admin-accounts', 'admin-activity', 'system-settings');
+if(canManageStudents) availableAdminViews.push('add-users', 'view-subadmins', 'manage-admin-accounts', 'admin-activity', 'system-settings', 'course-catalog');
 const initialAdminView = window.location.hash.slice(1) || document.body.dataset.defaultAdminView || 'dashboard';
 const selectedAdminView = availableAdminViews.includes(initialAdminView) ? initialAdminView : 'dashboard';
 showAdminView(selectedAdminView);
+if(initialAdminView === 'account-security' && !mustChangePassword) setAdminSettings(true, 'recovery');
 if(selectedAdminView === 'view-subadmins') loadSubadminProfiles();
 if(selectedAdminView === 'manage-admin-accounts') loadAdminAccounts();
 if(selectedAdminView === 'admin-activity') loadAdminActivity();
 if(selectedAdminView === 'system-settings') loadSystemSettings();
+if(selectedAdminView === 'course-catalog') loadCourseCatalog();
 if(selectedAdminView === 'manage-reports') loadReportCards();
 if(selectedAdminView === 'manage-recommendations') loadRecommendationManagement();
 

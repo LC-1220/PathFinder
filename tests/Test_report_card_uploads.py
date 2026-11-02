@@ -360,7 +360,8 @@ def test_new_upload_recalculates_real_recommendations_and_persists_them(monkeypa
     assert result["profile"]["strand"] == ""
     assert result["profile"]["course"] == "BSCS-DS"
     assert connection.saved[9] == ""
-    assert len(result["recommendation"]) == 3
+    assert len(result["recommendation"]) == 2
+    assert "BS in Nursing" not in {item["course"] for item in result["recommendation"]}
     assert result["recommendation"][0]["course"] == "BS in Hospitality Management"
     assert result["recommendation"] != old_recommendations
     assert result["recommendation"] == app._configured_recommendations(merged_subjects)
@@ -385,7 +386,7 @@ def test_save_persists_strand_and_grade_alternative_groups(monkeypatch):
     monkeypatch.setattr(app, "_db_conn", lambda: connection)
 
     async def request_json():
-        return {"subjects": "Mathematics - 98\nEnglish - 75", "strand": "BE"}
+        return {"subjects": "Mathematics - 98\nEnglish - 75\nEntrepreneurship - 90", "strand": "BE"}
 
     request = SimpleNamespace(session={"user_id": "student", "latest_recommendations": "stale"}, json=request_json)
     result = json.loads(asyncio.run(app.save_profile(request)).body)

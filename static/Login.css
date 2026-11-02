@@ -14,6 +14,8 @@ body{
     align-items:center;
     height:auto;
     min-height:100vh;
+    min-height:100svh;
+    padding:32px 16px;
     opacity: 1;
     transition: opacity 0.5s ease-in-out;
     position: relative;
@@ -81,10 +83,8 @@ body{
     overflow:visible;
     z-index:1;
     width:420px;
-    max-width:90%;
-    min-height:560px;
+    max-width:100%;
     height:auto;
-    transition:min-height .35s ease, transform .35s ease;
 }
 
 .container p{
@@ -121,34 +121,45 @@ body{
 }
 
 
-.container form{
+#loginForm{
     background:#fff;
     display:flex;
     justify-content:center;
     align-items:center;
     flex-direction:column;
-    padding:0 40px;
+    padding:40px 32px;
     height:auto;
-    min-height:560px;
     border-radius:38px;
+    width:100%;
+    gap:0;
+    flex-shrink:0;
 }
+
+.recovery-link-help{
+    padding:40px 32px;
+    text-align:center;
+}
+
+.recovery-link-help h1{font-size:24px;}
 
 .container input{
     background:#eee;
     border:none;
-    margin:8px 0;
+    margin:0;
     padding:10px 15px;
     font-size:13px;
     border-radius:8px;
     width:100%;
-    outline:none;
+    min-height:44px;
+    outline-offset:3px;
 }
+
+.container input:focus-visible{outline:2px solid #5c3ee8;}
 
 .form-container{
     position:relative;
     top:0;
     height:auto;
-    min-height:560px;
     width:100%;
     transition:all .6s ease-in-out;
 }
@@ -183,6 +194,7 @@ body{
     color:#64677a;
     text-align:center;
 }
+.container .login-intro{margin:12px 0 0;}
 
 .sign-in h1{
     width:100%;
@@ -207,7 +219,7 @@ body{
     display:grid;
     width:100%;
     gap:12px;
-    margin:26px 0 20px;
+    margin:24px 0;
 }
 
 .container .entry-button{
@@ -260,7 +272,7 @@ body{
 
 .admin-login{
     width:100%;
-    padding-top:14px;
+    padding-top:12px;
     border-top:1px solid #eceef5;
 }
 
@@ -269,9 +281,11 @@ body{
     color:#6d7080;
     font-size:12px;
     text-align:center;
+    padding:8px 0;
+    line-height:1.5;
 }
 
-.admin-login[open] summary{margin-bottom:10px;}
+.admin-login[open] summary{margin-bottom:12px;}
 .admin-login button{width:100%;}
 
 .admin-fields{
@@ -288,13 +302,28 @@ body{
 }
 
 .admin-fields-content{
+    display:flex;
+    flex-direction:column;
+    gap:12px;
     min-height:0;
-    overflow:hidden;
-    padding:0 4% 6px;
-    margin:0 -4%;
+    padding:4px 0 0;
 }
 
 .password-field{position:relative;width:100%;}
+[hidden]{display:none !important;}
+.container .auth-status{font-size:12px;line-height:1.6;color:#394369;margin:0;overflow-wrap:anywhere;}
+.auth-status:empty{display:none;}
+.container .recovery-link{background:none;animation:none;color:#4058b0;border:0;text-transform:none;padding:8px;font-size:12px;letter-spacing:normal;margin:0;}
+#login-submit{margin:0;min-height:44px;}
+.container button:disabled{opacity:.6;cursor:not-allowed;animation:none;}
+#admin-recovery-dialog{margin:auto;padding:0;border:0;border-radius:24px;width:420px;max-width:calc(100vw - 32px);max-height:calc(100svh - 32px);overflow-y:auto;box-shadow:0 20px 60px #151b4055;}
+#admin-recovery-dialog::backdrop{background:#12193899;}
+.container .recovery-form{display:flex;flex-direction:column;gap:16px;padding:28px;border-radius:24px;align-items:stretch;background:#fff;}
+.recovery-form h2{font-size:22px;}
+.recovery-form label{font-size:13px;color:#394369;}
+.container .recovery-form p{margin:0;}
+.recovery-field{display:grid;gap:8px;}
+.container .recovery-form button{margin:0;}
 .password-field input{padding-right:44px;}
 .password-field button#toggle-password{
     position:absolute;
@@ -321,45 +350,23 @@ body{
 }
 
 @media (max-width: 900px){
-    body{min-height:100svh;height:auto;padding:24px 16px;align-items:flex-start;overflow-y:auto;animation:login-mobile-flow 14s ease-in-out infinite;}
     .bubble-1{width:260px;height:260px;}
     .bubble-2{width:360px;height:360px;}
     .bubble-3{width:240px;height:240px;}
     .bubble-4{width:220px;height:220px;}
-    .container{position:relative;z-index:1;width:min(420px,100%);min-height:0;margin:86px auto 32px;border-radius:38px;overflow:hidden;background:transparent;box-shadow:0 20px 40px rgba(17,24,39,.18);}
-    .container::before{display:none;}
-    .form-container{position:relative;top:auto;left:auto;width:100%;height:auto;min-height:0;z-index:2;}
-    .form-container form{min-height:0;border-radius:38px;padding:34px 24px 64px;box-shadow:0 14px 32px rgba(46,51,145,.16);display:flex;justify-content:flex-start;}
-    .sign-in{display:flex !important;left:0;width:100%;z-index:3;}
-    .sign-in form{width:100%;height:auto;}
-    .container form h1{order:1;font-size:28px;line-height:1.16;color:#25234c;margin:0 0 8px;}
-    .container form::before{display:none;}
-    .container form .login-intro{order:2;margin:0 0 20px;color:#77758c;}
-    .container form .entry-actions{order:3;gap:12px;margin:0 0 18px;}
-    .container form .admin-login{order:4;}
-    .container form span{color:#77758c;}
-    .container form input{height:44px;background:#fafaff;border:1px solid #e3e3ef;}
-    .container form a{margin:0;}
-    .container form button{width:100%;padding:12px 18px;border-radius:9px;}
-    .admin-login[open] summary{margin-bottom:12px;}
-    .admin-login input{margin:10px 0;}
-    .admin-login button{margin-top:16px;}
-    .container:has(.admin-login[open]){transform:translateY(-72px);}
-    .container a{font-size:12px;}
 }
 
-@media (max-width: 900px) and (orientation: landscape){
-    body{overflow-y:auto;align-items:flex-start;}
-    .container{overflow:visible;min-height:100svh;}
-    .container::before{height:118px;padding-top:24px;font-size:22px;}
-    .form-container{top:82px;min-height:0;}
-    .form-container form{min-height:0;padding:14px 24px 18px;border-radius:18px 18px 0 0;}
-    .container form h1{font-size:22px;}
-    .container form input{height:34px;margin:4px 0;}
-    .container form a{margin:8px 0 4px;}
-    .container form button{margin-top:6px;padding:9px 18px;}
-    .container form .social-icons{margin-top:8px;padding-top:7px;}
-    .container form .social-icons a{margin:0;width:34px;height:34px;}
+@media (max-width: 480px){
+    body{padding:24px 16px;}
+    .container, #loginForm{border-radius:28px;}
+    #loginForm{padding:32px 24px;}
+    .sign-in h1{font-size:28px;line-height:1.2;}
+    .container .recovery-form{padding:24px 20px;}
+}
+
+@media (max-height: 600px){
+    body{align-items:flex-start;padding:16px;}
+    #loginForm{padding-top:28px;padding-bottom:28px;}
 }
 
 @keyframes login-mobile-flow{

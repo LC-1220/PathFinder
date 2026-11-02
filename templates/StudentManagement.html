@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="{{ url_for('static', filename='Student.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='ProfileCropper.css') }}">
 <link href="https://fonts.googleapis.com/css2?family=Nunito:ital,wght@0,200..1000;1,200..1000&family=Roboto:ital,wght@0,100..900;1,100..900&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/7.0.1/css/all.min.css" integrity="sha512-2SwdPD6INVrV/lHTZbO2nodKhrnDdJK9/kg2XD1r9uGqPo1cUbujc+IYdlYdEErWNu69gVcYgdxlmVmzTWnetw==" crossorigin="anonymous" referrerpolicy="no-referrer" />
     <script>try { document.documentElement.classList.toggle('student-dark', localStorage.getItem('pathfinder-student-theme') === 'dark'); } catch (error) {}</script>
@@ -227,12 +228,30 @@
                         <div class="recommendation-disclaimer"><i class="fa-solid fa-circle-info"></i><p>Course matches are academic guidance based on the grades provided. They do not guarantee admission, eligibility, or career outcomes. Consider your interests and speak with a guidance counselor before deciding.</p></div>
                         <div class="result-actions">
                             <button id="upload-another" type="button"><i class="fa-solid fa-arrow-rotate-left"></i> Upload another report card</button>
+                            {% if can_email_results|default(false) %}
+                            <button id="email-results" type="button" data-email="{{ email }}"><i class="fa-solid fa-envelope"></i> Email my results</button>
+                            {% endif %}
                         </div>
                     </section>
 
                 </section>
             </div>
         </div>
+
+        {% if can_email_results|default(false) %}
+        <div id="email-results-modal" class="email-results-modal" hidden>
+            <section class="email-results-dialog" role="dialog" aria-modal="true" aria-labelledby="email-results-title" aria-describedby="email-results-message">
+                <div class="email-results-icon"><i class="fa-solid fa-envelope"></i></div>
+                <h2 id="email-results-title">Email your results?</h2>
+                <p id="email-results-message">Your course recommendations and match details will be sent to <strong id="email-results-destination">{{ email }}</strong>.</p>
+                <p id="email-results-status" class="email-results-status" role="status" aria-live="polite" hidden></p>
+                <div class="email-results-actions">
+                    <button id="email-results-cancel" class="email-results-cancel" type="button">Cancel</button>
+                    <button id="email-results-confirm" class="email-results-confirm" type="button">Send results</button>
+                </div>
+            </section>
+        </div>
+        {% endif %}
 
         <div id="settings-modal" class="settings-modal" hidden>
             <div class="settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title">
@@ -400,6 +419,7 @@
                 });
             })();
         </script>
+        <script src="{{ url_for('static', filename='ProfileCropper.js') }}"></script>
         <script src="{{ url_for('static', filename='StudentApp.js') }}"></script>
         <script src="{{ url_for('static', filename='Logout.js') }}"></script>
     </body>

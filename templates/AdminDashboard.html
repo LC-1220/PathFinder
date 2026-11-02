@@ -6,6 +6,8 @@
   <title>Admin Dashboard</title>
   <link rel="icon" type="image/png" href="{{ url_for('static', filename='images/PathFinder2.png') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='Admin.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='PasswordChecklist.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='ProfileCropper.css') }}">
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/7.0.1/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.3.0/dist/chart.umd.min.js"></script>
@@ -39,7 +41,15 @@
           <li><a href="#manage-admin-accounts" class="logo admin-view-link" data-admin-view="manage-admin-accounts" title="Admin Accounts"><span class="icon"><i class="fa-solid fa-user-gear" aria-hidden="true"></i></span><span class="text">Admin Accounts</span></a></li>
           <li><a href="#view-subadmins" class="logo admin-view-link" data-admin-view="view-subadmins" title="Subadmin Profiles"><span class="icon"><i class="fa-solid fa-user-shield" aria-hidden="true"></i></span><span class="text">Subadmin Profiles</span></a></li>
           <li><a href="#admin-activity" class="logo admin-view-link" data-admin-view="admin-activity" title="Admin Activity"><span class="icon"><i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i></span><span class="text">Admin Activity</span></a></li>
-          <li><a href="#system-settings" class="logo admin-view-link" data-admin-view="system-settings" title="System Settings"><span class="icon"><i class="fa-solid fa-gear" aria-hidden="true"></i></span><span class="text">System Settings</span></a></li>
+          <li class="admin-nav-parent">
+            <details class="admin-nav-disclosure">
+              <summary class="logo admin-nav-toggle" title="System Settings" role="button" aria-label="System Settings" aria-expanded="false" aria-controls="system-settings-menu"><span class="icon"><i class="fa-solid fa-gear" aria-hidden="true"></i></span><span class="text">System Settings</span><i class="fa-solid fa-chevron-down admin-nav-chevron" aria-hidden="true"></i></summary>
+              <ul id="system-settings-menu" class="admin-nav-submenu" aria-label="System settings pages">
+                <li><a href="#system-settings" class="logo admin-view-link" data-admin-view="system-settings" data-admin-subview title="General Settings"><span class="icon"><i class="fa-solid fa-sliders" aria-hidden="true"></i></span><span class="text">General</span></a></li>
+                <li><a href="#course-catalog" class="logo admin-view-link" data-admin-view="course-catalog" data-admin-subview title="Course Catalog"><span class="icon"><i class="fa-solid fa-book-open" aria-hidden="true"></i></span><span class="text">Course Catalog</span></a></li>
+              </ul>
+            </details>
+          </li>
         </ul>
       </section>{% endif %}
     </div>
@@ -50,7 +60,6 @@
       <button id="admin-account-trigger" class="admin-account-trigger" type="button" aria-expanded="false"><span>{{ admin }}</span><img src="{{ profile_image }}" referrerpolicy="no-referrer" data-fallback-src="/static/profile_pictures/default.svg" alt="{{ admin }} profile picture"></button>
       <div id="admin-profile-menu" class="admin-profile-menu" hidden>
         <button type="button" data-admin-settings><i class="fa-solid fa-user-gear"></i> Account settings</button>
-        <button type="button" data-admin-settings="account"><i class="fa-solid fa-key" aria-hidden="true"></i> Change password</button>
         <button id="admin-theme-toggle" type="button" aria-pressed="false"><i class="fa-solid fa-moon" aria-hidden="true"></i><span>Dark mode</span></button>
         <a href="/admin/logout" data-confirm-logout><i class="fa-solid fa-right-from-bracket"></i> Logout</a>
       </div>
@@ -82,11 +91,11 @@
       <form id="add-admin-form" class="admin-user-form">
         <input name="name" type="text" placeholder="Admin name" required>
         <input name="username" type="text" placeholder="Username" autocomplete="off" pattern="[A-Za-z][A-Za-z0-9._-]{2,31}" title="3-32 characters, starting with a letter; use letters, numbers, dots, underscores, or hyphens." required>
-        <input name="password" type="password" placeholder="Temporary password (8+ characters)" minlength="8" maxlength="72" title="Use at least 8 characters, including an uppercase letter and a symbol." required>
+        <div class="admin-password-field"><input name="password" type="password" placeholder="Temporary password (8+ characters)" aria-label="Temporary password" minlength="8" maxlength="72" title="Use at least 8 characters, including uppercase and lowercase letters, a number, and a symbol." data-password-checklist required></div>
         <label class="admin-role-choice">Role<select name="role" required><option value="semi_admin">Semi Admin · View-only</option><option value="admin">Super Admin · Full access</option></select></label>
         <button class="btn btn-primary" type="submit">Create admin</button>
       </form>
-      <p class="admin-password-policy-note">Use at least 8 characters, including an uppercase letter and a symbol. Maximum 72 UTF-8 bytes.</p>
+      <p class="admin-password-policy-note">Maximum 72 UTF-8 bytes.</p>
       <div id="add-admin-status" class="admin-form-status" role="status"></div>
     </section>
     <section id="manage-admin-accounts" class="admin-students-section admin-account-management" style="margin-top:22px">
@@ -132,6 +141,27 @@
         </div>
         <div class="system-settings-actions"><button class="btn btn-primary" type="submit"><i class="fa-solid fa-floppy-disk" aria-hidden="true"></i> Save settings</button><span id="system-settings-status" role="status" hidden></span></div>
       </form>
+    </section>
+    <section id="course-catalog" class="admin-students-section admin-system-settings" style="margin-top:22px" aria-labelledby="course-catalog-title">
+      <div class="course-catalog-manager">
+        <div class="course-catalog-heading">
+          <div><span class="admin-panel-kicker">SYSTEM SETTINGS · RECOMMENDATION CATALOG</span><h3 id="course-catalog-title">Course catalog</h3><p>Courses listed here are the ones students can be recommended.</p></div>
+          <button id="add-course-button" class="btn btn-primary" type="button"><i class="fa-solid fa-plus" aria-hidden="true"></i> Add new course</button>
+        </div>
+        <div class="course-catalog-toolbar">
+          <label class="course-catalog-search"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i><span class="sr-only">Search courses</span><input id="course-catalog-search" type="search" placeholder="Search courses"></label>
+          <label class="admin-filter-control"><span>Cluster</span><select id="course-catalog-cluster" aria-label="Filter courses by academic cluster"><option value="">All clusters</option><option value="BE">BE</option><option value="STEM">STEM</option><option value="ICTECH">ICTECH</option><option value="HT">HT</option><option value="ARSSH">ARSSH</option></select></label>
+          <span id="course-catalog-count" aria-live="polite"></span>
+        </div>
+        <p id="course-catalog-status" role="status" hidden></p>
+        <div class="course-catalog-table-wrap">
+          <table class="admin-students-table course-catalog-table">
+            <thead><tr><th>Course</th><th>Academic clusters</th><th><span class="sr-only">Actions</span></th></tr></thead>
+            <tbody id="course-catalog-body"><tr><td colspan="3">Loading courses...</td></tr></tbody>
+          </table>
+        </div>
+        <div id="course-catalog-pager" aria-live="polite"></div>
+      </div>
     </section>
     {% endif %}
 
@@ -208,7 +238,17 @@
 
   <aside id="admin-settings-panel" class="admin-settings-panel" hidden>
     <div class="admin-settings-card">
-      <aside class="admin-settings-sidebar" role="tablist" aria-label="Account settings sections"><strong><i class="fa-solid fa-sliders"></i> Settings</strong><button id="admin-settings-tab-profile" class="admin-settings-tab active" type="button" role="tab" aria-selected="true" aria-controls="admin-settings-profile" data-settings-tab="profile"><i class="fa-solid fa-user"></i><span>Profile</span></button><button id="admin-settings-tab-account" class="admin-settings-tab" type="button" role="tab" aria-selected="false" aria-controls="admin-settings-account" data-settings-tab="account"><i class="fa-solid fa-shield-halved"></i><span>Account</span></button></aside>
+      <aside class="admin-settings-sidebar" role="tablist" aria-label="Account settings sections">
+        <strong><i class="fa-solid fa-sliders"></i> Settings</strong>
+        <button id="admin-settings-tab-profile" class="admin-settings-tab active" type="button" role="tab" aria-selected="true" aria-controls="admin-settings-profile" data-settings-tab="profile"><i class="fa-solid fa-user"></i><span>Profile</span></button>
+        <div class="admin-settings-group">
+          <button id="admin-settings-tab-account" class="admin-settings-tab admin-settings-group-toggle" type="button" aria-expanded="false" aria-controls="admin-settings-subtabs" data-settings-group="account"><i class="fa-solid fa-shield-halved"></i><span>Account</span><i class="admin-settings-chevron" aria-hidden="true"></i></button>
+          <div id="admin-settings-subtabs" class="admin-settings-subtabs" hidden>
+            <button id="admin-settings-tab-password" class="admin-settings-tab admin-settings-subtab" type="button" role="tab" aria-selected="false" aria-controls="admin-settings-password" data-settings-tab="password"><i class="fa-solid fa-key"></i><span>Change password</span></button>
+            <button id="admin-settings-tab-recovery" class="admin-settings-tab admin-settings-subtab" type="button" role="tab" aria-selected="false" aria-controls="admin-settings-recovery" data-settings-tab="recovery"><i class="fa-solid fa-envelope-circle-check"></i><span>Recovery Gmail</span></button>
+          </div>
+        </div>
+      </aside>
       <section class="admin-settings-content">
         <div class="admin-settings-heading"><span>Account settings</span><button id="close-admin-settings" type="button" aria-label="Close settings"><i class="fa-solid fa-xmark"></i></button></div>
         <section id="admin-settings-profile" class="admin-settings-tab-panel" role="tabpanel" aria-labelledby="admin-settings-tab-profile" data-settings-panel="profile">
@@ -217,16 +257,28 @@
           <p>{{ 'Super Admin' if account_role == 'admin' else 'Semi Admin' if account_role == 'semi_admin' else 'Administrator' }} account</p>
           <form id="admin-name-form" class="admin-name-form"><label for="admin-name-input">Display name</label><div><input id="admin-name-input" name="name" type="text" value="{{ admin }}" required><button type="submit">Save name</button></div><span id="admin-name-status" role="status"></span></form>
         </section>
-        <section id="admin-settings-account" class="admin-settings-tab-panel" role="tabpanel" aria-labelledby="admin-settings-tab-account" data-settings-panel="account" hidden>
-          <h3>Account security</h3>
+        <section id="admin-settings-password" class="admin-settings-tab-panel" role="tabpanel" aria-labelledby="admin-settings-tab-password" data-settings-panel="password" hidden>
+          <h3>Change password</h3>
           <p>Update your sign-in password and manage your session.</p>
           <dl class="admin-account-details">
             <div><dt>Username</dt><dd>{{ username or email }}</dd></div>
             <div><dt>Access level</dt><dd>{{ 'Super Admin' if account_role == 'admin' else 'Semi Admin' if account_role == 'semi_admin' else 'Administrator' }}</dd></div>
           </dl>
-          <p class="admin-password-policy-note">New passwords need 8+ characters, including an uppercase letter and a symbol. Maximum 72 UTF-8 bytes.</p>
-          <form id="admin-password-form" class="admin-password-form"><label for="admin-current-password">Change password</label><input id="admin-current-password" name="current_password" type="password" placeholder="Current password" autocomplete="current-password" required><input id="admin-new-password" name="new_password" type="password" placeholder="New password (8+ characters)" minlength="8" maxlength="72" autocomplete="new-password" required><input name="confirm_password" type="password" placeholder="Confirm new password" minlength="8" maxlength="72" autocomplete="new-password" required><button type="submit">Update password</button><span id="admin-password-status" role="status"></span></form>
+          <p class="admin-password-policy-note">Maximum 72 UTF-8 bytes.</p>
+          <form id="admin-password-form" class="admin-password-form"><label for="admin-current-password">New sign-in password</label><input id="admin-current-password" name="current_password" type="password" placeholder="Current password" autocomplete="current-password" required><input id="admin-new-password" name="new_password" type="password" placeholder="New password (8+ characters)" minlength="8" maxlength="72" autocomplete="new-password" data-password-checklist required><input name="confirm_password" type="password" placeholder="Confirm new password" minlength="8" maxlength="72" autocomplete="new-password" required><button type="submit">Update password</button><span id="admin-password-status" role="status"></span></form>
           <a href="/admin/logout" class="admin-settings-action" data-confirm-logout><i class="fa-solid fa-right-from-bracket"></i> Log out</a>
+        </section>
+        <section id="admin-settings-recovery" class="admin-settings-tab-panel" role="tabpanel" aria-labelledby="admin-settings-tab-recovery" data-settings-panel="recovery" hidden>
+          <h3>Recovery Gmail</h3>
+          <p>Add and verify your Gmail to recover your admin account if you forget your password. Your existing recovery address stays active until a replacement is verified.</p>
+          <form id="admin-recovery-form" class="admin-password-form">
+            <span id="admin-recovery-current" role="status">Loading recovery details...</span>
+            <label for="admin-recovery-gmail">Gmail address</label>
+            <input id="admin-recovery-gmail" name="email" type="email" placeholder="yourname@gmail.com" autocomplete="email" required>
+            <input name="current_password" type="password" placeholder="Current password" aria-label="Current password for recovery Gmail" autocomplete="current-password" required>
+            <button type="submit">Send verification link</button>
+            <span id="admin-recovery-status" role="status"></span>
+          </form>
         </section>
       </section>
     </div>
@@ -249,10 +301,10 @@
     <span class="admin-panel-kicker">ACCOUNT SECURITY</span>
     <h2 id="first-password-title">Change your temporary password</h2>
     <p id="first-password-description">Set a new password to access your {{ 'Super Admin' if account_role == 'admin' else 'Semi Admin' }} dashboard.</p>
-    <p class="admin-password-policy-note">Use at least 8 characters, including an uppercase letter and a symbol. Maximum 72 UTF-8 bytes.</p>
+    <p class="admin-password-policy-note">Maximum 72 UTF-8 bytes.</p>
     <form id="first-password-form">
       <label>Temporary password<input name="current_password" type="password" autocomplete="current-password" required></label>
-      <label>New password<input name="new_password" type="password" minlength="8" maxlength="72" autocomplete="new-password" required></label>
+      <label>New password<input name="new_password" type="password" minlength="8" maxlength="72" autocomplete="new-password" data-password-checklist required></label>
       <label>Confirm new password<input name="confirm_password" type="password" minlength="8" maxlength="72" autocomplete="new-password" required></label>
       <p id="first-password-status" role="status" aria-live="polite"></p>
       <button class="btn btn-primary" type="submit">Update password</button>
@@ -281,6 +333,51 @@
   </div>
 
   {% if can_manage_students|default(false) %}
+  <dialog id="course-editor-dialog" class="course-editor-dialog" aria-labelledby="course-editor-title">
+    <form id="course-editor-form" class="course-editor-form" novalidate>
+      <div class="course-editor-header"><div><span class="admin-panel-kicker">RECOMMENDATION CATALOG</span><h2 id="course-editor-title">Add new course</h2></div><button class="course-editor-close" type="button" data-course-editor-close aria-label="Close"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button></div>
+      <input name="id" type="hidden">
+      <label>Course name<input name="course" type="text" minlength="3" maxlength="200" placeholder="Bachelor of Science in ..." required></label>
+      <label>Description<textarea name="description" rows="3" minlength="10" maxlength="500" placeholder="Short description shown with the recommendation" required></textarea></label>
+      <fieldset class="course-editor-group"><legend>Academic clusters that fit this course</legend><div class="system-strand-options course-editor-strands">
+        <label><input type="checkbox" name="strands" value="BE"> BE</label>
+        <label><input type="checkbox" name="strands" value="STEM"> STEM</label>
+        <label><input type="checkbox" name="strands" value="ICTECH"> ICTECH</label>
+        <label><input type="checkbox" name="strands" value="HT"> HT</label>
+        <label><input type="checkbox" name="strands" value="ARSSH"> ARSSH</label>
+      </div></fieldset>
+      <fieldset class="course-editor-group">
+        <legend>Ideal subject-area scores (0–100)</legend>
+        <label class="course-editor-template">Start from a similar course<select id="course-template-select"><option value="">Choose a course to copy its scores</option></select></label>
+        <p class="course-editor-hint">Scores describe the grade profile of a student who fits this course. Copy a similar course, then adjust.</p>
+        <div class="course-editor-scores">
+          <label>Math<input name="score_math" type="number" min="0" max="100" step="1" required></label>
+          <label>Science<input name="score_science" type="number" min="0" max="100" step="1" required></label>
+          <label>English<input name="score_english" type="number" min="0" max="100" step="1" required></label>
+          <label>Technology<input name="score_technology" type="number" min="0" max="100" step="1" required></label>
+          <label>Business<input name="score_business" type="number" min="0" max="100" step="1" required></label>
+          <label>Social<input name="score_social" type="number" min="0" max="100" step="1" required></label>
+        </div>
+      </fieldset>
+      <p id="course-editor-status" role="status" aria-live="polite" hidden></p>
+      <div class="course-editor-actions"><button class="btn btn-secondary" type="button" data-course-editor-close>Cancel</button><button class="btn btn-primary" type="submit"><i class="fa-solid fa-floppy-disk" aria-hidden="true"></i> Save course</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="course-confirm-dialog" class="course-editor-dialog course-confirm-dialog" aria-labelledby="course-confirm-title" aria-describedby="course-confirm-message">
+    <form id="course-confirm-form" class="course-editor-form" method="dialog" novalidate>
+      <div class="course-editor-header"><div><span id="course-confirm-kicker" class="admin-panel-kicker">CONFIRM CHANGE</span><h2 id="course-confirm-title">Are you sure?</h2></div><button class="course-editor-close" type="button" data-course-confirm-cancel aria-label="Cancel"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button></div>
+      <p id="course-confirm-message" class="course-confirm-message"></p>
+      <ul id="course-confirm-details" class="course-confirm-details" hidden></ul>
+      <label id="course-confirm-typed" class="course-confirm-typed" hidden>
+        <span>Type <strong>delete</strong> to confirm</span>
+        <input id="course-confirm-input" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" aria-describedby="course-confirm-hint">
+        <small id="course-confirm-hint">This prevents removing a course by accident.</small>
+      </label>
+      <div class="course-editor-actions"><button class="btn btn-secondary" type="button" data-course-confirm-cancel>Cancel</button><button id="course-confirm-submit" class="btn btn-primary" type="submit">Confirm</button></div>
+    </form>
+  </dialog>
+
   <div id="subadmin-profile-modal" class="student-editor-modal subadmin-profile-modal" hidden>
     <section class="subadmin-profile-dialog" role="dialog" aria-modal="true" aria-labelledby="subadmin-profile-name">
       <div class="student-editor-header"><div><span>Level coordinator</span><h2 id="subadmin-profile-name">Subadmin profile</h2></div><button id="close-subadmin-profile" type="button" aria-label="Close profile"><i class="fa-solid fa-xmark"></i></button></div>
@@ -308,6 +405,8 @@
   </div>
   {% endif %}
 
+<script src="{{ url_for('static', filename='PasswordChecklist.js') }}"></script>
+<script src="{{ url_for('static', filename='ProfileCropper.js') }}"></script>
 <script src="{{ url_for('static', filename='Admin.js') }}"></script>
 </body>
 </html>

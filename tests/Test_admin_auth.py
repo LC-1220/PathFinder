@@ -29,6 +29,11 @@ class AuthCursor:
         self.statements.append((query, params))
 
     def fetchone(self):
+        query = self.statements[-1][0]
+        if "SELECT failed_attempts" in query:
+            return (0, 0, None)
+        if "SELECT password_hash, auth_version" in query:
+            return (self.account[2], self.account[-1])
         if "RETURNING id" in self.statements[-1][0]:
             return (77,)
         return self.account
@@ -54,7 +59,7 @@ class AuthConnection:
 @pytest.mark.parametrize("identifier", ["coordinator.one", "coordinator@example.com"])
 def test_admin_login_accepts_username_or_existing_email(monkeypatch, identifier):
     cursor = AuthCursor((77, "Coordinator", "stored-hash", app.ROLE_SEMI_ADMIN, "default.svg", True, True,
-                         "coordinator@example.com", "coordinator.one"))
+                         "coordinator@example.com", "coordinator.one", 0))
     monkeypatch.setattr(app, "_db_conn", lambda: AuthConnection(cursor))
     monkeypatch.setattr(app, "_check_password", lambda stored, supplied: True)
     monkeypatch.setattr(app, "_record_admin_activity", lambda *args, **kwargs: None)
@@ -75,7 +80,7 @@ def test_new_admin_account_requires_username_not_email(monkeypatch):
     monkeypatch.setattr(app, "_record_admin_activity", lambda *args, **kwargs: None)
 
     response = asyncio.run(app.admin_create_user(AuthRequest({
-        "name": "New Coordinator", "username": "new.coordinator", "password": "Password!", "role": "semi_admin",
+        "name": "New Coordinator", "username": "new.coordinator", "password": "Password1!", "role": "semi_admin",
     })))
 
     assert json.loads(response.body)["success"] is True
@@ -90,9 +95,18 @@ def test_admin_creation_rejects_invalid_usernames(monkeypatch, username):
     monkeypatch.setattr(app, "_is_full_admin_session", lambda session: True)
 
     response = asyncio.run(app.admin_create_user(AuthRequest({
-        "name": "Coordinator", "username": username, "password": "Password!", "role": "semi_admin",
+        "name": "Coordinator", "username": username, "password": "Password1!", "role": "semi_admin",
     })))
 
+    assert response.status_code == 400
+
+
+@pytest.mark.parametrize("password", ["NoDigits!", "UPPERCASE1!", "lowercase1!"])
+def test_admin_creation_rejects_passwords_missing_checklist_rules(monkeypatch, password):
+    monkeypatch.setattr(app, "_is_full_admin_session", lambda session: True)
+    response = asyncio.run(app.admin_create_user(AuthRequest({
+        "name": "Coordinator", "username": "coordinator", "password": password, "role": "semi_admin",
+    })))
     assert response.status_code == 400
 
 
@@ -134,8 +148,8 @@ class PasswordCursor(AuthCursor):
 
     def fetchone(self):
         if "SELECT password_hash" in self.statements[-1][0]:
-            return (self.password_hash,)
-        return (self.role, True, self.forced)
+            return (self.password_hash, 0)
+        return (self.role, True, self.forced, 0)
 
 
 @pytest.mark.parametrize("role", [app.ROLE_SUPER_ADMIN, app.ROLE_SEMI_ADMIN])
@@ -147,14 +161,14 @@ def test_admin_can_change_own_password(monkeypatch, role, forced):
     monkeypatch.setattr(app, "_record_admin_activity", lambda session, action, **kwargs: actions.append(action))
     request = AuthRequest({
         "current_password": "OldPassword!",
-        "new_password": "NewPassword!",
-        "confirm_password": "NewPassword!",
+        "new_password": "NewPassword1!",
+        "confirm_password": "NewPassword1!",
     })
     response = asyncio.run(app.admin_change_password(request))
 
     assert response.status_code == 200
     assert json.loads(response.body)["success"] is True
-    assert app._check_password(cursor.password_hash, "NewPassword!")
+    assert app._check_password(cursor.password_hash, "NewPassword1!")
     assert not app._check_password(cursor.password_hash, "OldPassword!")
     assert request.session["must_change_password"] is False
     assert request.session["role"] == role
@@ -164,14 +178,14 @@ def test_admin_can_change_own_password(monkeypatch, role, forced):
 
 
 @pytest.mark.parametrize(("current", "new", "confirmation", "message"), [
-    ("WrongPassword!", "NewPassword!", "NewPassword!", "Current password is incorrect."),
-    ("OldPassword!", "NewPassword!", "DifferentPassword!", "New passwords do not match."),
-    ("OldPassword!", "weak", "weak", app._password_policy_error("weak")),
-    ("OldPassword!", "OldPassword!", "OldPassword!", "Choose a password different from your current password."),
-    ("", "NewPassword!", "NewPassword!", "Complete all password fields."),
+    ("WrongPassword!", "NewPassword1!", "NewPassword1!", "Current password is incorrect."),
+    ("OldPassword1!", "NewPassword1!", "DifferentPassword1!", "New passwords do not match."),
+    ("OldPassword1!", "weak", "weak", app._password_policy_error("weak", admin=True)),
+    ("OldPassword1!", "OldPassword1!", "OldPassword1!", "Choose a password different from your current password."),
+    ("", "NewPassword1!", "NewPassword1!", "Complete all password fields."),
 ])
 def test_super_admin_password_change_rejects_invalid_input(monkeypatch, current, new, confirmation, message):
-    cursor = PasswordCursor(app.ROLE_SUPER_ADMIN, "OldPassword!")
+    cursor = PasswordCursor(app.ROLE_SUPER_ADMIN, "OldPassword1!")
     original_hash = cursor.password_hash
     monkeypatch.setattr(app, "_db_conn", lambda: AuthConnection(cursor))
     request = AuthRequest({
@@ -189,21 +203,52 @@ def test_admin_dashboard_includes_password_change_option(monkeypatch, role):
     secret = app.app.user_middleware[0].kwargs["secret_key"]
     session = {"user_id": 12345, "role": role, "name": "Test Admin"}
     cookie = TimestampSigner(secret).sign(base64.b64encode(json.dumps(session).encode())).decode()
-    monkeypatch.setattr(app, "_db_conn", lambda: AuthConnection(AuthCursor((role, True, False))))
+    monkeypatch.setattr(app, "_db_conn", lambda: AuthConnection(AuthCursor((role, True, False, 0))))
     monkeypatch.setattr(app, "_get_system_settings", lambda: app.SYSTEM_SETTING_DEFAULTS)
     with TestClient(app.app) as client:
         client.cookies.set("session_", cookie)
         dashboard = client.get("/admin/dashboard", headers={"Accept": "text/html"})
     assert dashboard.status_code == 200
-    assert 'data-admin-settings="account"' in dashboard.text
+    assert 'data-admin-settings="account"' not in dashboard.text
+    assert 'aria-expanded="false" aria-controls="admin-settings-subtabs"' in dashboard.text
+    assert 'id="admin-settings-subtabs" class="admin-settings-subtabs" hidden' in dashboard.text
+    assert 'class="admin-settings-chevron" aria-hidden="true"' in dashboard.text
+    assert 'data-settings-tab="password"' in dashboard.text
+    assert 'data-settings-tab="recovery"' in dashboard.text
     assert 'id="admin-password-form"' in dashboard.text
     assert 'name="current_password"' in dashboard.text
     assert 'name="new_password"' in dashboard.text
     assert 'name="confirm_password"' in dashboard.text
 
 
+@pytest.mark.parametrize(
+    ("role", "can_manage_catalog"),
+    [(app.ROLE_SUPER_ADMIN, True), (app.ROLE_SEMI_ADMIN, False)],
+)
+def test_system_settings_catalog_navigation_permissions(monkeypatch, role, can_manage_catalog):
+    secret = app.app.user_middleware[0].kwargs["secret_key"]
+    session = {"user_id": 12345, "role": role, "name": "Test Admin"}
+    cookie = TimestampSigner(secret).sign(base64.b64encode(json.dumps(session).encode())).decode()
+    monkeypatch.setattr(app, "_db_conn", lambda: AuthConnection(AuthCursor((role, True, False, 0))))
+    monkeypatch.setattr(app, "_get_system_settings", lambda: app.SYSTEM_SETTING_DEFAULTS)
+    with TestClient(app.app) as client:
+        client.cookies.set("session_", cookie)
+        dashboard = client.get("/admin/dashboard", headers={"Accept": "text/html"})
+
+    assert dashboard.status_code == 200
+    assert ('<details class="admin-nav-disclosure">' in dashboard.text) is can_manage_catalog
+    assert ('aria-label="System Settings"' in dashboard.text) is can_manage_catalog
+    assert ('aria-expanded="false" aria-controls="system-settings-menu"' in dashboard.text) is can_manage_catalog
+    assert ('id="system-settings-menu"' in dashboard.text) is can_manage_catalog
+    assert ('data-admin-view="course-catalog"' in dashboard.text) is can_manage_catalog
+    assert ('id="course-catalog-cluster"' in dashboard.text) is can_manage_catalog
+    assert ('id="course-catalog-pager"' in dashboard.text) is can_manage_catalog
+    assert ('id="course-confirm-dialog"' in dashboard.text) is can_manage_catalog
+    assert ('id="course-confirm-input"' in dashboard.text) is can_manage_catalog
+
+
 def test_password_change_requires_admin_account(monkeypatch):
-    cursor = AuthCursor(("student", True, False))
+    cursor = AuthCursor(("student", True, False, 0))
     monkeypatch.setattr(app, "_db_conn", lambda: AuthConnection(cursor))
     request = AuthRequest({
         "current_password": "OldPassword!", "new_password": "NewPassword!", "confirm_password": "NewPassword!",

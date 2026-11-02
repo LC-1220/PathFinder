@@ -23,6 +23,24 @@ alter table public.users
     alter column email drop not null;
 create unique index if not exists users_username_lower_unique on public.users (lower(username)) where username is not null;
 
+alter table public.users
+    add column if not exists auth_version integer not null default 0;
+
+create table if not exists public.admin_account_security (
+    user_id bigint primary key references public.users(id) on delete cascade,
+    failed_attempts integer not null default 0,
+    lockout_level integer not null default 0,
+    locked_until timestamptz,
+    recovery_email text unique,
+    pending_email text,
+    verification_hash text unique,
+    verification_expires_at timestamptz,
+    verification_sent_at timestamptz,
+    reset_hash text unique,
+    reset_expires_at timestamptz,
+    reset_sent_at timestamptz
+);
+
 create table if not exists public.system_settings (
     settings_key text primary key,
     settings_json text not null,

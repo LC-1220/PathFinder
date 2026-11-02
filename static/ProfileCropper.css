@@ -1,0 +1,125 @@
+.pf-cropper-open { overflow: hidden; }
+.pf-cropper-overlay[hidden] { display: none !important; }
+.pf-cropper-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 10050;
+    display: grid;
+    place-items: center;
+    padding: 16px;
+    background: rgba(15, 10, 12, 0.62);
+    font-family: inherit;
+}
+.pf-cropper-dialog {
+    width: min(380px, 100%);
+    max-height: calc(100vh - 32px);
+    overflow-x: hidden;
+    overflow-y: auto;
+    box-sizing: border-box;
+    padding: 20px;
+    border-radius: 18px;
+    background: #fff;
+    color: #2b1b1f;
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
+}
+.pf-cropper-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.pf-cropper-head h2 { margin: 0; font-size: 18px; line-height: 1.3; }
+.pf-cropper-overlay .pf-cropper-close {
+    flex: 0 0 32px;
+    margin: 0;
+    padding: 0;
+    width: 32px;
+    height: 32px;
+    border: 0;
+    border-radius: 50%;
+    background: transparent;
+    color: inherit;
+    font-size: 24px;
+    line-height: 1;
+    cursor: pointer;
+}
+.pf-cropper-close:hover { background: rgba(128, 0, 0, 0.08); }
+.pf-cropper-help { margin: 6px 0 14px; font-size: 13px; color: #6b5a5e; }
+.pf-cropper-stage {
+    position: relative;
+    width: min(300px, 100%);
+    aspect-ratio: 1 / 1;
+    margin: 0 auto;
+    overflow: hidden;
+    border-radius: 14px;
+    background: repeating-conic-gradient(#ece6e7 0 25%, #f8f5f5 0 50%) 0 0 / 20px 20px;
+    cursor: grab;
+    touch-action: none;
+    user-select: none;
+}
+.pf-cropper-stage.is-dragging { cursor: grabbing; }
+.pf-cropper-stage:focus-visible { outline: 3px solid #800000; outline-offset: 3px; }
+.pf-cropper-canvas { display: block; width: 100%; height: 100%; }
+.pf-cropper-mask {
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    box-shadow: 0 0 0 999px rgba(0, 0, 0, 0.45);
+    outline: 2px solid rgba(255, 255, 255, 0.9);
+    outline-offset: -2px;
+    pointer-events: none;
+}
+.pf-cropper-controls { display: flex; align-items: center; gap: 10px; margin: 16px 0 10px; }
+.pf-cropper-zoom { flex: 1; min-width: 0; accent-color: #800000; }
+.pf-cropper-overlay .pf-cropper-icon {
+    flex: 0 0 32px;
+    width: 32px;
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    height: 32px;
+    border: 1px solid #ddd0d3;
+    border-radius: 50%;
+    background: #fff;
+    color: #800000;
+    font-size: 18px;
+    font-weight: 700;
+    line-height: 1;
+    cursor: pointer;
+}
+.pf-cropper-tools, .pf-cropper-actions { display: flex; gap: 10px; }
+.pf-cropper-tools { justify-content: center; }
+.pf-cropper-actions { justify-content: flex-end; margin-top: 18px; padding-top: 14px; border-top: 1px solid #eee5e7; }
+.pf-cropper-overlay .pf-cropper-secondary, .pf-cropper-overlay .pf-cropper-primary {
+    flex: 0 0 auto;
+    width: auto;
+    min-width: 0;
+    max-width: none;
+    margin: 0;
+    box-shadow: none;
+    transform: none;
+    min-height: 38px;
+    padding: 0 16px;
+    border-radius: 10px;
+    font: inherit;
+    font-size: 14px;
+    font-weight: 700;
+    white-space: nowrap;
+    cursor: pointer;
+}
+.pf-cropper-secondary { border: 1px solid #ddd0d3; background: #fff; color: #4a3a3e; }
+.pf-cropper-secondary:hover, .pf-cropper-icon:hover { background: #fbf3f4; }
+.pf-cropper-primary { border: 1px solid #800000; background: #800000; color: #fff; }
+.pf-cropper-primary:hover { background: #660000; }
+.pf-cropper-primary:disabled { opacity: 0.7; cursor: wait; }
+.pf-cropper-dialog button:focus-visible, .pf-cropper-zoom:focus-visible { outline: 3px solid rgba(128, 0, 0, 0.45); outline-offset: 2px; }
+
+.admin-dark .pf-cropper-dialog, .student-dark .pf-cropper-dialog { background: #1f1a1c; color: #f3eced; }
+.admin-dark .pf-cropper-help, .student-dark .pf-cropper-help { color: #b9abae; }
+.admin-dark .pf-cropper-stage, .student-dark .pf-cropper-stage { background: repeating-conic-gradient(#2c2528 0 25%, #362e31 0 50%) 0 0 / 20px 20px; }
+.admin-dark .pf-cropper-secondary, .student-dark .pf-cropper-secondary,
+.admin-dark .pf-cropper-icon, .student-dark .pf-cropper-icon { background: #2a2326; border-color: #4a3e42; color: #f3eced; }
+.admin-dark .pf-cropper-secondary:hover, .student-dark .pf-cropper-secondary:hover,
+.admin-dark .pf-cropper-icon:hover, .student-dark .pf-cropper-icon:hover { background: #352c30; }
+.admin-dark .pf-cropper-actions, .student-dark .pf-cropper-actions { border-top-color: #3a3034; }
+.admin-dark .pf-cropper-close:hover, .student-dark .pf-cropper-close:hover { background: rgba(255, 255, 255, 0.08); }
+
+@media (max-width: 420px) {
+    .pf-cropper-dialog { padding: 16px; }
+    .pf-cropper-overlay .pf-cropper-actions > * { flex: 1 1 0; }
+}

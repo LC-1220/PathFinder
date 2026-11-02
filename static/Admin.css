@@ -1557,16 +1557,19 @@ body {
   padding: 24px;
   background: rgba(48, 18, 22, 0.45);
   backdrop-filter: blur(7px);
+  overflow: auto;
+  overscroll-behavior: contain;
 }
 .admin-settings-panel[hidden] {
   display: none;
 }
 .admin-settings-card {
   display: grid;
-  grid-template-columns: 180px minmax(0, 1fr);
-  width: min(640px, 100%);
+  grid-template-columns: 200px minmax(0, 1fr);
+  width: min(680px, 100%);
   min-height: 390px;
-  overflow: hidden;
+  max-height: calc(100dvh - 48px);
+  overflow: auto;
   padding: 0;
   border: 1px solid #dce4f5;
   border-radius: 18px;
@@ -1630,7 +1633,47 @@ body {
   width: 14px;
   text-align: center;
 }
+.admin-settings-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.admin-settings-subtabs {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-left: 14px;
+  padding-left: 8px;
+  border-left: 2px solid #e0e7f5;
+}
+.admin-settings-subtabs[hidden] {
+  display: none;
+}
+.admin-settings-sidebar .admin-settings-group-toggle .admin-settings-chevron {
+  display: block;
+  width: 7px;
+  height: 7px;
+  flex: 0 0 7px;
+  margin-left: auto;
+  border: solid currentColor;
+  border-width: 0 1.5px 1.5px 0;
+  transform: rotate(-45deg);
+  transition: transform 160ms ease;
+}
+.admin-settings-sidebar .admin-settings-group-toggle[aria-expanded="true"] .admin-settings-chevron {
+  transform: rotate(45deg);
+}
+.admin-settings-sidebar .admin-settings-subtab {
+  min-height: 36px;
+  padding: 9px 10px;
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+.admin-settings-sidebar .admin-settings-group-toggle.active {
+  background: transparent;
+}
 .admin-settings-content {
+  min-width: 0;
   padding: 28px 32px;
 }
 .admin-account-details {
@@ -1772,21 +1815,46 @@ body.logout-confirm-open {
     overflow: auto;
   }
   .admin-settings-sidebar {
-    flex-direction: row;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
     align-items: center;
+    gap: 2px;
     border-right: 0;
     border-bottom: 1px solid #e0e7f5;
-    padding: 12px;
+    padding: 10px 8px;
   }
   .admin-settings-sidebar strong {
-    margin: 0 auto 0 4px;
+    gap: 5px;
+    margin: 0 2px;
+    font-size: 13px;
   }
   .admin-settings-sidebar .admin-settings-tab {
-    font-size: 0;
-    padding: 9px;
+    gap: 5px;
+    padding: 8px 7px;
+    font-size: 11px;
+  }
+  .admin-settings-sidebar .admin-settings-tab span {
+    padding: 0;
   }
   .admin-settings-sidebar .admin-settings-tab i {
-    font-size: 14px;
+    font-size: 13px;
+  }
+  .admin-settings-group {
+    display: contents;
+  }
+  .admin-settings-subtabs {
+    grid-column: 1 / -1;
+    flex-direction: column;
+    margin: 4px 0 0;
+    padding: 4px 0 0;
+    border: 0;
+    border-top: 1px solid #e0e7f5;
+  }
+  .admin-settings-sidebar .admin-settings-group-toggle {
+    font-size: 11.5px;
+  }
+  .admin-settings-sidebar .admin-settings-subtab {
+    font-size: 11.5px;
   }
   .admin-settings-content {
     padding: 22px 18px;
@@ -2641,7 +2709,8 @@ body.logout-confirm-open {
   width: auto;
   margin: 0;
 }
-.admin-page nav.admin-plain-sidebar li a {
+.admin-page nav.admin-plain-sidebar li a,
+.admin-page nav.admin-plain-sidebar .admin-nav-toggle {
   display: flex !important;
   align-items: center;
   justify-content: flex-start;
@@ -2654,7 +2723,8 @@ body.logout-confirm-open {
   text-decoration: none !important;
 }
 .admin-page nav.admin-plain-sidebar li a:hover,
-.admin-page nav.admin-plain-sidebar li a[aria-current="page"] {
+.admin-page nav.admin-plain-sidebar li a[aria-current="page"],
+.admin-page nav.admin-plain-sidebar .admin-nav-toggle:hover {
   background: #2b3c33 !important;
   color: #ffffff !important;
 }
@@ -2709,7 +2779,8 @@ body.logout-confirm-open {
   .admin-page nav.admin-plain-sidebar .admin-nav-group + .admin-nav-group {
     padding-top: 6px;
   }
-  .admin-page nav.admin-plain-sidebar li a {
+  .admin-page nav.admin-plain-sidebar li a,
+  .admin-page nav.admin-plain-sidebar .admin-nav-toggle {
     justify-content: center;
     padding: 0;
   }
@@ -3669,13 +3740,14 @@ body.logout-confirm-open {
 .admin-page .admin-generated-report-brand {
   display: flex;
   align-items: center;
-  gap: 9px;
-  margin-bottom: 5px;
+  gap: 12px;
+  margin-bottom: 14px;
 }
 .admin-page .admin-generated-report-brand img {
   display: block;
-  width: 38px;
-  height: 38px;
+  width: 48px;
+  height: 48px;
+  flex-shrink: 0;
   object-fit: contain;
   filter: brightness(0) saturate(100%) invert(10%) sepia(90%) saturate(2200%) hue-rotate(335deg) brightness(90%);
 }
@@ -3684,12 +3756,17 @@ body.logout-confirm-open {
   color: var(--admin-muted);
   font-size: 11px;
 }
-.admin-page .admin-generated-report-brand p {
+.admin-page .admin-generated-report-brand .admin-generated-report-name {
   margin: 0;
   color: var(--admin-green);
-  font-size: 12px;
+  font-size: 20px;
   font-weight: 800;
-  text-transform: uppercase;
+}
+.admin-page .admin-generated-report-brand .admin-generated-report-school {
+  margin: 3px 0 0;
+  color: var(--admin-muted);
+  font-size: 12px;
+  line-height: 1.4;
 }
 .admin-page .admin-generated-report-header h2 {
   margin: 5px 0;
@@ -3769,6 +3846,35 @@ body.logout-confirm-open {
 }
 @media print {
   @page { margin: 14mm; }
+  body.admin-page {
+    --admin-ink: #262122 !important;
+    --admin-muted: #766e70 !important;
+    --admin-line: #e4dddd !important;
+    --admin-green: #800000 !important;
+    background: #fff !important;
+  }
+  html:has(body.admin-page),
+  body.admin-page {
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+  }
+  body.admin-page > :not(.admin-dashboard-page),
+  body.admin-page .admin-dashboard-page > :not(#admin-reports),
+  body.admin-page nav.admin-plain-sidebar,
+  body.admin-page nav.admin-plain-sidebar *,
+  body.admin-page .admin-topbar,
+  body.admin-page .admin-topbar * {
+    display: none !important;
+  }
+  body.admin-page .admin-dashboard-page.wrap,
+  body.admin-page.admin-nav-open .admin-dashboard-page.wrap {
+    position: static !important;
+    width: 100% !important;
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
   body.admin-page * {
     visibility: hidden !important;
   }
@@ -3778,8 +3884,7 @@ body.logout-confirm-open {
   }
   body.admin-page #admin-reports {
     display: block !important;
-    position: absolute !important;
-    inset: 0 auto auto 0 !important;
+    position: static !important;
     width: 100% !important;
     margin: 0 !important;
     padding: 0 !important;
@@ -3796,9 +3901,43 @@ body.logout-confirm-open {
     border: 0 !important;
     background: #fff !important;
   }
+  body.admin-page .admin-generated-report-header {
+    break-inside: avoid;
+    padding-bottom: 12px;
+    border-bottom: 2px solid #800000 !important;
+    print-color-adjust: exact;
+  }
+  body.admin-page .admin-generated-report-brand {
+    justify-content: center;
+    gap: 14px;
+    margin-bottom: 18px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid #e4dddd;
+    text-align: center;
+  }
+  body.admin-page .admin-generated-report-brand img {
+    width: 56px;
+    height: 56px;
+    print-color-adjust: exact;
+  }
+  body.admin-page .admin-generated-report-brand > div {
+    text-align: left;
+  }
+  body.admin-page .admin-generated-report-brand .admin-generated-report-name {
+    color: #800000 !important;
+    font-size: 24pt;
+    line-height: 1.1;
+    letter-spacing: 0.5px;
+  }
+  body.admin-page .admin-generated-report-brand .admin-generated-report-school {
+    margin-top: 4px;
+    color: #262122 !important;
+    font-size: 11pt;
+    font-weight: 600;
+  }
   body.admin-page .admin-generated-report-summary > div {
     break-inside: avoid;
-    background: #f4f7f4 !important;
+    background: #f7f5f5 !important;
     print-color-adjust: exact;
   }
   body.admin-page .admin-generated-report-table-wrap {
@@ -3820,7 +3959,7 @@ body.logout-confirm-open {
     display: table-header-group;
   }
   body.admin-page .admin-generated-report-table th {
-    background: #edf3ee !important;
+    background: #f5e9e9 !important;
     print-color-adjust: exact;
   }
 }
@@ -3922,11 +4061,13 @@ body.logout-confirm-open {
 .admin-page nav.admin-plain-sidebar .admin-nav-group-label {
   color: #f0bcbc;
 }
-.admin-page nav.admin-plain-sidebar li a {
+.admin-page nav.admin-plain-sidebar li a,
+.admin-page nav.admin-plain-sidebar .admin-nav-toggle {
   color: #f5eaea !important;
 }
 .admin-page nav.admin-plain-sidebar li a:hover,
-.admin-page nav.admin-plain-sidebar li a[aria-current="page"] {
+.admin-page nav.admin-plain-sidebar li a[aria-current="page"],
+.admin-page nav.admin-plain-sidebar .admin-nav-toggle:hover {
   background: #650000 !important;
 }
 .admin-page nav.admin-plain-sidebar .icon {
@@ -3935,7 +4076,9 @@ body.logout-confirm-open {
 .admin-page nav.admin-plain-sidebar li a:is(:hover, [aria-current="page"]),
 .admin-page nav.admin-plain-sidebar li a:is(:hover, [aria-current="page"]) .text,
 .admin-page nav.admin-plain-sidebar li a:is(:hover, [aria-current="page"]) .icon,
-.admin-page nav.admin-plain-sidebar li a:is(:hover, [aria-current="page"]) .icon i {
+.admin-page nav.admin-plain-sidebar li a:is(:hover, [aria-current="page"]) .icon i,
+.admin-page nav.admin-plain-sidebar .admin-nav-toggle:hover,
+.admin-page nav.admin-plain-sidebar .admin-nav-toggle:hover :is(.text, .icon, .icon i) {
   color: #fff !important;
 }
 .admin-page nav.admin-plain-sidebar .icon {
@@ -3945,12 +4088,79 @@ body.logout-confirm-open {
     color 160ms ease,
     transform 160ms ease !important;
 }
-.admin-page nav.admin-plain-sidebar li a:hover .icon {
+.admin-page nav.admin-plain-sidebar li a:hover .icon,
+.admin-page nav.admin-plain-sidebar .admin-nav-toggle:hover .icon {
   transform: scale(1.12);
 }
 @media (prefers-reduced-motion: reduce) {
   .admin-page nav.admin-plain-sidebar .icon {
     transition-duration: 0.01ms !important;
+  }
+}
+.admin-page nav.admin-plain-sidebar .admin-nav-toggle {
+  position: relative;
+  width: 100%;
+  gap: 8px;
+  list-style: none;
+  cursor: pointer;
+}
+.admin-page nav.admin-plain-sidebar .admin-nav-toggle .text {
+  white-space: nowrap;
+}
+.admin-page nav.admin-plain-sidebar .admin-nav-toggle::-webkit-details-marker {
+  display: none;
+}
+.admin-page nav.admin-plain-sidebar .admin-nav-toggle:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: -2px;
+}
+.admin-page nav.admin-plain-sidebar .admin-nav-chevron {
+  margin-left: auto;
+  font-size: 10px;
+  transform: rotate(-90deg);
+  transition: transform 160ms ease;
+}
+.admin-page nav.admin-plain-sidebar details[open] > .admin-nav-toggle .admin-nav-chevron {
+  transform: rotate(0);
+}
+.admin-page nav.admin-plain-sidebar .admin-nav-submenu {
+  gap: 2px;
+  margin: 4px 0 0 25px;
+  padding-left: 10px;
+  border-left: 1px solid rgba(255, 255, 255, 0.24);
+}
+.admin-page nav.admin-plain-sidebar .admin-nav-submenu li a {
+  height: 36px;
+  padding: 0 10px;
+  gap: 8px;
+  font-size: 12px;
+}
+.admin-page nav.admin-plain-sidebar .admin-nav-submenu .icon {
+  width: 20px;
+  min-width: 20px;
+  height: 20px;
+  font-size: 12px;
+}
+.admin-page nav.admin-plain-sidebar .admin-nav-parent.has-active-child .admin-nav-toggle {
+  background: rgba(0, 0, 0, 0.12) !important;
+  color: #fff !important;
+}
+@media (max-width: 900px) {
+  .admin-page nav.admin-plain-sidebar .admin-nav-chevron {
+    position: absolute;
+    right: 3px;
+    bottom: 5px;
+    font-size: 8px;
+  }
+  .admin-page nav.admin-plain-sidebar .admin-nav-submenu {
+    margin: 4px 0 0;
+    padding: 4px 0 0;
+    border-left: 0;
+    border-top: 1px solid rgba(255, 255, 255, 0.2);
+  }
+  .admin-page nav.admin-plain-sidebar .admin-nav-submenu li a {
+    justify-content: center;
+    padding: 0;
   }
 }
 .admin-page .stat-icon,
@@ -4415,6 +4625,9 @@ body.graph-expanded-open {
     border-color: var(--admin-line);
     color: var(--admin-ink);
   }
+  html.admin-dark .admin-page .admin-settings-subtabs {
+    border-color: var(--admin-line);
+  }
   html.admin-dark .admin-page :is(input:not([type="checkbox"]), select, textarea) {
     background: #211e21;
     border-color: var(--admin-line);
@@ -4525,6 +4738,335 @@ body.graph-expanded-open {
   color: var(--admin-muted);
   font-size: 12px;
   text-align: center;
+}
+
+.admin-page .course-catalog-manager .sr-only,
+.admin-page .course-editor-dialog .sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+.admin-page .course-catalog-manager {
+  margin: 0;
+}
+.admin-page .course-catalog-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 14px;
+}
+.admin-page .course-catalog-heading h3 {
+  margin: 4px 0;
+  color: var(--admin-ink);
+}
+.admin-page .course-catalog-heading p {
+  margin: 0;
+  color: var(--admin-muted);
+  font: 500 12px "DM Sans", sans-serif;
+}
+.admin-page .course-catalog-heading .btn,
+.admin-page .course-editor-actions .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.admin-page .course-catalog-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 16px 0 10px;
+  color: var(--admin-muted);
+  font: 600 12px "DM Sans", sans-serif;
+}
+.admin-page .course-catalog-search {
+  position: relative;
+  flex: 0 1 320px;
+}
+.admin-page .course-catalog-search i {
+  position: absolute;
+  top: 50%;
+  left: 11px;
+  color: var(--admin-muted);
+  font-size: 12px;
+  transform: translateY(-50%);
+}
+.admin-page .course-catalog-search input {
+  width: 100%;
+  min-height: 38px;
+  padding: 0 10px 0 32px;
+  border: 1px solid var(--admin-line);
+  border-radius: 4px;
+  background: var(--admin-paper);
+  color: var(--admin-ink);
+  font: 500 13px "DM Sans", sans-serif;
+}
+.admin-page #course-catalog-count {
+  margin-left: auto;
+}
+.admin-page #course-catalog-status {
+  margin: 0 0 10px;
+  color: var(--admin-green);
+  font: 600 12px "DM Sans", sans-serif;
+}
+.admin-page #course-catalog-status.is-error,
+.admin-page #course-editor-status.is-error {
+  color: #b42318;
+}
+.admin-page .course-catalog-table-wrap {
+  max-height: 460px;
+  overflow: auto;
+  border: 1px solid var(--admin-line);
+  border-radius: 6px;
+}
+.admin-page .course-catalog-table {
+  width: 100%;
+  min-width: 620px;
+  margin: 0;
+}
+.admin-page .course-catalog-table th:nth-child(2) {
+  width: 160px;
+}
+.admin-page .course-catalog-table th:last-child {
+  width: 190px;
+}
+.admin-page .course-catalog-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.admin-page .course-catalog-table td:first-child strong {
+  display: block;
+  color: var(--admin-ink);
+}
+.admin-page .course-catalog-table td:first-child small {
+  display: -webkit-box;
+  margin-top: 3px;
+  overflow: hidden;
+  color: var(--admin-muted);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.admin-page .course-strand-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.admin-page .course-strand-tags span {
+  padding: 2px 8px;
+  border: 1px solid var(--admin-line);
+  border-radius: 999px;
+  color: var(--admin-ink);
+  font: 700 11px "DM Sans", sans-serif;
+}
+.admin-page .course-row-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  white-space: nowrap;
+}
+.admin-page .course-row-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--admin-line);
+  border-radius: 4px;
+  background: var(--admin-paper);
+  color: var(--admin-ink);
+  font: 600 12px "DM Sans", sans-serif;
+  cursor: pointer;
+}
+.admin-page .course-row-actions button:hover {
+  border-color: var(--admin-green);
+  color: var(--admin-green);
+}
+.admin-page .course-row-actions button.is-danger:hover {
+  border-color: #b42318;
+  color: #b42318;
+}
+.admin-page .course-editor-dialog {
+  width: min(620px, calc(100vw - 28px));
+  max-height: calc(100dvh - 28px);
+  overflow: auto;
+  padding: 24px;
+  border: 1px solid var(--admin-line);
+  border-radius: 7px;
+  background: var(--admin-paper);
+  color: var(--admin-ink);
+  box-shadow: 0 24px 64px rgba(20, 10, 10, 0.26);
+  font-family: "DM Sans", sans-serif;
+}
+.admin-page .course-editor-dialog::backdrop {
+  background: rgba(23, 17, 18, 0.55);
+}
+.admin-page .course-editor-form {
+  display: grid;
+  gap: 14px;
+}
+.admin-page .course-editor-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.admin-page .course-editor-header h2 {
+  margin: 6px 0 0;
+  font-size: 21px;
+  line-height: 1.2;
+}
+.admin-page .course-editor-close {
+  display: inline-grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--admin-line);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--admin-muted);
+  cursor: pointer;
+}
+.admin-page .course-editor-form > label,
+.admin-page .course-editor-template,
+.admin-page .course-editor-scores label {
+  display: grid;
+  gap: 6px;
+  color: var(--admin-ink);
+  font: 700 12px "DM Sans", sans-serif;
+}
+.admin-page .course-editor-form :is(input:not([type="checkbox"]), select, textarea) {
+  width: 100%;
+  min-height: 38px;
+  padding: 8px 10px;
+  border: 1px solid var(--admin-line);
+  border-radius: 4px;
+  background: var(--admin-canvas);
+  color: var(--admin-ink);
+  font: 500 13px "DM Sans", sans-serif;
+}
+.admin-page .course-editor-form textarea {
+  resize: vertical;
+}
+.admin-page .course-editor-form :is(input, select, textarea)[aria-invalid="true"] {
+  border-color: #b42318;
+}
+.admin-page .course-editor-group {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  margin: 0;
+  padding: 14px 0 0;
+  border: 0;
+  border-top: 1px solid var(--admin-line);
+}
+.admin-page .course-editor-group legend {
+  padding: 0 0 10px;
+  color: var(--admin-ink);
+  font: 700 14px "Space Grotesk", sans-serif;
+}
+.admin-page .course-editor-strands {
+  grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
+}
+.admin-page .course-editor-hint {
+  margin: 0;
+  color: var(--admin-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.admin-page .course-editor-scores {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+.admin-page #course-editor-status {
+  margin: 0;
+  color: var(--admin-green);
+  font-size: 12px;
+  font-weight: 600;
+}
+.admin-page .course-editor-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding-top: 14px;
+  border-top: 1px solid var(--admin-line);
+}
+.admin-page .course-confirm-dialog {
+  width: min(440px, calc(100vw - 28px));
+}
+.admin-page .course-confirm-dialog [hidden] {
+  display: none;
+}
+.admin-page .course-confirm-message {
+  margin: 0;
+  color: var(--admin-muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+.admin-page .course-confirm-details {
+  display: grid;
+  gap: 6px;
+  max-height: 180px;
+  margin: 0;
+  padding: 10px 12px 10px 28px;
+  overflow: auto;
+  border: 1px solid var(--admin-line);
+  border-radius: 4px;
+  background: var(--admin-canvas);
+  color: var(--admin-ink);
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.admin-page .course-confirm-typed small {
+  color: var(--admin-muted);
+  font-weight: 500;
+}
+.admin-page .course-confirm-typed strong {
+  color: #b42318;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+.admin-page #course-confirm-submit.btn-danger:not(:disabled) {
+  border-color: #b42318;
+  background: #b42318;
+  color: #fff;
+}
+.admin-page #course-confirm-submit:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+@media (max-width: 640px) {
+  .admin-page .course-catalog-heading .btn,
+  .admin-page .course-catalog-search {
+    flex: 1 1 100%;
+    justify-content: center;
+  }
+  .admin-page .course-editor-dialog {
+    padding: 18px;
+  }
+  .admin-page .course-editor-scores {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .admin-page .course-row-actions button span {
+    display: none;
+  }
+}
+@media screen {
+  html.admin-dark .admin-page .course-row-actions button.is-danger:hover {
+    border-color: #ff8a80;
+    color: #ff8a80;
+  }
+  html.admin-dark .admin-page :is(#course-catalog-status, #course-editor-status).is-error,
+  html.admin-dark .admin-page .course-confirm-typed strong {
+    color: #ff8a80;
+  }
 }
 
 .admin-page button {

@@ -2081,22 +2081,38 @@ function clearInputs() {
             return evidence;
         }
 
-        function subjectFieldLabel(subject){
+        function subjectFieldLabels(subject){
             const label = String(subject || '').toLowerCase();
+            const matchesTerm = term => new RegExp(`(^|[^a-z0-9])${term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|[^a-z0-9])`).test(label);
             const fields = [
-                ['Math and quantitative subjects', ['math', 'algebra', 'calculus', 'statistics', 'trigonometry', 'geometry', 'probability']],
-                ['Physics and physical sciences', ['physics', 'chemistry', 'earth science', 'physical science', 'geology', 'astronomy']],
+                ['Math and quantitative subjects', ['math', 'mathematics', 'algebra', 'calculus', 'statistics', 'trigonometry', 'geometry', 'probability']],
+                ['Physics and physical sciences', ['physics', 'chemistry', 'earth science', 'earth and space science', 'physical science', 'geology', 'astronomy']],
                 ['Biology and life sciences', ['biology', 'biological', 'life science', 'anatomy', 'physiology', 'botany', 'zoology', 'microbiology', 'biochemistry']],
                 ['Physical education and fitness', ['physical education']],
                 ['Health studies', ['health', 'nursing', 'medical', 'patient care', 'first aid', 'nutrition']],
                 ['Environmental sciences', ['environment', 'agriculture', 'fisheries', 'ecology', 'ecosystem', 'forestry', 'crop', 'soil']],
                 ['Technology subjects', ['technology', 'computer', 'programming', 'coding', 'software', 'ict', 'database', 'network', 'engineering', 'electronics', 'robotics']],
                 ['Communication and languages', ['english', 'filipino', 'language', 'communication', 'speech', 'writing', 'literature', 'reading', 'oral']],
-                ['Business subjects', ['business', 'accounting', 'management', 'marketing', 'economics', 'entrepreneur', 'finance', 'tourism', 'hospitality']],
+                ['Foreign languages', ['nihongo', 'japanese', 'chinese', 'korean', 'spanish', 'french', 'german', 'foreign language']],
+                ['Business subjects', ['business', 'account', 'accounting', 'accountancy', 'management', 'marketing', 'economics', 'entrepreneur', 'entrepreneurship', 'finance', 'tourism', 'hospitality']],
                 ['Social sciences and humanities', ['history', 'sociology', 'psychology', 'political', 'social', 'criminology', 'education', 'philosophy', 'governance', 'culture', 'humanities', 'religion']],
-                ['Arts and creative subjects', ['art', 'design', 'music', 'media', 'creative', 'visual', 'physical education', 'performing']],
+                ['Arts and creative subjects', ['art', 'arts', 'design', 'music', 'media', 'creative', 'visual', 'performing']],
             ];
-            return fields.find(([, terms]) => terms.some(term => label.includes(term)))?.[0] || '';
+            const labels = fields.filter(([, terms]) => terms.some(matchesTerm)).map(([field]) => field);
+            if(/^(?:(?:general|integrated|natural|basic)\s+)?sciences?(?:\s*\d+)?$/.test(label.trim())) labels.push('General sciences', 'Science subjects');
+            if(labels.some(field => ['Physics and physical sciences', 'Biology and life sciences', 'Health studies', 'Environmental sciences'].includes(field))) labels.push('Science subjects');
+            if(labels.includes('Foreign languages')) labels.push('Communication and languages');
+            if(labels.includes('Physical education and fitness')) return labels.filter(field => field !== 'Health studies');
+            return labels;
+        }
+
+        function courseSubjectEvidence(item, academicRecord){
+            const priorities = new Map((Array.isArray(item.subject_field_evidence) ? item.subject_field_evidence : []).map(entry => [entry.field, entry.priority]));
+            return extractSubjectEvidence(academicRecord).flatMap(entry => {
+                const fields = subjectFieldLabels(entry.subject).filter(field => priorities.has(field));
+                const field = fields.find(field => priorities.get(field) === 'major') || fields[0];
+                return field ? [{...entry, field, priority: priorities.get(field)}] : [];
+            });
         }
 
         function renderInlineRecommendations(recommendations, academicRecord, comparisons = {}, shouldScroll = true){
@@ -2151,7 +2167,7 @@ function clearInputs() {
             list.innerHTML = items.length
                 ? items.map((item, index) => `
                     ${index === 0 && primary.length ? `<div class="recommendation-group-heading"><h3>${primary[0].strand_label ? 'Cluster-matched courses' : 'Grade-profile matches'}</h3><p>${primary[0].strand_label ? 'Courses listed for your cluster, ranked using your grades.' : 'Courses ranked using your available grades.'}</p></div>` : ''}
-                    ${isAlternative(item) && index === primary.length ? '<div class="recommendation-group-heading"><h3>Best grade-based alternative</h3><p>The highest-ranked course outside your cluster group, based only on Math, Science, English, and their recognized branches. This is guidance, not an admission guarantee.</p></div>' : ''}
+                    ${isAlternative(item) && index === primary.length ? '<div class="recommendation-group-heading"><h3>Best grade-based alternative</h3><p>The highest-ranked course outside your cluster group with recognized major-related grades, ranked using related subjects and your available grade profile. Supporting subjects alone do not qualify a course. This is guidance, not an admission guarantee.</p></div>' : ''}
                     <article class="inline-recommendation-card${isAlternative(item) ? ' grade-based-alternative' : index === 0 ? ' best-match' : ''}" data-recommendation-index="${index}">
                         <div class="recommendation-rank">${String(groupRank(index)).padStart(2, '0')}</div>
                         <div class="recommendation-detail">
@@ -2162,11 +2178,7 @@ function clearInputs() {
                             <p>${escapeHtml(item.description || item.reason)}</p>
                             ${item.reason ? `<small>${escapeHtml(item.reason)}</small>` : ''}
                             ${(() => {
-                                const fieldPriorities = new Map((Array.isArray(item.subject_field_evidence) ? item.subject_field_evidence : []).map(entry => [entry.field, entry.priority]));
-                                const courseEvidence = extractSubjectEvidence(academicRecord)
-                                    .map(entry => ({...entry, field: subjectFieldLabel(entry.subject)}))
-                                    .filter(entry => fieldPriorities.has(entry.field))
-                                    .map(entry => ({...entry, priority: fieldPriorities.get(entry.field)}));
+                                const courseEvidence = courseSubjectEvidence(item, academicRecord);
                                 const majorEvidence = courseEvidence.filter(entry => entry.priority === 'major').sort((left, right) => right.grade - left.grade).slice(0, 3);
                                 const supportingEvidence = courseEvidence.filter(entry => entry.priority === 'supporting').sort((left, right) => right.grade - left.grade).slice(0, 3);
                                 const renderEvidence = entries => entries.map(entry => `<b>${escapeHtml(entry.subject)} <em>${entry.grade.toFixed(0)}</em></b>`).join('');
@@ -2241,10 +2253,7 @@ function clearInputs() {
             function renderMatchExplanation(index){
                 const item = items[index];
                 if(!item) return;
-                const fieldPriorities = new Map((Array.isArray(item.subject_field_evidence) ? item.subject_field_evidence : []).map(entry => [entry.field, entry.priority]));
-                const supportingSubjects = extractSubjectEvidence(academicRecord)
-                    .map(entry => ({...entry, field: subjectFieldLabel(entry.subject), priority: fieldPriorities.get(subjectFieldLabel(entry.subject))}))
-                    .filter(entry => entry.priority)
+                const supportingSubjects = courseSubjectEvidence(item, academicRecord)
                     .sort((left, right) => (left.priority === right.priority ? right.grade - left.grade : left.priority === 'major' ? -1 : 1))
                     .slice(0, 6);
                 const strandLabel = String(item.strand_label || '').trim();
@@ -2376,6 +2385,34 @@ function clearInputs() {
             document.getElementById('dropzone')?.scrollIntoView({behavior:'smooth',block:'center'});
         }
 
+        document.querySelectorAll('a[href="#inline-recommendations"]').forEach(link => {
+            link.addEventListener('click', async event => {
+                if(isGuest) return;
+                event.preventDefault();
+                closeProfileMenu();
+                try{
+                    let profile = window.latestSavedProfile;
+                    if(!profile?.success){
+                        const response = await fetch('/api/v1/get_profile');
+                        profile = await response.json();
+                        if(!response.ok){
+                            throw new Error(profile.message || `Could not load saved recommendations (HTTP ${response.status}).`);
+                        }
+                        if(profile.success) window.latestSavedProfile = profile;
+                    }
+                    if(!profile?.success || !Array.isArray(profile.recommendation) || !profile.recommendation.length){
+                        alert('No saved recommendations were found. Save a report card to generate your recommendations.');
+                        return;
+                    }
+                    window.restoreSavedProfileView(profile);
+                    document.getElementById('inline-recommendations').scrollIntoView({behavior:'smooth',block:'start'});
+                }catch(error){
+                    console.error('Error showing saved recommendations:', error);
+                    alert(error.message || 'Could not load saved recommendations.');
+                }
+            });
+        });
+
         function resetRecommendationFlow(){
             input.value = '';
             queuedFiles = [];
@@ -2404,14 +2441,109 @@ function clearInputs() {
             setSavedProfileView(false);
             const identityCard = document.getElementById('ocr-identity-status');
             if(identityCard){
-                identityCard.querySelector('.review-section-title').textContent = 'Student details are read from your report card';
-                identityCard.querySelector('p').textContent = 'OCR will extract the student number, first name, middle initial, last name, and SHS cluster together with the subjects and grades.';
+                const addingToSavedProfile = Boolean(window.latestSavedProfile?.success);
+                identityCard.querySelector('.review-section-title').textContent = addingToSavedProfile
+                    ? 'Adding to your saved report card'
+                    : 'Student details are read from your report card';
+                identityCard.querySelector('p').textContent = addingToSavedProfile
+                    ? 'Your saved student details stay the same. Subjects from this report card will be added to your saved subjects and the recommendations recalculated.'
+                    : 'OCR will extract the student number, first name, middle initial, last name, and SHS cluster together with the subjects and grades.';
             }
             setJourneyStep(1);
             document.getElementById('dropzone')?.scrollIntoView({behavior:'smooth',block:'center'});
         }
 
         document.getElementById('upload-another')?.addEventListener('click', resetRecommendationFlow);
+
+        const emailResultsButton = document.getElementById('email-results');
+        const emailResultsModal = document.getElementById('email-results-modal');
+        const emailResultsCancel = document.getElementById('email-results-cancel');
+        const emailResultsConfirm = document.getElementById('email-results-confirm');
+        const emailResultsTitle = document.getElementById('email-results-title');
+        const emailResultsMessage = document.getElementById('email-results-message');
+        const emailResultsStatus = document.getElementById('email-results-status');
+        let emailResultsSending = false;
+
+        function closeEmailResultsModal(){
+            if(!emailResultsModal || emailResultsSending) return;
+            emailResultsModal.hidden = true;
+            emailResultsButton?.focus();
+            if(emailResultsTitle) emailResultsTitle.textContent = 'Email your results?';
+            if(emailResultsMessage) emailResultsMessage.innerHTML = 'Your course recommendations and match details will be sent to <strong id="email-results-destination"></strong>.';
+            const destination = emailResultsButton?.dataset.email || 'your Google email';
+            const destinationNode = document.getElementById('email-results-destination');
+            if(destinationNode) destinationNode.textContent = destination;
+            if(emailResultsStatus){
+                emailResultsStatus.hidden = true;
+                emailResultsStatus.textContent = '';
+                emailResultsStatus.classList.remove('is-error');
+            }
+            if(emailResultsCancel) emailResultsCancel.textContent = 'Cancel';
+            if(emailResultsConfirm){
+                emailResultsConfirm.hidden = false;
+                emailResultsConfirm.disabled = false;
+                emailResultsConfirm.textContent = 'Send results';
+            }
+        }
+
+        function openEmailResultsModal(){
+            if(!emailResultsModal) return;
+            const destination = emailResultsButton?.dataset.email || 'your Google email';
+            const destinationNode = document.getElementById('email-results-destination');
+            if(destinationNode) destinationNode.textContent = destination;
+            emailResultsModal.hidden = false;
+            emailResultsConfirm?.focus();
+        }
+
+        emailResultsButton?.addEventListener('click', openEmailResultsModal);
+        emailResultsCancel?.addEventListener('click', closeEmailResultsModal);
+        emailResultsModal?.addEventListener('click', event => {
+            if(event.target === emailResultsModal) closeEmailResultsModal();
+        });
+        document.addEventListener('keydown', event => {
+            if(event.key === 'Escape' && emailResultsModal && !emailResultsModal.hidden){
+                event.preventDefault();
+                closeEmailResultsModal();
+            }
+        });
+
+        emailResultsConfirm?.addEventListener('click', async () => {
+            if(!emailResultsButton || !emailResultsStatus || !emailResultsTitle || !emailResultsMessage) return;
+            const destination = emailResultsButton.dataset.email || 'your Google email';
+            emailResultsSending = true;
+            emailResultsButton.disabled = true;
+            emailResultsButton.setAttribute('aria-busy', 'true');
+            emailResultsConfirm.disabled = true;
+            emailResultsCancel.disabled = true;
+            emailResultsConfirm.textContent = 'Sending...';
+            emailResultsStatus.hidden = true;
+            try{
+                const response = await fetch('/api/v1/email_results', {method: 'POST'});
+                const data = await response.json().catch(() => ({}));
+                if(!response.ok || !data.success){
+                    throw new Error(data.message || `Request failed (HTTP ${response.status}).`);
+                }
+                emailResultsTitle.textContent = 'Results emailed';
+                emailResultsMessage.textContent = data.message || `Your results were sent to ${destination}.`;
+                emailResultsStatus.hidden = true;
+                emailResultsConfirm.hidden = true;
+                emailResultsCancel.textContent = 'Done';
+            }catch(error){
+                emailResultsStatus.textContent = 'Email not sent: ' + (error?.message || error);
+                emailResultsStatus.classList.add('is-error');
+                emailResultsStatus.hidden = false;
+            }finally{
+                emailResultsSending = false;
+                emailResultsButton.disabled = false;
+                emailResultsButton.removeAttribute('aria-busy');
+                emailResultsConfirm.disabled = false;
+                emailResultsCancel.disabled = false;
+                if(!emailResultsConfirm.hidden){
+                    emailResultsConfirm.textContent = 'Send results';
+                }
+                if(!emailResultsModal.hidden) emailResultsCancel.focus();
+            }
+        });
 
         async function updatePreviewForFiles(files){
             const previewWrap = previewContainer;
@@ -2783,12 +2915,33 @@ function clearInputs() {
                 warningBox.classList.toggle('review-quality-ok', warnings.length === 0);
             }
 
+            const savedProfile = !isGuest && window.latestSavedProfile?.success ? window.latestSavedProfile : null;
+            const savedSubjectLines = String(savedProfile?.subjects || '').split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+            const escapeReviewText = value => String(value || '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;');
+            const savedProfileName = savedProfile
+                ? [savedProfile.firstName, savedProfile.middleInitial ? `${savedProfile.middleInitial}.` : '', savedProfile.lastName].filter(Boolean).join(' ')
+                : '';
+            const savedProfileSection = savedProfile && savedSubjectLines.length ? `
+                    <details class="review-saved-profile">
+                        <summary>
+                            <i class="fa-solid fa-folder-plus"></i>
+                            <span><strong>Adding to your saved report card${savedProfileName ? ` (${escapeReviewText(savedProfileName)})` : ''}</strong>
+                            <small>${savedSubjectLines.length} saved subject${savedSubjectLines.length === 1 ? '' : 's'}${savedProfile.gwa ? `, average ${escapeReviewText(savedProfile.gwa)}` : ''} will be kept. The subjects below are added to them; a subject already saved keeps its saved grade.</small></span>
+                        </summary>
+                        <ul>${savedSubjectLines.map(line => `<li>${escapeReviewText(line)}</li>`).join('')}</ul>
+                    </details>` : '';
+
             form.innerHTML = `
                 <div class="review-form-grid">
-                    <div class="review-section-title">Extracted academic details</div>
+                    <div class="review-section-title">${savedProfileSection ? 'New subjects from this report card' : 'Extracted academic details'}</div>
+                    ${savedProfileSection}
                     <div id="review-quality-warning" class="review-quality-warning" role="status" aria-live="polite"></div>
                     <div class="review-average-card">
-                        <span>Computed average</span>
+                        <span>${savedProfileSection ? 'Average of new subjects' : 'Computed average'}</span>
                         <strong id="review-average">N/A</strong>
                         <small>Automatically updates from the valid grades below.</small>
                     </div>
@@ -2800,7 +2953,7 @@ function clearInputs() {
                     </div>
                     <button id="add-review-row" type="button" class="add-review-row"><i class="fa-solid fa-plus"></i> Add subject</button>
                     <div class="review-actions">
-                        <button id="save-reviewed-record" type="button" class="review-primary-btn"><i class="fa-solid fa-wand-magic-sparkles"></i> ${isGuest ? 'Show recommendations' : 'Save and show recommendations'}</button>
+                        <button id="save-reviewed-record" type="button" class="review-primary-btn"><i class="fa-solid fa-wand-magic-sparkles"></i> ${isGuest ? 'Show recommendations' : savedProfileSection ? 'Add to saved report card' : 'Save and show recommendations'}</button>
                         <button id="save-review-grades" type="button" class="review-save-btn${savedReviewRows() ? ' is-saved' : ''}">${savedReviewRows() ? '<i class="fa-solid fa-check"></i> Grades saved' : '<i class="fa-solid fa-floppy-disk"></i> Save grades'}</button>
                         <button id="discard-reviewed-record" type="button" class="review-secondary-btn">Discard</button>
                     </div>
@@ -2857,7 +3010,7 @@ function clearInputs() {
                         throw new Error((data && data.message) || `Request failed (HTTP ${response.status}).`);
                     }
                     if(data && data.success){
-                        setProgress(100, isGuest ? 'Recommendations ready.' : 'Report card saved and recommendations ready.');
+                        setProgress(100, isGuest ? 'Recommendations ready.' : savedProfileSection ? 'Report card added to your saved profile and recommendations updated.' : 'Report card saved and recommendations ready.');
                         if(!isGuest){
                             await loadSavedProfile(data.profile);
                             if(document.getElementById('saved-grades-panel')?.hidden === false){
@@ -3254,11 +3407,27 @@ document.addEventListener('DOMContentLoaded', () => {
 
     pictureInput.addEventListener('change', async () => {
         const file = pictureInput.files[0];
+        pictureInput.value = '';
         if (!file) return;
-        preview.src = URL.createObjectURL(file);
+        let picture = file;
+        if (window.PathFinderCropper) {
+            try {
+                picture = await window.PathFinderCropper.open(file);
+            } catch (error) {
+                setStatus(pictureStatus, error.message || 'This image could not be opened.', true);
+                return;
+            }
+            if (!picture) {
+                setStatus(pictureStatus, '');
+                return;
+            }
+        }
+        const previousSrc = preview.src;
+        const previewUrl = URL.createObjectURL(picture);
+        preview.src = previewUrl;
         setStatus(pictureStatus, 'Uploading...');
         const formData = new FormData();
-        formData.append('profile_picture', file);
+        formData.append('profile_picture', picture, picture === file ? file.name : 'profile-picture.png');
         try {
             const response = await fetch('/api/v1/upload_profile_picture', { method: 'POST', body: formData });
             const data = await response.json();
@@ -3268,7 +3437,10 @@ document.addEventListener('DOMContentLoaded', () => {
             document.querySelectorAll('#profilePicture, .focus-profile-trigger img').forEach(image => { image.src = imageUrl; });
             setStatus(pictureStatus, 'Picture updated.');
         } catch (error) {
+            preview.src = previousSrc;
             setStatus(pictureStatus, error.message, true);
+        } finally {
+            URL.revokeObjectURL(previewUrl);
         }
     });
 

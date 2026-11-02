@@ -4,7 +4,8 @@
     <meta name="google-site-verification" content="vgO2ZZaiPseckOV_hhLqL7lbgqJPvhTDZ3XtBfwulFs" />
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PathFinder Login</title>
+    <meta name="referrer" content="no-referrer">
+    <title>{{ 'Verify recovery Gmail' if recovery_verification_page|default(false) else 'PathFinder Login' }}</title>
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='images/PathFinder2.png') }}">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -12,6 +13,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@100;200;300;400;500;600;700;800;900&display=swap" rel="stylesheet">
 
     <link rel="stylesheet" href="{{ url_for('static', filename='Login.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='PasswordChecklist.css') }}">
 </head>
 <body>
 
@@ -25,7 +27,7 @@
     <div class="container" id="container">
 
         <div class="form-container sign-in">
-            <form id="loginForm">
+            <form id="loginForm"{% if recovery_verification_page|default(false) %} hidden{% endif %}>
                 <h1>Welcome to <span class="brand-gradient-text">PathFinder</span></h1>
                 <p class="login-intro">Upload your report card and discover courses that match your grades.</p>
 
@@ -38,20 +40,46 @@
                     <summary>Sign in</summary>
                     <div class="admin-fields">
                         <div class="admin-fields-content">
-                            <input id="login-identifier" type="text" placeholder="Username or email" aria-label="Username or email" autocomplete="username">
+                            <input id="login-identifier" type="text" placeholder="Username or email" aria-label="Username or email" autocomplete="username" required>
                             <div class="password-field">
-                                <input id="login-password" type="password" placeholder="Password" autocomplete="current-password">
+                                <input id="login-password" type="password" placeholder="Password" aria-label="Password" autocomplete="current-password" required>
                                 <button id="toggle-password" type="button" aria-label="Show password" aria-pressed="false"><i class="fa-solid fa-eye"></i></button>
                             </div>
-                            <button type="submit">Login</button>
+                            <button id="login-submit" type="submit">Login</button>
+                            <p id="login-status" class="auth-status" role="status" aria-live="polite"></p>
+                            <button id="forgot-password" class="recovery-link" type="button">Forgot password?</button>
                         </div>
                     </div>
                 </details>
             </form>
+            <section id="recovery-link-help" class="recovery-link-help"{% if not recovery_verification_page|default(false) %} hidden{% endif %}>
+                <h1>Verify recovery Gmail</h1>
+                <p>Open the complete verification link from your email to confirm your recovery address.</p>
+                <a href="/login">Back to sign in</a>
+            </section>
+            <dialog id="admin-recovery-dialog" aria-labelledby="recovery-title">
+                <form id="recovery-form" class="recovery-form">
+                    <h2 id="recovery-title">Forgot password?</h2>
+                    <p id="recovery-description"></p>
+                    <label id="recovery-identifier-field" class="recovery-field" for="recovery-identifier">Admin username, sign-in email, or verified recovery Gmail
+                        <input id="recovery-identifier" name="username" type="text" autocomplete="username">
+                    </label>
+                    <div id="recovery-password-fields" class="recovery-field" hidden>
+                        <label for="recovery-password">New password</label>
+                        <input id="recovery-password" name="new_password" type="password" minlength="8" maxlength="72" autocomplete="new-password" data-password-checklist>
+                        <label for="recovery-confirm">Confirm new password</label>
+                        <input id="recovery-confirm" name="confirm_password" type="password" minlength="8" maxlength="72" autocomplete="new-password">
+                    </div>
+                    <p id="recovery-status" class="auth-status" role="status" aria-live="polite"></p>
+                    <button id="recovery-submit" type="submit">Send reset link</button>
+                    <button id="recovery-close" class="recovery-link" type="button">Back to sign in</button>
+                </form>
+            </dialog>
         </div>
 
     </div>
 
+    <script src="{{ url_for('static', filename='PasswordChecklist.js') }}"></script>
     <script src="{{ url_for('static', filename='Login.js') }}"></script>
 
 </body>
