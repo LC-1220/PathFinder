@@ -53,6 +53,10 @@ and mobile adjustments. Navigation scrolling follows CSS `scroll-behavior`
 instead of forcing animation in JavaScript. The operating system's
 `prefers-reduced-motion` setting disables motion on all three interfaces.
 Existing light/dark colors and account permissions are unchanged.
+`static/CourseNames.js` expands the `BS` prefix to `Bachelor of Science` in
+Student and Admin course labels without changing stored names or comparison
+keys. Saving an unchanged expanded name in the catalog editor preserves its
+original stored name.
 
 ## OCR provider
 

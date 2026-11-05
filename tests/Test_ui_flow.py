@@ -57,3 +57,13 @@ def test_student_logout_confirmation_is_available_in_every_layout(home_mode, is_
     assert 'method="dialog" class="logout-content"' in html
     assert 'href="/logout" class="Logoutbtn2"' in html
     assert "Logout.js" in html
+
+
+@pytest.mark.parametrize(("template", "script"), [
+    ("StudentManagement.html", "StudentApp.js"),
+    ("AdminDashboard.html", "Admin.js"),
+])
+def test_course_name_formatter_loads_before_page_script(template, script):
+    source = (Path(__file__).resolve().parents[1] / "templates" / template).read_text(encoding="utf-8")
+
+    assert source.index("CourseNames.js") < source.index(script)

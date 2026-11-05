@@ -142,6 +142,7 @@ function renderCourseCatalog(){
   const status = document.getElementById('course-catalog-active-filter')?.value || '';
   const filtered = courseCatalog.filter(course => {
     const matchesQuery = !query || course.course.toLowerCase().includes(query)
+      || displayCourseName(course.course).toLowerCase().includes(query)
       || course.description.toLowerCase().includes(query)
       || course.strands.some(strand => strand.toLowerCase().includes(query));
     const matchesStatus = !status || (status === 'active' ? course.is_active !== false : course.is_active === false);
@@ -167,7 +168,7 @@ function renderCourseCatalog(){
     const row = body.insertRow();
     const nameCell = row.insertCell();
     const name = document.createElement('strong');
-    name.textContent = course.course;
+    name.textContent = displayCourseName(course.course);
     const description = document.createElement('small');
     description.textContent = course.description;
     nameCell.append(name, description);
@@ -195,7 +196,7 @@ function renderCourseCatalog(){
       const actionLabel = button.dataset.courseAction === 'edit'
         ? 'Edit'
         : button.dataset.courseAction === 'deactivate' ? 'Deactivate' : 'Reactivate';
-      button.setAttribute('aria-label', `${actionLabel} ${course.course}`);
+      button.setAttribute('aria-label', `${actionLabel} ${displayCourseName(course.course)}`);
     });
     row.insertCell().append(actions);
   }
@@ -207,7 +208,7 @@ function fillCourseTemplateOptions(excludeId){
   select.length = 1;
   for(const course of courseCatalog){
     if(String(course.id) === String(excludeId)) continue;
-    select.add(new Option(course.course, course.id));
+    select.add(new Option(displayCourseName(course.course), course.id));
   }
   select.value = '';
 }
@@ -242,7 +243,7 @@ function openCourseEditor(course = null){
   setCourseStatus(document.getElementById('course-editor-status'), '');
   document.getElementById('course-editor-title').textContent = course ? 'Edit course' : 'Add new course';
   form.elements.namedItem('id').value = course?.id || '';
-  form.elements.namedItem('course').value = course?.course || '';
+  form.elements.namedItem('course').value = displayCourseName(course?.course);
   form.elements.namedItem('description').value = course?.description || '';
   form.querySelectorAll('input[name="strands"]').forEach(input => { input.checked = Boolean(course?.strands.includes(input.value)); });
   setCourseScores(form, course?.features);
@@ -255,7 +256,9 @@ function readCourseForm(form){
   const invalid = [];
   const name = form.elements.namedItem('course');
   const description = form.elements.namedItem('description');
-  const course = name.value.trim().replace(/\s+/g, ' ');
+  const enteredName = name.value.trim().replace(/\s+/g, ' ');
+  const original = courseCatalog.find(item => String(item.id) === form.elements.namedItem('id').value);
+  const course = original && enteredName === displayCourseName(original.course) ? original.course : enteredName;
   const text = description.value.trim().replace(/\s+/g, ' ');
   if(course.length < 3) invalid.push([name, 'Enter a course name with at least 3 characters.']);
   if(text.length < 10) invalid.push([description, 'Enter a description with at least 10 characters.']);
@@ -332,7 +335,7 @@ function confirmCourseAction({kicker, title, message, details = [], confirmLabel
 
 function describeCourseChanges(original, payload){
   const changes = [];
-  if(original.course !== payload.course) changes.push(`Name: "${original.course}" → "${payload.course}"`);
+  if(original.course !== payload.course) changes.push(`Name: "${displayCourseName(original.course)}" → "${displayCourseName(payload.course)}"`);
   if((original.description || '') !== payload.description) changes.push('Description updated');
   const before = [...(original.strands || [])].sort().join(', ');
   const after = [...payload.strands].sort().join(', ');
@@ -398,7 +401,7 @@ document.getElementById('course-catalog-body')?.addEventListener('click', async 
   const isActive = course.is_active !== false;
   const confirmed = await confirmCourseAction({
     kicker: isActive ? 'DEACTIVATE COURSE' : 'REACTIVATE COURSE',
-    title: `${isActive ? 'Deactivate' : 'Reactivate'} ${course.course}?`,
+    title: `${isActive ? 'Deactivate' : 'Reactivate'} ${displayCourseName(course.course)}?`,
     message: isActive
       ? 'Students will no longer be recommended this course. Its details and strand assignments will be kept, and you can reactivate it later.'
       : 'Students can be recommended this course again.',
@@ -410,7 +413,7 @@ document.getElementById('course-catalog-body')?.addEventListener('click', async 
   const status = document.getElementById('course-catalog-status');
   button.disabled = true;
   const action = isActive ? 'deactivate' : 'reactivate';
-  setCourseStatus(status, `${isActive ? 'Deactivating' : 'Reactivating'} ${course.course}...`);
+  setCourseStatus(status, `${isActive ? 'Deactivating' : 'Reactivating'} ${displayCourseName(course.course)}...`);
   try{
     await fetchJsonOrThrow(
       isActive
@@ -418,7 +421,7 @@ document.getElementById('course-catalog-body')?.addEventListener('click', async 
         : `/admin/courses/${encodeURIComponent(course.id)}/activate`,
       {method: isActive ? 'DELETE' : 'POST'}
     );
-    setCourseStatus(status, `${isActive ? 'Deactivated' : 'Reactivated'} ${course.course}.`);
+    setCourseStatus(status, `${isActive ? 'Deactivated' : 'Reactivated'} ${displayCourseName(course.course)}.`);
     await loadCourseCatalog(true);
   }catch(error){
     setCourseStatus(status, error.message || `Unable to ${action} the course.`, true);
@@ -448,7 +451,7 @@ document.getElementById('course-editor-form')?.addEventListener('submit', async 
     }
     const confirmed = await confirmCourseAction({
       kicker: 'CONFIRM EDIT',
-      title: `Save changes to ${original?.course || payload.course}?`,
+      title: `Save changes to ${displayCourseName(original?.course || payload.course)}?`,
       message: 'Recommendations will use the updated course details right away.',
       details: changes,
       confirmLabel: 'Save changes',
@@ -464,7 +467,7 @@ document.getElementById('course-editor-form')?.addEventListener('submit', async 
       body: JSON.stringify(payload),
     });
     document.getElementById('course-editor-dialog').close();
-    setCourseStatus(document.getElementById('course-catalog-status'), `${id ? 'Updated' : 'Added'} ${payload.course}. Recommendations now include this change.`);
+    setCourseStatus(document.getElementById('course-catalog-status'), `${id ? 'Updated' : 'Added'} ${displayCourseName(payload.course)}. Recommendations now include this change.`);
         await loadCourseCatalog(true);
   }catch(error){
     setCourseStatus(status, error.message || 'Unable to save the course.', true);
@@ -605,7 +608,7 @@ function renderTopRecommended(containerElem, list, allList = list){
   list.forEach(item => {
     const percentage = total ? Math.round((Number(item.count || 0) / total) * 100) : 0;
     const color = adminChartPalette.set1[(rank - 1) % adminChartPalette.set1.length];
-    html += `<div class="admin-bar-row"><div class="admin-bar-label"><span>${rank++}. <strong>${item.course}</strong></span><b>${percentage}%</b></div><div class="admin-bar-track"><i style="width:${percentage}%;background-color:${color}"></i></div></div>`;
+    html += `<div class="admin-bar-row"><div class="admin-bar-label"><span>${rank++}. <strong>${escapeAdminHtml(displayCourseName(item.course))}</strong></span><b>${percentage}%</b></div><div class="admin-bar-track"><i style="width:${percentage}%;background-color:${color}"></i></div></div>`;
   });
   html += '</div>';
   containerElem.innerHTML = html;
@@ -619,7 +622,7 @@ function renderAllRecommended(containerElem, list){
   let html = '<div class="admin-recommendation-bars">';
   list.forEach((item, index) => {
     const width = Math.round((Number(item.count || 0) / maxCount) * 100);
-    html += `<div class="admin-bar-row"><div class="admin-bar-label"><span><strong>${item.course}</strong></span><b>${item.count}</b></div><div class="admin-bar-track admin-count-track"><i style="width:${width}%;background-color:${colors[index]}"></i></div></div>`;
+    html += `<div class="admin-bar-row"><div class="admin-bar-label"><span><strong>${escapeAdminHtml(displayCourseName(item.course))}</strong></span><b>${item.count}</b></div><div class="admin-bar-track admin-count-track"><i style="width:${width}%;background-color:${colors[index]}"></i></div></div>`;
   });
   html += '</div>';
   containerElem.innerHTML = html;
@@ -1448,7 +1451,7 @@ function renderRecommendationHistory(){
   if(!wrap) return;
   const query = (document.getElementById('recommendationSearch')?.value || '').trim().toLowerCase();
   const filtered = recommendationHistory.filter(item => {
-    const recommendationText = (item.recommendations || []).map(rec => `${rec.course || ''} ${rec.reason || ''}`).join(' ');
+    const recommendationText = (item.recommendations || []).map(rec => `${rec.course || ''} ${displayCourseName(rec.course)} ${rec.reason || ''}`).join(' ');
     return `${item.student_name || ''} ${item.student_number || ''} ${item.strand || ''} ${item.email || ''} ${recommendationText}`.toLowerCase().includes(query);
   });
   if(!filtered.length){
@@ -1463,7 +1466,7 @@ function renderRecommendationHistory(){
     const recalculateAction = canManageStudents
       ? `<button class="recommendation-recalculate-button" type="button" data-profile-id="${item.profile_id}"><i class="fa-solid fa-rotate" aria-hidden="true"></i><span>Recalculate</span></button>`
       : '';
-    return `<tr><td>${escapeAdminHtml(formatReportDate(item.generated_at))}</td><td><strong>${escapeAdminHtml(item.student_name || 'Unknown student')}</strong><small class="recommendation-student-number">${escapeAdminHtml(item.student_number || item.email || '')}</small></td><td>${escapeAdminHtml(item.strand || '—')}</td><td>${escapeAdminHtml(item.gwa || '—')}</td><td>${escapeAdminHtml(top.course || 'No recommendation')}</td><td>${Number.isFinite(confidence) ? `${confidence.toFixed(1)}%` : '—'}</td><td>${Number.isFinite(fit) ? `${fit.toFixed(1)}%` : '—'}</td><td><div class="recommendation-row-actions"><button class="recommendation-detail-button" type="button" data-history-id="${item.history_id}">Details</button>${recalculateAction}</div></td></tr>`;
+    return `<tr><td>${escapeAdminHtml(formatReportDate(item.generated_at))}</td><td><strong>${escapeAdminHtml(item.student_name || 'Unknown student')}</strong><small class="recommendation-student-number">${escapeAdminHtml(item.student_number || item.email || '')}</small></td><td>${escapeAdminHtml(item.strand || '—')}</td><td>${escapeAdminHtml(item.gwa || '—')}</td><td>${escapeAdminHtml(displayCourseName(top.course) || 'No recommendation')}</td><td>${Number.isFinite(confidence) ? `${confidence.toFixed(1)}%` : '—'}</td><td>${Number.isFinite(fit) ? `${fit.toFixed(1)}%` : '—'}</td><td><div class="recommendation-row-actions"><button class="recommendation-detail-button" type="button" data-history-id="${item.history_id}">Details</button>${recalculateAction}</div></td></tr>`;
   }).join('')}</tbody></table>${buildAdminPager('recommendations', filtered.length, 'students')}`;
   bindAdminPager(wrap, 'recommendations');
   wrap.scrollLeft = 0;
@@ -1483,7 +1486,7 @@ function openRecommendationDetail(historyId){
     : '<p class="student-detail-empty">No subject grades were saved with this profile.</p>';
   const recommendations = item.recommendations || [];
   document.getElementById('recommendation-detail-list').innerHTML = recommendations.length
-    ? recommendations.map((rec, index) => `<article class="recommendation-detail-item"><div class="recommendation-detail-item-heading"><h4>${index + 1}. ${escapeAdminHtml(rec.course || 'Unspecified course')}</h4><span>${Number.isFinite(Number(rec.confidence)) ? `${Number(rec.confidence).toFixed(1)}% confidence` : 'Confidence unavailable'}</span></div><p>${escapeAdminHtml(rec.description || '')}</p><p class="recommendation-detail-reason"><strong>Reason:</strong> ${escapeAdminHtml(rec.reason || 'No reason saved.')}</p><div class="recommendation-fit-tags"><span>Core grade fit: ${Number.isFinite(Number(rec.core_grade_fit)) ? `${Number(rec.core_grade_fit).toFixed(1)}%` : '—'}</span>    <span>${rec.recommendation_basis === 'grade_alternative' ? 'Grade-based alternative (outside cluster)' : rec.strand_alignment ? 'Cluster aligned' : 'Grade profile match'}</span></div></article>`).join('')
+    ? recommendations.map((rec, index) => `<article class="recommendation-detail-item"><div class="recommendation-detail-item-heading"><h4>${index + 1}. ${escapeAdminHtml(displayCourseName(rec.course) || 'Unspecified course')}</h4><span>${Number.isFinite(Number(rec.confidence)) ? `${Number(rec.confidence).toFixed(1)}% confidence` : 'Confidence unavailable'}</span></div><p>${escapeAdminHtml(rec.description || '')}</p><p class="recommendation-detail-reason"><strong>Reason:</strong> ${escapeAdminHtml(rec.reason || 'No reason saved.')}</p><div class="recommendation-fit-tags"><span>Core grade fit: ${Number.isFinite(Number(rec.core_grade_fit)) ? `${Number(rec.core_grade_fit).toFixed(1)}%` : '—'}</span>    <span>${rec.recommendation_basis === 'grade_alternative' ? 'Grade-based alternative (outside cluster)' : rec.strand_alignment ? 'Cluster aligned' : 'Grade profile match'}</span></div></article>`).join('')
     : '<p class="student-detail-empty">No recommendations in this snapshot.</p>';
   document.getElementById('recommendation-detail-modal').hidden = false;
 }
@@ -1727,7 +1730,7 @@ async function openStudentEditor(studentId){
     }
     const recommendations = document.getElementById('student-editor-recommendations');
     recommendations.innerHTML = student.recommendation?.length
-      ? `<ol>${student.recommendation.map(item => `<li><strong>${escapeAdminHtml(item.course)}</strong><span>${item.recommendation_basis === 'grade_alternative' ? 'Grade-based alternative (outside cluster)' : item.strand_alignment ? 'Cluster-matched course' : 'Grade-profile match'}</span>${item.description ? `<span>${escapeAdminHtml(item.description)}</span>` : ''}</li>`).join('')}</ol>`
+      ? `<ol>${student.recommendation.map(item => `<li><strong>${escapeAdminHtml(displayCourseName(item.course))}</strong><span>${item.recommendation_basis === 'grade_alternative' ? 'Grade-based alternative (outside cluster)' : item.strand_alignment ? 'Cluster-matched course' : 'Grade-profile match'}</span>${item.description ? `<span>${escapeAdminHtml(item.description)}</span>` : ''}</li>`).join('')}</ol>`
       : '<p class="student-detail-empty">No course recommendations saved.</p>';
     modal.hidden = false;
   }catch(error){ alert(error.message || 'Unable to load student record.'); }
@@ -2024,7 +2027,7 @@ function renderAdminReportBody(report, output){
       const rowElement = document.createElement('tr');
       report.columns.forEach(column => {
         const cell = document.createElement('td');
-        cell.textContent = String(row[column.key] ?? '');
+        cell.textContent = column.key === 'course' ? displayCourseName(row[column.key]) : String(row[column.key] ?? '');
         rowElement.append(cell);
       });
       tableBody.append(rowElement);
@@ -2160,7 +2163,7 @@ async function loadDashboard(){
     document.getElementById('statCourseRecommendations').innerText = formatCount(stats.total_course_recommendations);
     document.getElementById('statStudentsWithReports').innerText = formatCount(stats.students_who_uploaded_reports);
     document.getElementById('statAverageGwa').innerText = stats.avg_gwa == null ? '—' : Number(stats.avg_gwa).toFixed(2);
-    document.getElementById('statMostRecommendedCourse').innerText = stats.most_recommended_course || '—';
+    document.getElementById('statMostRecommendedCourse').innerText = displayCourseName(stats.most_recommended_course) || '—';
     const mostRecommendedCount = Number(stats.most_recommended_course_count || 0);
     document.getElementById('statMostRecommendedCount').innerText = mostRecommendedCount
       ? `${formatCount(mostRecommendedCount)} ${mostRecommendedCount === 1 ? 'recommendation' : 'recommendations'}`

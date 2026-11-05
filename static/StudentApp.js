@@ -1490,7 +1490,7 @@ function viewStudentProfile(student) {
         <br>
 
         <p><strong>Course:</strong>
-        ${student.course}</p>
+        ${displayCourseName(student.course)}</p>
 
         <br>
 
@@ -2194,7 +2194,7 @@ function clearInputs() {
                         <div class="recommendation-rank">${String(groupRank(index)).padStart(2, '0')}</div>
                         <div class="recommendation-detail">
                             <div class="recommendation-title-row">
-                                <h3>${escapeHtml(item.course)}</h3>
+                                <h3>${escapeHtml(displayCourseName(item.course))}</h3>
                                 ${groupRank(index) === 1 ? `<span class="best-match-badge"><i class="fa-solid fa-star"></i> ${isAlternative(item) ? 'Top grade-based alternative' : 'Best match'}</span>` : ''}
                             </div>
                             <p>${escapeHtml(item.description || item.reason)}</p>
@@ -2208,7 +2208,7 @@ function clearInputs() {
                                     ? `<div class="subject-evidence">${majorEvidence.length ? `<span>Major related subjects</span><div>${renderEvidence(majorEvidence)}</div>` : ''}${supportingEvidence.length ? `<span>Supporting subjects</span><div>${renderEvidence(supportingEvidence)}</div>` : ''}</div>`
                                     : '';
                             })()}
-                            <div class="match-meter" aria-label="${escapeHtml(item.course)} recommendation match ${Number(item.match_score ?? item.confidence ?? 0).toFixed(2)} percent">
+                            <div class="match-meter" aria-label="${escapeHtml(displayCourseName(item.course))} recommendation match ${Number(item.match_score ?? item.confidence ?? 0).toFixed(2)} percent">
                                 <div class="match-meter-label"><span>Recommendation match</span><strong>${Number(item.match_score ?? item.confidence ?? 0).toFixed(2)}%</strong></div>
                                 <div class="match-meter-track"><span style="width:${Math.max(0, Math.min(100, Number(item.match_score ?? item.confidence ?? 0)))}%"></span></div>
                             </div>
@@ -2232,13 +2232,14 @@ function clearInputs() {
                 const difference = Number(comparison.overall_gap);
                 const hasStudentAverage = comparison.student_overall !== null && Number.isFinite(studentAverage);
                 const hasCourseAverage = comparison.course_average !== null && Number.isFinite(courseAverage);
-                const hasDifference = comparison.overall_gap !== null && Number.isFinite(difference);
+                const hasDifference = comparison.overall_gap !== null && comparison.overall_gap !== undefined && Number.isFinite(difference);
+                const differencePosition = hasDifference ? 50 + Math.max(-100, Math.min(100, difference)) / 2 : null;
                 const fieldEvidence = Array.isArray(item.subject_field_evidence) ? item.subject_field_evidence : [];
                 const fieldAverage = item.field_fit === null || item.field_fit === undefined ? null : Number(item.field_fit);
                 const strandLabel = String(item.strand_label || '').trim();
                 courseAnalysis.innerHTML = `
                     <div class="course-analysis-header">
-                        <div><span>${index === 0 ? 'Your best match' : 'Recommended course'}</span><h3>${escapeHtml(item.course)}</h3></div>
+                        <div><span>${index === 0 ? 'Your best match' : 'Recommended course'}</span><h3>${escapeHtml(displayCourseName(item.course))}</h3></div>
                         <strong>${Number(item.confidence || 0).toFixed(2)}% profile similarity</strong>
                     </div>
                     <p class="course-analysis-reason"><i class="fa-solid fa-lightbulb"></i>${escapeHtml(item.reason || 'This program matches your academic profile and subject strengths.')}</p>
@@ -2251,7 +2252,15 @@ function clearInputs() {
                     <div class="course-analysis-summary">
                         <div><span>Your average (graded categories)</span><strong>${hasStudentAverage ? studentAverage.toFixed(2) : 'N/A'}</strong></div>
                         <div><span>Course reference (same categories)</span><strong>${hasCourseAverage ? courseAverage.toFixed(2) : 'N/A'}</strong></div>
-                        <div><span>Difference</span><strong class="${hasDifference && difference >= 0 ? 'analysis-up' : 'analysis-down'}">${hasDifference ? `${difference >= 0 ? '+' : ''}${difference.toFixed(2)}` : 'N/A'}</strong></div>
+                        <div><span>Difference</span><strong class="${!hasDifference || difference === 0 ? 'analysis-neutral' : difference > 0 ? 'analysis-up' : 'analysis-down'}">${hasDifference ? `${difference > 0 ? '+' : ''}${difference.toFixed(2)}` : 'N/A'}</strong></div>
+                    </div>
+                    <div class="analysis-reference-scale">
+                        <div class="analysis-reference-labels"><span>Below reference</span><strong>Neutral (0)</strong><span>Above reference</span></div>
+                        <div class="analysis-reference-track" ${hasDifference ? `role="meter" aria-label="Grade-point difference from course reference" aria-valuemin="-100" aria-valuemax="100" aria-valuenow="${difference}" aria-valuetext="${difference === 0 ? 'Neutral: equal to the course reference' : `${Math.abs(difference).toFixed(2)} grade points ${difference > 0 ? 'above' : 'below'} the course reference`}"` : ''}>
+                            <span class="analysis-reference-neutral" aria-hidden="true"></span>
+                            ${hasDifference ? `<span class="analysis-reference-marker" style="left:${differencePosition}%" aria-hidden="true"></span>` : ''}
+                        </div>
+                        <p>${hasDifference ? 'Centered at 0: your average equals the course reference. Scale: -100 to +100 grade points.' : 'No grade comparison available.'}</p>
                     </div>
                     <div class="course-analysis-bars">
                         ${rows.map(row => `
@@ -2295,13 +2304,13 @@ function clearInputs() {
                 };
                 const fieldExplanation = fieldFitExplanations[item.category] || 'This course overlaps with the strengths shown in your academic profile.';
                 const fitExplanation = isAlternative(item) ? item.reason : subjectList
-                    ? `${index === 0 ? 'This is your strongest course match' : 'This course is a relevant match'} because your grades in ${subjectList} show strengths related to ${item.course}. ${fieldExplanation}${strandLabel && item.strand_alignment ? ` It is also listed for your ${strandLabel} cluster.` : !strandLabel ? ' No cluster was identified, so the match is based on your grade profile.' : ''}`
-                    : `${index === 0 ? 'This is currently your strongest course match' : 'This course is a relevant match'} based on how your overall grade profile compares with ${item.course}. ${fieldExplanation}${strandLabel && item.strand_alignment ? ` It is also listed for your ${strandLabel} cluster.` : ''}`;
+                    ? `${index === 0 ? 'This is your strongest course match' : 'This course is a relevant match'} because your grades in ${subjectList} show strengths related to ${displayCourseName(item.course)}. ${fieldExplanation}${strandLabel && item.strand_alignment ? ` It is also listed for your ${strandLabel} cluster.` : !strandLabel ? ' No cluster was identified, so the match is based on your grade profile.' : ''}`
+                    : `${index === 0 ? 'This is currently your strongest course match' : 'This course is a relevant match'} based on how your overall grade profile compares with ${displayCourseName(item.course)}. ${fieldExplanation}${strandLabel && item.strand_alignment ? ` It is also listed for your ${strandLabel} cluster.` : ''}`;
 
                 courseAnalysis.innerHTML = `
                     <div class="course-fit-explanation">
                         <div class="course-analysis-header">
-                            <div><span>${isAlternative(item) ? 'Why this grade-based alternative matches' : index === 0 ? 'Why this is your best match' : 'Why this course matches'}</span><h3>${escapeHtml(item.course)}</h3></div>
+                            <div><span>${isAlternative(item) ? 'Why this grade-based alternative matches' : index === 0 ? 'Why this is your best match' : 'Why this course matches'}</span><h3>${escapeHtml(displayCourseName(item.course))}</h3></div>
                             <strong>${matchScore}% match</strong>
                         </div>
                         <p class="course-analysis-reason course-fit-narrative"><i class="fa-solid fa-lightbulb"></i>${escapeHtml(fitExplanation)}</p>
@@ -2325,7 +2334,7 @@ function clearInputs() {
                 card.tabIndex = 0;
                 card.setAttribute('role', 'button');
                 card.setAttribute('aria-haspopup', 'dialog');
-                card.setAttribute('aria-label', `View academic comparison for ${items[index]?.course || 'this course'}`);
+                card.setAttribute('aria-label', `View academic comparison for ${displayCourseName(items[index]?.course) || 'this course'}`);
                 card.addEventListener('click', event => {
                     if(event.target.closest('button, a')) return;
                     renderSelectedCourse(index);
@@ -2336,10 +2345,13 @@ function clearInputs() {
                     renderSelectedCourse(index);
                 });
             });
-            const gradeValues = String(academicRecord?.grades || '')
+            const storedGradeValues = String(academicRecord?.grades || '')
                 .split(/[\s,;|]+/)
                 .map(value => Number.parseFloat(value))
                 .filter(value => Number.isFinite(value) && value >= 0 && value <= 100);
+            const gradeValues = storedGradeValues.length
+                ? storedGradeValues
+                : extractSubjectEvidence(academicRecord).map(entry => entry.grade);
             const subjectLines = String(academicRecord?.subjects || '')
                 .split(/\r?\n/)
                 .map(value => value.trim())
@@ -2347,7 +2359,7 @@ function clearInputs() {
             const average = gradeValues.length
                 ? gradeValues.reduce((total, grade) => total + grade, 0) / gradeValues.length
                 : Number.parseFloat(academicRecord?.gwa);
-            const spread = gradeValues.length > 1
+            const spread = gradeValues.length
                 ? Math.max(...gradeValues) - Math.min(...gradeValues)
                 : null;
             const evidenceCount = Math.max(gradeValues.length, subjectLines.length);
@@ -2386,7 +2398,7 @@ function clearInputs() {
             if(!data || !Array.isArray(data.recommendation) || !data.recommendation.length) return;
             renderInlineRecommendations(
                 data.recommendation,
-                { subjects: data.subjects || '', gwa: data.gwa || '' },
+                { subjects: data.subjects || '', grades: data.grades || '', gwa: data.gwa || '' },
                 data.comparisons || {},
                 false
             );

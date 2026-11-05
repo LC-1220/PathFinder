@@ -401,6 +401,20 @@ html:has(> body.student-page){scrollbar-gutter:stable;}
 .course-analysis-summary span{color:#737a91;font-size:10px;font-weight:900;text-transform:uppercase;}
 .course-analysis-summary strong{color:#171b4b;font-size:22px;}
 .analysis-up{color:#16745f!important;}.analysis-down{color:#b13b4a!important;}
+.analysis-neutral{color:#667085!important;}
+.analysis-reference-scale{margin:0 0 22px;color:#667085;font-size:11px;}
+.analysis-reference-labels{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));align-items:end;gap:8px;margin-bottom:12px;}
+.analysis-reference-labels strong{text-align:center;}
+.analysis-reference-labels>span:last-child{text-align:right;}
+.analysis-reference-track{position:relative;height:10px;margin:0 7px;border-radius:6px;background:linear-gradient(90deg,#f3d9df,#e8eaf3 50%,#cde9e1);}
+.analysis-reference-neutral{position:absolute;left:50%;top:-5px;width:2px;height:20px;transform:translateX(-50%);background:#667085;}
+.analysis-reference-marker{position:absolute;top:50%;width:14px;height:14px;border:2px solid #fff;border-radius:50%;background:#4c5bdf;box-shadow:0 0 0 1px #4c5bdf;transform:translate(-50%,-50%);}
+.analysis-reference-scale p{margin:12px 0 0;line-height:1.5;}
+html.student-dark .analysis-reference-scale,
+html.student-dark .analysis-neutral{color:#a1a9c3!important;}
+html.student-dark .analysis-reference-track{background:linear-gradient(90deg,#613342,#28304a 50%,#265648);}
+html.student-dark .analysis-reference-neutral{background:#a1a9c3;}
+html.student-dark .analysis-reference-marker{border-color:#171c2b;background:#a9b5ff;box-shadow:0 0 0 1px #a9b5ff;}
 .course-analysis-bars{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;}
 .analysis-subject{padding:13px;border:1px solid #e3e6f1;border-radius:6px;}
 .analysis-subject>strong{display:block;margin-bottom:9px;color:#2e355b;font-size:12px;}
