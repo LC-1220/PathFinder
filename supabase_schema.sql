@@ -139,6 +139,7 @@ create table if not exists public.university_courses (
     features jsonb not null,
     description text not null
 );
+alter table public.university_courses add column if not exists is_active boolean not null default true;
 alter table public.university_courses drop column if exists training_course;
 alter table public.university_courses drop column if exists description_override;
 alter table public.university_courses add column if not exists features jsonb;

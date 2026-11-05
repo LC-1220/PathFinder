@@ -2161,6 +2161,12 @@ body.logout-confirm-open {
   max-height: 260px;
   padding: 2px 0 0;
 }
+.admin-page #allRecommended {
+  scrollbar-width: none;
+}
+.admin-page #allRecommended::-webkit-scrollbar {
+  display: none;
+}
 .admin-page .admin-recommendation-bars {
   gap: 13px;
   padding: 2px 0;

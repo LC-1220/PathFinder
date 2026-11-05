@@ -26,6 +26,13 @@ FastHTML serves the website pages and templates. FastAPI provides the versioned 
    catalog with 44 university programs and their cluster categories. The obsolete
    course-training table is removed; student grades and profiles remain in place.
 
+   Course deactivation is a soft delete: inactive courses and their cluster
+   assignments remain in the admin catalog and can be reactivated. Existing
+   databases receive the course-status column automatically on app startup.
+   Restart the app after backend changes; the development server does not
+   automatically reload Python code. Do not reapply the catalog seed just to
+   add this column, since the seed replaces existing courses.
+
    python fastapi_app.py
 
 4. Open:

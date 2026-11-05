@@ -139,15 +139,17 @@ function renderCourseCatalog(){
   if(!body) return;
   const query = (document.getElementById('course-catalog-search')?.value || '').trim().toLowerCase();
   const cluster = document.getElementById('course-catalog-cluster')?.value || '';
+  const status = document.getElementById('course-catalog-active-filter')?.value || '';
   const filtered = courseCatalog.filter(course => {
     const matchesQuery = !query || course.course.toLowerCase().includes(query)
       || course.description.toLowerCase().includes(query)
       || course.strands.some(strand => strand.toLowerCase().includes(query));
-    return matchesQuery && (!cluster || course.strands.includes(cluster));
+    const matchesStatus = !status || (status === 'active' ? course.is_active !== false : course.is_active === false);
+    return matchesQuery && (!cluster || course.strands.includes(cluster)) && matchesStatus;
   });
   const pageCourses = paginateAdminList('courses', filtered);
   const count = document.getElementById('course-catalog-count');
-  if(count) count.textContent = query || cluster ? `${filtered.length} of ${courseCatalog.length} courses` : `${courseCatalog.length} courses`;
+  if(count) count.textContent = query || cluster || status ? `${filtered.length} of ${courseCatalog.length} courses` : `${courseCatalog.length} courses`;
   body.replaceChildren();
   const pager = document.getElementById('course-catalog-pager');
   if(pager){
@@ -169,6 +171,11 @@ function renderCourseCatalog(){
     const description = document.createElement('small');
     description.textContent = course.description;
     nameCell.append(name, description);
+    if(course.is_active === false){
+      const inactive = document.createElement('small');
+      inactive.textContent = 'Inactive — not recommended';
+      nameCell.append(inactive);
+    }
 
     const tags = document.createElement('div');
     tags.className = 'course-strand-tags';
@@ -181,10 +188,14 @@ function renderCourseCatalog(){
 
     const actions = document.createElement('div');
     actions.className = 'course-row-actions';
-    actions.innerHTML = '<button type="button" data-course-action="edit"><i class="fa-solid fa-pen" aria-hidden="true"></i><span>Edit</span></button><button type="button" class="is-danger" data-course-action="delete"><i class="fa-solid fa-trash" aria-hidden="true"></i><span>Remove</span></button>';
+    const active = course.is_active !== false;
+    actions.innerHTML = `<button type="button" data-course-action="edit"><i class="fa-solid fa-pen" aria-hidden="true"></i><span>Edit</span></button><button type="button" class="${active ? 'is-danger' : ''}" data-course-action="${active ? 'deactivate' : 'activate'}"><i class="fa-solid ${active ? 'fa-ban' : 'fa-rotate-left'}" aria-hidden="true"></i><span>${active ? 'Deactivate' : 'Reactivate'}</span></button>`;
     actions.querySelectorAll('button').forEach(button => {
       button.dataset.courseId = course.id;
-      button.setAttribute('aria-label', `${button.dataset.courseAction === 'edit' ? 'Edit' : 'Remove'} ${course.course}`);
+      const actionLabel = button.dataset.courseAction === 'edit'
+        ? 'Edit'
+        : button.dataset.courseAction === 'deactivate' ? 'Deactivate' : 'Reactivate';
+      button.setAttribute('aria-label', `${actionLabel} ${course.course}`);
     });
     row.insertCell().append(actions);
   }
@@ -265,7 +276,6 @@ function readCourseForm(form){
   return {course, description: text, strands, features};
 }
 
-const COURSE_DELETE_PHRASE = 'delete';
 let resolveCourseConfirm = null;
 
 function finishCourseConfirm(confirmed){
@@ -281,10 +291,10 @@ function syncCourseConfirmSubmit(){
   const input = document.getElementById('course-confirm-input');
   const submit = document.getElementById('course-confirm-submit');
   if(!submit) return;
-  submit.disabled = Boolean(typed && !typed.hidden && input?.value.trim().toLowerCase() !== COURSE_DELETE_PHRASE);
+  submit.disabled = Boolean(typed && !typed.hidden && input?.value.trim().toLowerCase() !== input?.dataset.confirmPhrase);
 }
 
-function confirmCourseAction({kicker, title, message, details = [], confirmLabel, danger = false, requireTyped = false}){
+function confirmCourseAction({kicker, title, message, details = [], confirmLabel, danger = false, typedPhrase = ''}){
   const dialog = document.getElementById('course-confirm-dialog');
   if(!dialog) return Promise.resolve(false);
   if(resolveCourseConfirm) finishCourseConfirm(false);
@@ -301,8 +311,10 @@ function confirmCourseAction({kicker, title, message, details = [], confirmLabel
   list.hidden = !details.length;
   const typed = document.getElementById('course-confirm-typed');
   const input = document.getElementById('course-confirm-input');
-  typed.hidden = !requireTyped;
+  typed.hidden = !typedPhrase;
   input.value = '';
+  input.dataset.confirmPhrase = typedPhrase;
+  document.getElementById('course-confirm-phrase').textContent = typedPhrase;
   const submit = document.getElementById('course-confirm-submit');
   submit.textContent = confirmLabel;
   submit.classList.toggle('btn-danger', danger);
@@ -314,7 +326,7 @@ function confirmCourseAction({kicker, title, message, details = [], confirmLabel
       resolve(confirmed);
     };
     dialog.showModal();
-    (requireTyped ? input : submit).focus();
+    (typedPhrase ? input : submit).focus();
   });
 }
 
@@ -364,6 +376,7 @@ document.getElementById('course-confirm-dialog')?.addEventListener('close', () =
 document.getElementById('add-course-button')?.addEventListener('click', () => openCourseEditor());
 document.getElementById('course-catalog-search')?.addEventListener('input', () => resetAdminPage('courses'));
 document.getElementById('course-catalog-cluster')?.addEventListener('change', () => resetAdminPage('courses'));
+document.getElementById('course-catalog-active-filter')?.addEventListener('change', () => resetAdminPage('courses'));
 document.querySelectorAll('[data-course-editor-close]').forEach(button => {
   button.addEventListener('click', () => document.getElementById('course-editor-dialog')?.close());
 });
@@ -382,24 +395,33 @@ document.getElementById('course-catalog-body')?.addEventListener('click', async 
     openCourseEditor(course);
     return;
   }
+  const isActive = course.is_active !== false;
   const confirmed = await confirmCourseAction({
-    kicker: 'REMOVE COURSE',
-    title: `Remove ${course.course}?`,
-    message: 'Students will no longer be recommended this course, and it will be hidden from previously saved results. This cannot be undone from the dashboard.',
-    confirmLabel: 'Remove course',
-    danger: true,
-    requireTyped: true,
+    kicker: isActive ? 'DEACTIVATE COURSE' : 'REACTIVATE COURSE',
+    title: `${isActive ? 'Deactivate' : 'Reactivate'} ${course.course}?`,
+    message: isActive
+      ? 'Students will no longer be recommended this course. Its details and strand assignments will be kept, and you can reactivate it later.'
+      : 'Students can be recommended this course again.',
+    confirmLabel: isActive ? 'Deactivate course' : 'Reactivate course',
+    danger: isActive,
+    typedPhrase: isActive ? 'deactivate' : 'reactivate',
   });
   if(!confirmed) return;
   const status = document.getElementById('course-catalog-status');
   button.disabled = true;
-  setCourseStatus(status, `Removing ${course.course}...`);
+  const action = isActive ? 'deactivate' : 'reactivate';
+  setCourseStatus(status, `${isActive ? 'Deactivating' : 'Reactivating'} ${course.course}...`);
   try{
-    await fetchJsonOrThrow(`/admin/courses/${encodeURIComponent(course.id)}`, {method:'DELETE'});
-    setCourseStatus(status, `Removed ${course.course}.`);
+    await fetchJsonOrThrow(
+      isActive
+        ? `/admin/courses/${encodeURIComponent(course.id)}`
+        : `/admin/courses/${encodeURIComponent(course.id)}/activate`,
+      {method: isActive ? 'DELETE' : 'POST'}
+    );
+    setCourseStatus(status, `${isActive ? 'Deactivated' : 'Reactivated'} ${course.course}.`);
     await loadCourseCatalog(true);
   }catch(error){
-    setCourseStatus(status, error.message || 'Unable to remove the course.', true);
+    setCourseStatus(status, error.message || `Unable to ${action} the course.`, true);
     button.disabled = false;
   }
 });
@@ -1078,8 +1100,8 @@ function renderAdminAccounts(users){
   const pageAccounts = paginateAdminList('accounts', accounts);
   wrap.innerHTML = `<div class="admin-accounts-table-wrap" role="region" aria-label="Admin accounts table" tabindex="0"><table class="table-fixed admin-students-table admin-accounts-table"><thead><tr><th>Name</th><th>Username</th><th>Role</th><th>Status</th><th>Last activity</th><th>Actions</th></tr></thead><tbody>${pageAccounts.map(user => {
     const isCurrent = String(user.id) === String(currentAdminUserId);
-    const roleLabel = user.role === 'admin' ? 'Super Admin' : 'Semi Admin';
-    return `<tr><td>${escapeAdminHtml(user.name || 'Unnamed admin')}${isCurrent ? '<small class="admin-current-account">You</small>' : ''}</td><td>${escapeAdminHtml(user.username || '—')}</td><td><select class="admin-role-select" data-admin-role-id="${escapeAdminHtml(user.id)}" aria-label="Role for ${escapeAdminHtml(user.name)}" ${isCurrent ? 'disabled' : ''}><option value="semi_admin" ${user.role === 'semi_admin' ? 'selected' : ''}>Semi Admin</option><option value="admin" ${user.role === 'admin' ? 'selected' : ''}>Super Admin</option></select><small class="admin-role-current">${roleLabel}</small></td><td><span class="student-status ${user.is_active ? 'is-active' : 'is-inactive'}">${user.is_active ? 'Active' : 'Deactivated'}</span></td><td>${escapeAdminHtml(user.last_login_at ? formatReportDate(user.last_login_at) : 'Never signed in')}</td><td><div class="admin-account-actions"><button class="admin-save-role" type="button" data-admin-id="${escapeAdminHtml(user.id)}" ${isCurrent ? 'disabled' : ''}>Save role</button><button class="admin-remove-account" type="button" data-admin-id="${escapeAdminHtml(user.id)}" ${isCurrent ? 'disabled' : ''}>Remove</button></div></td></tr>`;
+    const roleLabel = user.role === 'admin' ? 'Admin' : 'Sub Admin';
+    return `<tr><td>${escapeAdminHtml(user.name || 'Unnamed admin')}${isCurrent ? '<small class="admin-current-account">You</small>' : ''}</td><td>${escapeAdminHtml(user.username || '—')}</td><td><select class="admin-role-select" data-admin-role-id="${escapeAdminHtml(user.id)}" aria-label="Role for ${escapeAdminHtml(user.name)}" ${isCurrent ? 'disabled' : ''}><option value="semi_admin" ${user.role === 'semi_admin' ? 'selected' : ''}>Sub Admin</option><option value="admin" ${user.role === 'admin' ? 'selected' : ''}>Admin</option></select><small class="admin-role-current">${roleLabel}</small></td><td><span class="student-status ${user.is_active ? 'is-active' : 'is-inactive'}">${user.is_active ? 'Active' : 'Deactivated'}</span></td><td>${escapeAdminHtml(user.last_login_at ? formatReportDate(user.last_login_at) : 'Never signed in')}</td><td><div class="admin-account-actions"><button class="admin-save-role" type="button" data-admin-id="${escapeAdminHtml(user.id)}" ${isCurrent ? 'disabled' : ''}>Save role</button><button class="admin-remove-account" type="button" data-admin-id="${escapeAdminHtml(user.id)}" ${isCurrent ? 'disabled' : ''}>Remove</button></div></td></tr>`;
       }).join('')}</tbody></table></div>${buildAdminPager('accounts', accounts.length, 'admin accounts')}`;
       bindAdminPager(wrap, 'accounts');
   wrap.querySelectorAll('.admin-save-role').forEach(button => button.addEventListener('click', () => updateAdminRole(button.dataset.adminId, wrap)));
@@ -1119,7 +1141,7 @@ async function updateAdminRole(userId, wrap){
 
 async function removeAdminAccount(userId){
   const account = await fetchJsonOrThrow('/admin/users').then(result => (result.users || []).find(user => String(user.id) === String(userId)));
-  if(!account || !confirm(`Permanently remove ${account.name || account.username} (${account.role === 'admin' ? 'Super Admin' : 'Semi Admin'})?`)) return;
+  if(!account || !confirm(`Permanently remove ${account.name || account.username} (${account.role === 'admin' ? 'Admin' : 'Sub Admin'})?`)) return;
   try{
     const result = await fetchJsonOrThrow('/admin/remove_admin_account', {
       method: 'POST',

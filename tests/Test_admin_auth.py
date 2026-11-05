@@ -236,15 +236,23 @@ def test_system_settings_catalog_navigation_permissions(monkeypatch, role, can_m
         dashboard = client.get("/admin/dashboard", headers={"Accept": "text/html"})
 
     assert dashboard.status_code == 200
+    expected_role_label = "Admin" if role == app.ROLE_SUPER_ADMIN else "Sub Admin"
+    assert f"<dd>{expected_role_label}</dd>" in dashboard.text
+    assert f"<p>{expected_role_label} account</p>" in dashboard.text
+    assert "Super Admin" not in dashboard.text
+    assert "Semi Admin" not in dashboard.text
+    assert 'class="card admin-chart-all-courses"' in dashboard.text
     assert ('<details class="admin-nav-disclosure">' in dashboard.text) is can_manage_catalog
     assert ('aria-label="System Settings"' in dashboard.text) is can_manage_catalog
     assert ('aria-expanded="false" aria-controls="system-settings-menu"' in dashboard.text) is can_manage_catalog
     assert ('id="system-settings-menu"' in dashboard.text) is can_manage_catalog
     assert ('data-admin-view="course-catalog"' in dashboard.text) is can_manage_catalog
     assert ('id="course-catalog-cluster"' in dashboard.text) is can_manage_catalog
+    assert ('id="course-catalog-active-filter"' in dashboard.text) is can_manage_catalog
     assert ('id="course-catalog-pager"' in dashboard.text) is can_manage_catalog
     assert ('id="course-confirm-dialog"' in dashboard.text) is can_manage_catalog
     assert ('id="course-confirm-input"' in dashboard.text) is can_manage_catalog
+    assert ('id="course-confirm-phrase"' in dashboard.text) is can_manage_catalog
 
 
 def test_password_change_requires_admin_account(monkeypatch):

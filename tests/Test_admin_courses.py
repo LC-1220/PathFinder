@@ -24,9 +24,10 @@ class CourseRequest:
 
 
 class CourseCursor:
-    def __init__(self, duplicate=False, existing="Old Course", course_count=5):
+    def __init__(self, duplicate=False, existing="Old Course", existing_active=True, course_count=5):
         self.duplicate = duplicate
         self.existing = existing
+        self.existing_active = existing_active
         self.course_count = course_count
         self.statements = []
 
@@ -40,7 +41,7 @@ class CourseCursor:
         if "RETURNING id" in query:
             return (41,)
         if "FOR UPDATE" in query:
-            return (self.existing,) if self.existing else None
+            return (self.existing, self.existing_active) if self.existing else None
         if "COUNT(*)" in query:
             return (self.course_count,)
         return None
@@ -48,7 +49,7 @@ class CourseCursor:
     def fetchall(self):
         if "pg_constraint" in self.statements[-1][0]:
             return [("CHECK ((strand_code = ANY (ARRAY['BE'::text, 'STEM'::text, 'ICTech'::text, 'HT'::text, 'ARSSH'::text])))",)]
-        return [(3, "BS Nursing", "Care for patients.", [70, 95, 80, 60, 55, 85], ["stem", "HT"])]
+        return [(3, "BS Nursing", "Care for patients.", [70, 95, 80, 60, 55, 85], True, ["stem", "HT"])]
 
 
 class CourseConnection:
@@ -96,15 +97,42 @@ def test_super_admin_can_list_courses(catalog):
         "course": "BS Nursing",
         "description": "Care for patients.",
         "features": [70, 95, 80, 60, 55, 85],
+        "is_active": True,
         "strands": ["HT", "STEM"],
     }]
+
+
+def test_admin_catalog_includes_deactivated_courses(catalog, monkeypatch):
+    cursor, _, _ = catalog
+    monkeypatch.setattr(cursor, "fetchall", lambda: [
+        (3, "BS Nursing", "Care for patients.", [70, 95, 80, 60, 55, 85], False, ["STEM"]),
+    ])
+
+    response = app.admin_list_courses(CourseRequest())
+
+    assert body(response)["courses"][0]["is_active"] is False
+    assert body(response)["courses"][0]["strands"] == ["STEM"]
+    assert "WHERE COALESCE(courses.is_active" not in cursor.statements[0][0]
+
+
+def test_startup_adds_course_status_without_reseeding(catalog, monkeypatch):
+    cursor, connection, _ = catalog
+    monkeypatch.setattr(cursor, "fetchall", lambda: [])
+    monkeypatch.setattr(app, "ADMIN_USERNAME", "")
+
+    app.init_database()
+
+    queries = [query for query, _ in cursor.statements]
+    assert "ALTER TABLE IF EXISTS university_courses ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE" in queries
+    assert not any(query.startswith(("DELETE FROM university_courses", "INSERT INTO university_courses")) for query in queries)
+    assert connection.committed
 
 
 @pytest.mark.parametrize("call", [
     lambda request: app.admin_list_courses(request),
     lambda request: asyncio.run(app.admin_create_course(request)),
     lambda request: asyncio.run(app.admin_update_course(request, "3")),
-    lambda request: app.admin_delete_course(request, "3"),
+    lambda request: app.admin_deactivate_course(request, "3"),
 ])
 def test_semi_admin_cannot_manage_courses(catalog, call):
     response = call(CourseRequest(dict(VALID_COURSE), role="semi_admin"))
@@ -194,36 +222,48 @@ def test_update_missing_course_returns_not_found(catalog):
     assert not connection.committed
 
 
-def test_delete_course_removes_clusters_and_course(catalog):
+def test_deactivate_course_keeps_course_and_clusters(catalog):
     cursor, connection, activity = catalog
 
-    response = app.admin_delete_course(CourseRequest(), "3")
+    response = app.admin_deactivate_course(CourseRequest(), "3")
 
     assert response.status_code == 200
-    deletes = [(query, params) for query, params in cursor.statements if query.startswith("DELETE")]
-    assert deletes == [
-        ("DELETE FROM university_course_strands WHERE course = ?", ("Old Course",)),
-        ("DELETE FROM university_courses WHERE id = ?", (3,)),
-    ]
+    assert body(response)["is_active"] is False
+    assert ("UPDATE university_courses SET is_active = ? WHERE id = ?", (False, 3)) in cursor.statements
+    assert not any(query.startswith("DELETE") for query, _ in cursor.statements)
+    assert ("SELECT COUNT(*) FROM university_courses WHERE COALESCE(is_active, TRUE)", ()) in cursor.statements
     assert connection.committed
     assert app._NEAREST_NEIGHBOR_MODEL is None
-    assert activity == [("course_deleted", {"target_label": "Old Course"})]
+    assert activity == [("course_deactivated", {"target_label": "Old Course"})]
 
 
-def test_delete_refuses_to_empty_catalog(catalog):
+def test_deactivate_refuses_to_empty_catalog(catalog):
     cursor, connection, _ = catalog
     cursor.course_count = 1
 
-    response = app.admin_delete_course(CourseRequest(), "3")
+    response = app.admin_deactivate_course(CourseRequest(), "3")
 
     assert response.status_code == 400
-    assert "at least one course" in body(response)["message"]
+    assert "at least one active course" in body(response)["message"]
     assert not connection.committed
+
+
+def test_reactivate_course(catalog):
+    cursor, connection, activity = catalog
+    cursor.existing_active = False
+
+    response = app.admin_activate_course(CourseRequest(), "3")
+
+    assert response.status_code == 200
+    assert body(response)["is_active"] is True
+    assert ("UPDATE university_courses SET is_active = ? WHERE id = ?", (True, 3)) in cursor.statements
+    assert connection.committed
+    assert activity == [("course_reactivated", {"target_label": "Old Course"})]
 
 
 @pytest.mark.parametrize("course_id", ["abc", "0", "-2"])
 def test_invalid_course_id_returns_not_found(catalog, course_id):
-    assert app.admin_delete_course(CourseRequest(), course_id).status_code == 404
+    assert app.admin_deactivate_course(CourseRequest(), course_id).status_code == 404
     assert asyncio.run(app.admin_update_course(CourseRequest(dict(VALID_COURSE)), course_id)).status_code == 404
 
 
@@ -235,4 +275,5 @@ def test_course_routes_are_registered():
         ("/admin/courses", "POST"),
         ("/admin/courses/{course_id}", "PUT"),
         ("/admin/courses/{course_id}", "DELETE"),
+        ("/admin/courses/{course_id}/activate", "POST"),
     } <= routes

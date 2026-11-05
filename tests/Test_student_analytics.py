@@ -598,6 +598,7 @@ def test_university_catalog_loads_course_strand_assignments(monkeypatch):
     assert expected == ["BS in Computer Science with Specialization in Data Science", "BS in Accountancy"]
     assert catalog[0]["strands"] == ["STEM", "ICTECH"]
     assert "FROM university_courses" in executed[0]
+    assert "WHERE COALESCE(courses.is_active, TRUE)" in executed[0]
     assert "university_course_strands" in executed[0]
     assert app._sanitize_recommendations([{"course": "Software Engineering"}, {"course": expected[0]}]) == [
         {"course": expected[0], "description": "", "reason": "", "category": app.categorize_course(expected[0]),

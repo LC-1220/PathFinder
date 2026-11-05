@@ -92,7 +92,7 @@
         <input name="name" type="text" placeholder="Admin name" required>
         <input name="username" type="text" placeholder="Username" autocomplete="off" pattern="[A-Za-z][A-Za-z0-9._-]{2,31}" title="3-32 characters, starting with a letter; use letters, numbers, dots, underscores, or hyphens." required>
         <div class="admin-password-field"><input name="password" type="password" placeholder="Temporary password (8+ characters)" aria-label="Temporary password" minlength="8" maxlength="72" title="Use at least 8 characters, including uppercase and lowercase letters, a number, and a symbol." data-password-checklist required></div>
-        <label class="admin-role-choice">Role<select name="role" required><option value="semi_admin">Semi Admin · View-only</option><option value="admin">Super Admin · Full access</option></select></label>
+        <label class="admin-role-choice">Role<select name="role" required><option value="semi_admin">Sub Admin · View-only</option><option value="admin">Admin · Full access</option></select></label>
         <button class="btn btn-primary" type="submit">Create admin</button>
       </form>
       <p class="admin-password-policy-note">Maximum 72 UTF-8 bytes.</p>
@@ -145,12 +145,13 @@
     <section id="course-catalog" class="admin-students-section admin-system-settings" style="margin-top:22px" aria-labelledby="course-catalog-title">
       <div class="course-catalog-manager">
         <div class="course-catalog-heading">
-          <div><span class="admin-panel-kicker">SYSTEM SETTINGS · RECOMMENDATION CATALOG</span><h3 id="course-catalog-title">Course catalog</h3><p>Courses listed here are the ones students can be recommended.</p></div>
+          <div><span class="admin-panel-kicker">SYSTEM SETTINGS · RECOMMENDATION CATALOG</span><h3 id="course-catalog-title">Course catalog</h3><p>Active courses can be recommended to students. Deactivated courses remain saved and can be reactivated.</p></div>
           <button id="add-course-button" class="btn btn-primary" type="button"><i class="fa-solid fa-plus" aria-hidden="true"></i> Add new course</button>
         </div>
         <div class="course-catalog-toolbar">
           <label class="course-catalog-search"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i><span class="sr-only">Search courses</span><input id="course-catalog-search" type="search" placeholder="Search courses"></label>
           <label class="admin-filter-control"><span>Cluster</span><select id="course-catalog-cluster" aria-label="Filter courses by academic cluster"><option value="">All clusters</option><option value="BE">BE</option><option value="STEM">STEM</option><option value="ICTECH">ICTECH</option><option value="HT">HT</option><option value="ARSSH">ARSSH</option></select></label>
+          <label class="admin-filter-control"><span>Status</span><select id="course-catalog-active-filter" aria-label="Filter courses by status"><option value="">All Status</option><option value="active">Active</option><option value="deactivated">Deactivated</option></select></label>
           <span id="course-catalog-count" aria-live="polite"></span>
         </div>
         <p id="course-catalog-status" role="status" hidden></p>
@@ -182,7 +183,7 @@
           <div class="admin-panel-heading"><div><span class="admin-panel-kicker">COURSE MATCHES</span><h4>Top recommended</h4></div><button class="graph-expand-trigger" type="button" aria-label="Expand Top recommended graph" title="Expand graph"><i class="fa-solid fa-up-right-and-down-left-from-center" aria-hidden="true"></i></button></div>
           <div id="topRecommended"></div>
         </div>
-        <div class="card card-narrow admin-chart-all-courses" data-expandable-graph tabindex="0" aria-label="Expand Recommended courses graph">
+        <div class="card admin-chart-all-courses" data-expandable-graph tabindex="0" aria-label="Expand Recommended courses graph">
           <div class="admin-panel-heading"><div><span class="admin-panel-kicker">FULL CATALOG</span><h4>Recommended courses</h4></div><button class="graph-expand-trigger" type="button" aria-label="Expand Recommended courses graph" title="Expand graph"><i class="fa-solid fa-up-right-and-down-left-from-center" aria-hidden="true"></i></button></div>
           <div id="allRecommended" class="panel-scroll">
             <div class="no-courses">Loading recommended courses...</div>
@@ -254,7 +255,7 @@
         <section id="admin-settings-profile" class="admin-settings-tab-panel" role="tabpanel" aria-labelledby="admin-settings-tab-profile" data-settings-panel="profile">
           <div class="admin-settings-picture"><img id="admin-settings-picture" src="{{ profile_image }}" referrerpolicy="no-referrer" data-fallback-src="/static/profile_pictures/default.svg" alt="{{ admin }} profile picture"><label for="admin-picture-input" class="admin-picture-button"><i class="fa-solid fa-camera"></i> Change picture</label><input id="admin-picture-input" type="file" accept="image/*" hidden><span id="admin-picture-status" role="status"></span></div>
           <h3>{{ admin }}</h3>
-          <p>{{ 'Super Admin' if account_role == 'admin' else 'Semi Admin' if account_role == 'semi_admin' else 'Administrator' }} account</p>
+          <p>{{ 'Admin' if account_role == 'admin' else 'Sub Admin' if account_role == 'semi_admin' else 'Administrator' }} account</p>
           <form id="admin-name-form" class="admin-name-form"><label for="admin-name-input">Display name</label><div><input id="admin-name-input" name="name" type="text" value="{{ admin }}" required><button type="submit">Save name</button></div><span id="admin-name-status" role="status"></span></form>
         </section>
         <section id="admin-settings-password" class="admin-settings-tab-panel" role="tabpanel" aria-labelledby="admin-settings-tab-password" data-settings-panel="password" hidden>
@@ -262,7 +263,7 @@
           <p>Update your sign-in password and manage your session.</p>
           <dl class="admin-account-details">
             <div><dt>Username</dt><dd>{{ username or email }}</dd></div>
-            <div><dt>Access level</dt><dd>{{ 'Super Admin' if account_role == 'admin' else 'Semi Admin' if account_role == 'semi_admin' else 'Administrator' }}</dd></div>
+            <div><dt>Access level</dt><dd>{{ 'Admin' if account_role == 'admin' else 'Sub Admin' if account_role == 'semi_admin' else 'Administrator' }}</dd></div>
           </dl>
           <p class="admin-password-policy-note">Maximum 72 UTF-8 bytes.</p>
           <form id="admin-password-form" class="admin-password-form"><label for="admin-current-password">New sign-in password</label><input id="admin-current-password" name="current_password" type="password" placeholder="Current password" autocomplete="current-password" required><input id="admin-new-password" name="new_password" type="password" placeholder="New password (8+ characters)" minlength="8" maxlength="72" autocomplete="new-password" data-password-checklist required><input name="confirm_password" type="password" placeholder="Confirm new password" minlength="8" maxlength="72" autocomplete="new-password" required><button type="submit">Update password</button><span id="admin-password-status" role="status"></span></form>
@@ -300,7 +301,7 @@
   <dialog id="first-password-dialog" class="first-password-dialog" aria-labelledby="first-password-title" aria-describedby="first-password-description">
     <span class="admin-panel-kicker">ACCOUNT SECURITY</span>
     <h2 id="first-password-title">Change your temporary password</h2>
-    <p id="first-password-description">Set a new password to access your {{ 'Super Admin' if account_role == 'admin' else 'Semi Admin' }} dashboard.</p>
+    <p id="first-password-description">Set a new password to access your {{ 'Admin' if account_role == 'admin' else 'Sub Admin' }} dashboard.</p>
     <p class="admin-password-policy-note">Maximum 72 UTF-8 bytes.</p>
     <form id="first-password-form">
       <label>Temporary password<input name="current_password" type="password" autocomplete="current-password" required></label>
@@ -370,9 +371,9 @@
       <p id="course-confirm-message" class="course-confirm-message"></p>
       <ul id="course-confirm-details" class="course-confirm-details" hidden></ul>
       <label id="course-confirm-typed" class="course-confirm-typed" hidden>
-        <span>Type <strong>delete</strong> to confirm</span>
+        <span>Type <strong id="course-confirm-phrase"></strong> to confirm</span>
         <input id="course-confirm-input" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" aria-describedby="course-confirm-hint">
-        <small id="course-confirm-hint">This prevents removing a course by accident.</small>
+        <small id="course-confirm-hint">This prevents changing a course's status by accident.</small>
       </label>
       <div class="course-editor-actions"><button class="btn btn-secondary" type="button" data-course-confirm-cancel>Cancel</button><button id="course-confirm-submit" class="btn btn-primary" type="submit">Confirm</button></div>
     </form>
