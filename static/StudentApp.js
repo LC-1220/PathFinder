@@ -2493,6 +2493,60 @@ function clearInputs() {
 
         document.getElementById('upload-another')?.addEventListener('click', resetRecommendationFlow);
 
+        const freshStartDialog = document.getElementById('fresh-start-dialog');
+        const freshStartConfirm = document.getElementById('fresh-start-confirm');
+        const freshStartCancel = document.getElementById('fresh-start-cancel');
+        const freshStartStatus = document.getElementById('fresh-start-status');
+        let freshStartPending = false;
+        let savingReviewedRecord = false;
+        let freshStartTrigger = null;
+        document.querySelectorAll('[data-fresh-start]').forEach(button => {
+            button.addEventListener('click', () => {
+                if(runBtn.disabled || savingReviewedRecord){
+                    alert('Wait for report-card processing to finish before removing your profile.');
+                    return;
+                }
+                freshStartTrigger = button;
+                closeProfileMenu();
+                freshStartStatus.hidden = true;
+                freshStartDialog.showModal();
+            });
+        });
+        freshStartDialog?.addEventListener('cancel', event => {
+            if(freshStartPending) event.preventDefault();
+        });
+        freshStartDialog?.addEventListener('close', () => freshStartTrigger?.focus({preventScroll:true}));
+        freshStartConfirm?.addEventListener('click', async () => {
+            if(freshStartPending) return;
+            freshStartPending = true;
+            freshStartConfirm.disabled = true;
+            freshStartCancel.disabled = true;
+            freshStartStatus.hidden = true;
+            try{
+                const response = await fetch('/api/v1/recommendations/reset', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({confirmation: 'RESET'})
+                });
+                const data = await response.json();
+                if(!response.ok || !data.success) throw new Error(data.message || 'Could not remove your academic profile.');
+                window.latestSavedProfile = null;
+                try{
+                    Object.keys(sessionStorage).filter(key => key.startsWith('pathfinder-reviewed-grades:'))
+                        .forEach(key => sessionStorage.removeItem(key));
+                }catch(error){ console.error('Could not clear reviewed grades:', error); }
+                location.replace('/home');
+            }catch(error){
+                console.error('Profile removal failed:', error);
+                freshStartStatus.textContent = error.message || 'Could not remove your academic profile. Please try again.';
+                freshStartStatus.hidden = false;
+            }finally{
+                freshStartPending = false;
+                freshStartConfirm.disabled = false;
+                freshStartCancel.disabled = false;
+            }
+        });
+
         const emailResultsButton = document.getElementById('email-results');
         const emailResultsModal = document.getElementById('email-results-modal');
         const emailResultsCancel = document.getElementById('email-results-cancel');
@@ -3013,6 +3067,7 @@ function clearInputs() {
             updateReviewWarnings();
 
             saveBtn && (saveBtn.onclick = async () => {
+                if(savingReviewedRecord || freshStartPending) return;
                 const reviewedRows = reviewRows().filter(row => row.subject || row.grade);
                 const average = reviewAverage(reviewedRows);
                 const identity = window.latestStudentMetadata || {};
@@ -3028,6 +3083,7 @@ function clearInputs() {
                 };
 
                 try{
+                    savingReviewedRecord = true;
                     completedFilePercent = 0;
                     progressFileCount = 1;
                     estimatedProgress = 0;
@@ -3066,6 +3122,8 @@ function clearInputs() {
                     console.error('Save reviewed report failed:', error);
                     setProgress(0, 'Save failed');
                     alert('Save failed: ' + (error && error.message ? error.message : error));
+                }finally{
+                    savingReviewedRecord = false;
                 }
             });
 

@@ -31,6 +31,7 @@
                     <button type="button" class="profile-menu-action" data-show-upload><i class="fa-solid fa-cloud-arrow-up"></i> Upload another report</button>
                     <button type="button" class="profile-menu-action" data-open-settings><i class="fa-solid fa-user-gear"></i> Profile settings</button>
                     {% endif %}
+                    <button type="button" class="profile-menu-action" data-fresh-start><i class="fa-solid fa-trash-can"></i> Remove profile</button>
                     <button id="student-theme-toggle" class="profile-menu-theme" type="button" aria-pressed="false"><i class="fa-solid fa-moon" aria-hidden="true"></i><span>Dark mode</span></button>
                     <a href="/logout" class="profile-menu-logout" data-student-logout><i class="fa-solid fa-right-from-bracket"></i> Log out</a>
                 </div>
@@ -238,6 +239,18 @@
             </div>
         </div>
 
+        <dialog id="fresh-start-dialog" class="student-logout-dialog" aria-labelledby="fresh-start-title" aria-describedby="fresh-start-description">
+            <form method="dialog" class="logout-content">
+                <h2 id="fresh-start-title">Remove profile?</h2>
+                <p id="fresh-start-description" class="logoutTxt">This permanently removes all your saved report cards, grades, recommendations, and recommendation history. Your account and profile settings are kept. This cannot be undone.</p>
+                <p id="fresh-start-status" role="alert" hidden></p>
+                <div class="logout-buttons">
+                    <button id="fresh-start-cancel" class="Logoutbtn" type="submit" autofocus>Cancel</button>
+                    <button id="fresh-start-confirm" class="Logoutbtn2" type="button">Remove profile</button>
+                </div>
+            </form>
+        </dialog>
+
         {% if can_email_results|default(false) %}
         <div id="email-results-modal" class="email-results-modal" hidden>
             <section class="email-results-dialog" role="dialog" aria-modal="true" aria-labelledby="email-results-title" aria-describedby="email-results-message">
@@ -423,5 +436,6 @@
         <script src="{{ url_for('static', filename='CourseNames.js') }}"></script>
         <script src="{{ url_for('static', filename='StudentApp.js') }}"></script>
         <script src="{{ url_for('static', filename='Logout.js') }}"></script>
+        <script src="{{ url_for('static', filename='SessionTimeout.js') }}"></script>
     </body>
 </html>

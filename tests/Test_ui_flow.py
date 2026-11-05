@@ -101,3 +101,34 @@ def test_subject_evidence_selections_are_not_labeled_as_model_predictions():
     assert "isEvidenceSelected(item) ? 'Strong subject evidence'" in source
     assert source.count("isEvidenceSelected(item) ? 'Why this subject-based suggestion'") == 2
     assert "isEvidenceSelected(item) ? 'Subject-evidence suggestion'" in source
+
+
+@pytest.mark.parametrize("template", ["StudentManagement.html", "AdminDashboard.html"])
+def test_all_role_pages_load_inactivity_timeout_script(template):
+    source = (Path(__file__).resolve().parents[1] / "templates" / template).read_text(encoding="utf-8")
+    assert "filename='SessionTimeout.js'" in source
+
+
+def test_student_fresh_start_has_explicit_destructive_confirmation():
+    root = Path(__file__).resolve().parents[1]
+    template = (root / "templates" / "StudentManagement.html").read_text(encoding="utf-8")
+    script = (root / "static" / "StudentApp.js").read_text(encoding="utf-8")
+    assert 'class="fresh-start-card"' not in template
+    assert template.count("data-fresh-start") == 1
+    menu = template.split('id="profile-menu"', 1)[1].split('</header>', 1)[0]
+    assert "data-fresh-start" in menu
+    assert 'id="fresh-start-dialog"' in template
+    assert "This cannot be undone." in template
+    assert "recommendation history" in template
+    assert '<h2 id="fresh-start-title">Remove profile?</h2>' in template
+    assert '>Remove profile</button>' in template
+    assert "Start fresh?" not in template
+    assert "'/api/v1/recommendations/reset'" in script
+    assert "JSON.stringify({confirmation: 'RESET'})" in script
+
+
+@pytest.mark.parametrize("expired", [True, False])
+def test_timeout_popup_only_appears_after_session_expiry(expired):
+    template = app.TEMPLATES.get_template("Login.html").render(session_expired=expired)
+    assert ('id="session-timeout-dialog"' in template) is expired
+    assert ("document.getElementById('session-timeout-dialog').showModal()" in template) is expired

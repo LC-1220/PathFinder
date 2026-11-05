@@ -78,6 +78,7 @@ ROLE_SEMI_ADMIN = "semi_admin"
 ROLE_SUPER_ADMIN = ROLE_ADMIN
 PASSWORD_MIN_LENGTH = 8
 PASSWORD_MAX_BYTES = 72
+SESSION_IDLE_SECONDS = 15 * 60
 PASSWORD_POLICY_MESSAGE = "Use at least 8 characters with an uppercase letter and a symbol. Passwords must be no more than 72 UTF-8 bytes."
 ADMIN_PASSWORD_POLICY_MESSAGE = "Use at least 8 characters with an uppercase letter, a lowercase letter, a number, and a symbol. Passwords must be no more than 72 UTF-8 bytes."
 SYSTEM_SETTING_STRANDS = ("BE", "STEM", "ICTECH", "HT", "ARSSH")
@@ -2114,6 +2115,7 @@ def _render(req, template_name, **ctx):
         username=sess.get("username") or "",
         admin=sess.get("admin_user", sess.get("name", "Administrator")),
         profile_image=sess.get("profile_image", _default_profile_image_url()),
+        session_expired=req.query_params.get("reason") == "timeout",
         current_user_id=sess.get("user_id", ""),
         account_role=sess.get("role", ""),
         **ctx,
@@ -2174,6 +2176,7 @@ class _FirstLoginPasswordChangeMiddleware:
                 "/api/v1/admin/forgot-password",
                 "/api/v1/admin/verify-recovery",
                 "/api/v1/admin/reset-password",
+                "/api/v1/session",
                 "/admin/logout",
                 "/logout",
             }
@@ -2191,7 +2194,57 @@ class _FirstLoginPasswordChangeMiddleware:
         await self.app(scope, receive, send)
 
 
-# Run after SessionMiddleware so the gate can inspect the authenticated session.
+class _SessionIdleMiddleware:
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http" or scope.get("path", "").startswith("/static/"):
+            await self.app(scope, receive, send)
+            return
+        session = scope["session"]
+        now = time.time()
+        authenticated = bool(session.get("user_id") or session.get("is_guest"))
+        path = scope.get("path", "")
+        if authenticated:
+            last_activity = session.get("last_activity", now)
+            if (
+                not isinstance(last_activity, (int, float))
+                or not math.isfinite(last_activity)
+                or last_activity > now
+                or now - last_activity >= SESSION_IDLE_SECONDS
+            ):
+                session.clear()
+                session["session_expired"] = True
+                if path.startswith("/api/"):
+                    response = JSONResponse({
+                        "success": False, "code": "session_expired",
+                        "message": "Your session expired after 15 minutes of inactivity. Please sign in again.",
+                        "redirect": "/login?reason=timeout",
+                    }, status_code=401)
+                else:
+                    response = RedirectResponse("/login?reason=timeout", status_code=303)
+                response.headers["Cache-Control"] = "no-store"
+                await response(scope, receive, send)
+                return
+            session.setdefault("last_activity", now)
+            headers = dict(scope.get("headers", []))
+            if scope.get("method") == "GET" and b"text/html" in headers.get(b"accept", b"") and not path.startswith("/api/"):
+                session["last_activity"] = now
+
+        async def send_with_session(message):
+            if message["type"] == "http.response.start":
+                if session.get("user_id") or session.get("is_guest"):
+                    session.setdefault("last_activity", now)
+                    session.pop("session_expired", None)
+                    message.setdefault("headers", []).append((b"cache-control", b"no-store"))
+            await send(message)
+
+        await self.app(scope, receive, send_with_session)
+
+
+# Run after SessionMiddleware so both gates can inspect the authenticated session.
+app.user_middleware.append(Middleware(_SessionIdleMiddleware))
 app.user_middleware.append(Middleware(_FirstLoginPasswordChangeMiddleware))
 app.middleware_stack = None
 
@@ -2682,7 +2735,7 @@ def logout(req):
     _record_admin_activity(req.session, "logout")
     _record_student_activity(req, "logout")
     req.session.clear()
-    return RedirectResponse("/", status_code=302)
+    return RedirectResponse("/login?reason=timeout" if req.query_params.get("reason") == "timeout" else "/", status_code=302)
 
 # Define the route for admin login
 @fastapi_route("/admin/login", methods=["GET", "POST"])
@@ -4976,6 +5029,57 @@ def get_profile(req):
     )
 
 
+def session_status(req):
+    sess = req.session
+    if not (sess.get("user_id") or sess.get("is_guest")):
+        return JSONResponse({
+            "success": False, "code": "session_expired" if sess.get("session_expired") else "session_required",
+            "message": "Your session has ended. Please sign in again.",
+            "redirect": "/login?reason=timeout" if sess.get("session_expired") else "/login",
+        }, status_code=401, headers={"Cache-Control": "no-store"})
+    if req.method == "POST":
+        sess["last_activity"] = time.time()
+    return JSONResponse({
+        "success": True,
+        "expires_at": sess["last_activity"] + SESSION_IDLE_SECONDS,
+        "timeout_seconds": SESSION_IDLE_SECONDS,
+    }, headers={"Cache-Control": "no-store"})
+
+
+async def reset_student_recommendations(req):
+    sess = req.session
+    if not (sess.get("is_guest") or sess.get("user_id")):
+        return JSONResponse({"success": False, "message": "Please sign in first."}, status_code=401)
+    if sess.get("role", "student") != "student":
+        return JSONResponse({"success": False, "message": "Only students can clear their recommendation records."}, status_code=403)
+    data = await req.json()
+    if not isinstance(data, dict) or data.get("confirmation") != "RESET":
+        return JSONResponse({"success": False, "message": "Confirm profile removal before removing your records."}, status_code=400)
+    if not sess.get("is_guest"):
+        conn = _db_conn()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT COALESCE(role, 'student') FROM users WHERE id = ?", (sess["user_id"],))
+            row = cursor.fetchone()
+            if not row or row[0] != "student":
+                return JSONResponse({"success": False, "message": "Student account required."}, status_code=403)
+            # History is removed by the profile foreign key's ON DELETE CASCADE.
+            cursor.execute("DELETE FROM student_profiles WHERE user_id = ?", (sess["user_id"],))
+            cursor.execute("DELETE FROM report_card_uploads WHERE user_id = ?", (sess["user_id"],))
+            conn.commit()
+        except psycopg.Error:
+            conn.rollback()
+            logging.getLogger(__name__).exception("Could not clear student recommendation records.")
+            return JSONResponse({"success": False, "message": "Could not clear your records. Please try again."}, status_code=500)
+        finally:
+            conn.close()
+        _record_student_activity(req, "recommendations_reset", details="Student cleared report cards, grades, recommendations, and recommendation history.")
+    for key in list(sess):
+        if key.startswith(("latest_", "ocr_")):
+            sess.pop(key, None)
+    return JSONResponse({"success": True, "message": "Your report cards, grades, recommendations, and recommendation history have been cleared. Your account is unchanged."})
+
+
 def _results_email_content(profile, recommendations):
     name = " ".join(part for part in (
         profile.get("first_name") or "",
@@ -6029,6 +6133,8 @@ def _fastapi_handler(handler, path_parameters=()):
 
 
 _FASTAPI_ENDPOINTS = (
+    ("/session", ["GET", "POST"], session_status, ()),
+    ("/recommendations/reset", ["POST"], reset_student_recommendations, ()),
     ("/register", ["POST"], register, ()),
     ("/login", ["POST"], login, ()),
     ("/admin/recovery-email", ["GET"], admin_recovery_email, ()),

@@ -5,6 +5,16 @@
     font-family:'Montserrat', sans-serif;
 }
 
+#session-timeout-dialog{margin:auto;width:min(420px,calc(100vw - 32px));padding:28px;border:1px solid #dfe4f7;border-radius:20px;background:#fff;color:#17213b;box-shadow:0 24px 70px #10183055;}
+#session-timeout-dialog::backdrop{background:#12193899;backdrop-filter:blur(5px);}
+#session-timeout-dialog h2{margin-bottom:14px;font-size:24px;}
+#session-timeout-dialog p{margin-bottom:24px;font-size:14px;line-height:1.7;}
+#session-timeout-dialog button{display:flex;align-items:center;justify-content:center;width:100%;min-height:46px;padding:12px 20px;border:1px solid transparent;border-radius:10px;background:linear-gradient(120deg,#1f4ad4,#5c3ee8);color:#fff;font:inherit;font-size:14px;font-weight:700;line-height:1.4;box-shadow:0 4px 12px #403bd426;cursor:pointer;}
+#session-timeout-dialog button{background-image:linear-gradient(120deg,#1f4ad4,#5c3ee8,#7a5cff,#1f4ad4);background-size:220% 220%;animation:pf-flow-bg 7s ease-in-out infinite;}
+#session-timeout-dialog button:hover{filter:brightness(.94);box-shadow:0 6px 16px #403bd438;}
+#session-timeout-dialog button:focus-visible{outline:3px solid #7866ed;outline-offset:3px;}
+#session-timeout-dialog button:active{box-shadow:0 2px 6px #403bd426;}
+
 body{
     background: linear-gradient(135deg, #190069 0%, #0e37bd 35%, #5d3fe8 68%, #1d8fd1 100%);
     background-size: 320% 320%;

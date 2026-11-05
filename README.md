@@ -45,6 +45,31 @@ FastHTML serves the website pages and templates. FastAPI provides the versioned 
 - Interactive API documentation is available at `/api/v1/docs`; the OpenAPI schema is at `/api/v1/openapi.json`.
 - Browser API calls use the versioned FastAPI routes under `/api/v1`.
 
+## Sessions and student profile removal
+
+Students, guests, Admins, and Sub Admins are signed out after **15 minutes of
+inactivity**. The server checks the signed session's activity timestamp before
+handling page or API requests; expired API calls return HTTP 401 with
+`code: "session_expired"`. Protected pages redirect to sign-in with a session-timeout
+popup and an expiry notice. Dismissing the popup leaves the sign-in options visible.
+`static/SessionTimeout.js` tracks keyboard, pointer, touch, and scrolling activity
+and sends throttled activity heartbeats to `POST /api/v1/session`.
+`GET /api/v1/session` checks the deadline without extending it, so background
+polling does not keep idle accounts signed in. Visible tabs resynchronize against
+the shared session cookie; sleeping tabs check expiry when resumed.
+Existing signed-in sessions receive an initial deadline on their next request.
+
+The student's **Remove profile** action is available only in the profile-icon
+dropdown menu and opens an irreversible-deletion confirmation. Confirming sends
+`POST /api/v1/recommendations/reset` with `{"confirmation": "RESET"}`.
+For signed-in students this deletes only their own academic profiles (including
+grades and recommendations), associated recommendation history, and uploaded
+report cards. Their account, sign-in details, profile settings, and activity audit
+logs remain. Guest resets clear session recommendation data without database
+writes. Local reviewed-grade drafts are cleared, and a clean upload page opens.
+Canceling leaves records unchanged. Ordinary **Upload another report card**
+continues to merge subjects into the saved record; it does not erase data.
+
 ## UI motion and layout
 
 Student, Admin, and sign-in pages load `static/UIFlow.css` after their page

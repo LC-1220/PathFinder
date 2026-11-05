@@ -31,6 +31,7 @@
             <form id="loginForm"{% if recovery_verification_page|default(false) %} hidden{% endif %}>
                 <h1>Welcome to <span class="brand-gradient-text">PathFinder</span></h1>
                 <p class="login-intro">Upload your report card and discover courses that match your grades.</p>
+                {% if session_expired|default(false) %}<p role="status">Your session expired after 15 minutes of inactivity. Please sign in again or start a new guest session.</p>{% endif %}
 
                 <div class="entry-actions">
                     <a href="/google-login" class="entry-button google-entry" rel="noopener noreferrer"><i class="fa-brands fa-google"></i><span>Continue with Google</span></a>
@@ -79,6 +80,17 @@
         </div>
 
     </div>
+
+    {% if session_expired|default(false) %}
+    <dialog id="session-timeout-dialog" aria-labelledby="session-timeout-title" aria-describedby="session-timeout-description">
+        <form method="dialog">
+            <h2 id="session-timeout-title">Session timed out</h2>
+            <p id="session-timeout-description">You were signed out after 15 minutes of inactivity. Please sign in again or start a new guest session.</p>
+            <button type="submit" autofocus>Back to sign in</button>
+        </form>
+    </dialog>
+    <script>document.getElementById('session-timeout-dialog').showModal();</script>
+    {% endif %}
 
     <script src="{{ url_for('static', filename='PasswordChecklist.js') }}"></script>
     <script src="{{ url_for('static', filename='Login.js') }}"></script>
