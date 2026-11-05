@@ -2099,6 +2099,16 @@ function clearInputs() {
                 ['Business subjects', ['business', 'account', 'accounting', 'accountancy', 'management', 'marketing', 'economics', 'entrepreneur', 'entrepreneurship', 'finance', 'tourism', 'hospitality']],
                 ['Social sciences and humanities', ['history', 'sociology', 'psychology', 'political', 'social', 'criminology', 'education', 'philosophy', 'governance', 'culture', 'humanities', 'religion']],
                 ['Arts and creative subjects', ['art', 'arts', 'design', 'music', 'media', 'creative', 'visual', 'performing']],
+                ['Teaching and learner development', ['pedagogy', 'teaching', 'teacher education', 'child development', 'early childhood education', 'elementary education', 'secondary education', 'special needs education', 'inclusive education', 'curriculum', 'classroom instruction']],
+                ['Psychology and human behavior', ['psychology', 'human behavior', 'human behaviour', 'mental processes', 'personal development']],
+                ['Politics and governance', ['politics', 'political', 'governance', 'civics', 'public administration']],
+                ['Criminal justice and law enforcement', ['criminology', 'criminal', 'justice', 'law enforcement', 'forensic']],
+                ['Navigation and seamanship', ['navigation', 'seamanship', 'nautical', 'ship operations']],
+                ['Physics', ['physics']],
+                ['Chemistry', ['chemistry', 'chemical', 'biochemistry']],
+                ['Tourism and hospitality', ['tourism', 'hospitality', 'tour operations', 'tour guiding', 'travel services']],
+                ['Programming and software development', ['programming', 'coding', 'software development', 'software engineering', 'algorithms', 'algorithm', 'data structures', 'web development', 'application development', 'python', 'java', 'javascript', 'c++', 'c#']],
+                ['Architectural design and drafting', ['drafting', 'technical drawing', 'architectural design', 'building design', 'computer aided design', 'computer-aided design', 'autocad', 'cad', 'building information modeling']],
             ];
             const labels = fields.filter(([, terms]) => terms.some(matchesTerm)).map(([field]) => field);
             if(/^(?:(?:general|integrated|natural|basic)\s+)?sciences?(?:\s*\d+)?$/.test(label.trim())) labels.push('General sciences', 'Science subjects');
@@ -2180,22 +2190,23 @@ function clearInputs() {
                 .slice(0, 1);
             const items = [...primary, ...alternatives];
             const isAlternative = item => item.recommendation_basis === 'grade_alternative';
+            const isEvidenceSelected = item => item.selection_basis === 'subject_evidence';
             const groupRank = index => index < primary.length ? index + 1 : index - primary.length + 1;
             const resultsTitle = document.getElementById('recommendation-results-title');
             if(resultsTitle){
-                resultsTitle.textContent = alternatives.length ? 'Your course matches and best grade-based alternative'
+                resultsTitle.textContent = alternatives.length ? 'Your course matches and grade-based alternative'
                     : `Your top ${items.length} course match${items.length === 1 ? '' : 'es'}`;
             }
             list.innerHTML = items.length
                 ? items.map((item, index) => `
                     ${index === 0 && primary.length ? `<div class="recommendation-group-heading"><h3>${primary[0].strand_label ? 'Cluster-matched courses' : 'Grade-profile matches'}</h3><p>${primary[0].strand_label ? 'Courses listed for your cluster, ranked using your grades.' : 'Courses ranked using your available grades.'}</p></div>` : ''}
-                    ${isAlternative(item) && index === primary.length ? '<div class="recommendation-group-heading"><h3>Best grade-based alternative</h3><p>The highest-ranked course outside your cluster group with recognized major-related grades, ranked using related subjects and your available grade profile. Supporting subjects alone do not qualify a course. This is guidance, not an admission guarantee.</p></div>' : ''}
+                    ${isAlternative(item) && index === primary.length ? `<div class="recommendation-group-heading"><h3>Grade-based alternative</h3><p>${isEvidenceSelected(item) ? 'Selected outside your cluster group because of your strongest subject evidence.' : 'The highest-ranked course outside your cluster group with recognized major-related grades, ranked using related subjects and your available grade profile.'} Supporting subjects alone do not qualify a course. This is guidance, not an admission guarantee.</p></div>` : ''}
                     <article class="inline-recommendation-card${isAlternative(item) ? ' grade-based-alternative' : index === 0 ? ' best-match' : ''}" data-recommendation-index="${index}">
                         <div class="recommendation-rank">${String(groupRank(index)).padStart(2, '0')}</div>
                         <div class="recommendation-detail">
                             <div class="recommendation-title-row">
                                 <h3>${escapeHtml(displayCourseName(item.course))}</h3>
-                                ${groupRank(index) === 1 ? `<span class="best-match-badge"><i class="fa-solid fa-star"></i> ${isAlternative(item) ? 'Top grade-based alternative' : 'Best match'}</span>` : ''}
+                                ${isEvidenceSelected(item) || groupRank(index) === 1 ? `<span class="best-match-badge"><i class="fa-solid fa-star"></i> ${isEvidenceSelected(item) ? 'Strong subject evidence' : isAlternative(item) ? 'Top grade-based alternative' : item.model_basis ? 'Top model suggestion' : 'Best match'}</span>` : ''}
                             </div>
                             <p>${escapeHtml(item.description || item.reason)}</p>
                             ${item.reason ? `<small>${escapeHtml(item.reason)}</small>` : ''}
@@ -2208,17 +2219,17 @@ function clearInputs() {
                                     ? `<div class="subject-evidence">${majorEvidence.length ? `<span>Major related subjects</span><div>${renderEvidence(majorEvidence)}</div>` : ''}${supportingEvidence.length ? `<span>Supporting subjects</span><div>${renderEvidence(supportingEvidence)}</div>` : ''}</div>`
                                     : '';
                             })()}
-                            <div class="match-meter" aria-label="${escapeHtml(displayCourseName(item.course))} recommendation match ${Number(item.match_score ?? item.confidence ?? 0).toFixed(2)} percent">
-                                <div class="match-meter-label"><span>Recommendation match</span><strong>${Number(item.match_score ?? item.confidence ?? 0).toFixed(2)}%</strong></div>
-                                <div class="match-meter-track"><span style="width:${Math.max(0, Math.min(100, Number(item.match_score ?? item.confidence ?? 0)))}%"></span></div>
+                            <div class="match-meter" title="Grade-profile similarity, not model support or an admission probability" aria-label="${escapeHtml(displayCourseName(item.course))} recommendation match ${Number(item.confidence ?? 0).toFixed(2)} percent, based on grade-profile similarity">
+                                <div class="match-meter-label"><span>Recommendation match</span><strong>${Number(item.confidence ?? 0).toFixed(2)}%</strong></div>
+                                <div class="match-meter-track"><span style="width:${Math.max(0, Math.min(100, Number(item.confidence ?? 0)))}%"></span></div>
                             </div>
                             <div class="recommendation-actions">
-                                <button class="recommendation-match-explanation" type="button" aria-haspopup="dialog">${isAlternative(item) ? 'Why this alternative matches' : index === 0 ? 'Why this is your best match' : 'Why this course matches'} <i class="fa-solid fa-lightbulb" aria-hidden="true"></i></button>
+                                <button class="recommendation-match-explanation" type="button" aria-haspopup="dialog">${isEvidenceSelected(item) ? 'Why this subject-based suggestion' : item.model_basis ? 'Why the model suggests this' : isAlternative(item) ? 'Why this alternative matches' : index === 0 ? 'Why this is your best match' : 'Why this course matches'} <i class="fa-solid fa-lightbulb" aria-hidden="true"></i></button>
                             </div>
                         </div>
                     </article>
                 `).join('')
-                : '<p class="recommendation-empty">No course matches could be generated from these grades.</p>';
+                : '<p class="recommendation-empty">No courses have enough recognized course-specific grade evidence. Review your subject names or consult a guidance counselor; this does not mean you are ineligible for college.</p>';
 
             function renderSelectedCourse(index){
                 const item = items[index];
@@ -2239,13 +2250,14 @@ function clearInputs() {
                 const strandLabel = String(item.strand_label || '').trim();
                 courseAnalysis.innerHTML = `
                     <div class="course-analysis-header">
-                        <div><span>${index === 0 ? 'Your best match' : 'Recommended course'}</span><h3>${escapeHtml(displayCourseName(item.course))}</h3></div>
-                        <strong>${Number(item.confidence || 0).toFixed(2)}% profile similarity</strong>
+                        <div><span>${isEvidenceSelected(item) ? 'Subject-evidence suggestion' : item.model_basis ? 'Experimental model suggestion' : index === 0 ? 'Your best match' : 'Recommended course'}</span><h3>${escapeHtml(displayCourseName(item.course))}</h3></div>
+                        <strong>${Number(item.confidence || 0).toFixed(2)}% recommendation match</strong>
                     </div>
                     <p class="course-analysis-reason"><i class="fa-solid fa-lightbulb"></i>${escapeHtml(item.reason || 'This program matches your academic profile and subject strengths.')}</p>
                     <p class="course-analysis-description">${escapeHtml(item.description || 'Course description is not available.')}</p>
                     <div class="course-analysis-signals" aria-label="Recommendation signals">
-                        <div class="course-analysis-signal"><span>Grade-profile similarity</span><strong>${Number(item.confidence || 0).toFixed(2)}%</strong><small>Based on graded subject categories compared with this course profile.</small></div>
+                        ${item.model_basis ? `<div class="course-analysis-signal"><span>Synthetic model support</span><strong>${Number(item.match_score || 0).toFixed(2)}%</strong><small>Relative support across all active catalog courses, before eligibility filtering. Not validated on real students.</small></div>` : ''}
+                        <div class="course-analysis-signal"><span>Recommendation match</span><strong>${Number(item.confidence || 0).toFixed(2)}%</strong><small>Grade-profile similarity: graded subject categories compared with this course profile. Separate from model support; does not determine ML ranking.</small></div>
                         <div class="course-analysis-signal"><span>Related-field grades</span><strong>${fieldAverage !== null && Number.isFinite(fieldAverage) ? fieldAverage.toFixed(1) : 'Not available'}</strong><small>${fieldEvidence.length ? fieldEvidence.map(entry => `${escapeHtml(entry.field)} ${Number(entry.grade).toFixed(1)}`).join(' · ') : 'No recognized related-field grades.'}</small></div>
                         <div class="course-analysis-signal"><span>${strandLabel ? `${escapeHtml(strandLabel)} cluster` : 'Cluster'}</span><strong>${isAlternative(item) ? 'Grade-based alternative' : strandLabel ? (item.strand_alignment ? 'Aligned' : 'Not aligned') : 'Not provided'}</strong><small>${isAlternative(item) ? 'Ranked by your strongest grades and stored course profiles, not cluster eligibility.' : 'Cluster alignment helps prioritize results; it does not replace grade evidence.'}</small></div>
                     </div>
@@ -2284,7 +2296,7 @@ function clearInputs() {
                     .sort((left, right) => (left.priority === right.priority ? right.grade - left.grade : left.priority === 'major' ? -1 : 1))
                     .slice(0, 6);
                 const strandLabel = String(item.strand_label || '').trim();
-                const matchScore = Number(item.match_score ?? item.confidence ?? 0).toFixed(2);
+                const matchScore = Number(item.confidence ?? 0).toFixed(2);
                 const profileSimilarity = Number(item.confidence || 0).toFixed(2);
                 const subjectNames = [...new Set(supportingSubjects.slice(0, 4).map(entry => entry.subject))];
                 const subjectList = subjectNames.length === 1
@@ -2303,23 +2315,23 @@ function clearInputs() {
                     'Sports & Physical Education': 'These programs combine physical performance, health knowledge, and instruction.',
                 };
                 const fieldExplanation = fieldFitExplanations[item.category] || 'This course overlaps with the strengths shown in your academic profile.';
-                const fitExplanation = isAlternative(item) ? item.reason : subjectList
+                const fitExplanation = item.model_basis || isAlternative(item) ? item.reason : subjectList
                     ? `${index === 0 ? 'This is your strongest course match' : 'This course is a relevant match'} because your grades in ${subjectList} show strengths related to ${displayCourseName(item.course)}. ${fieldExplanation}${strandLabel && item.strand_alignment ? ` It is also listed for your ${strandLabel} cluster.` : !strandLabel ? ' No cluster was identified, so the match is based on your grade profile.' : ''}`
                     : `${index === 0 ? 'This is currently your strongest course match' : 'This course is a relevant match'} based on how your overall grade profile compares with ${displayCourseName(item.course)}. ${fieldExplanation}${strandLabel && item.strand_alignment ? ` It is also listed for your ${strandLabel} cluster.` : ''}`;
 
                 courseAnalysis.innerHTML = `
                     <div class="course-fit-explanation">
                         <div class="course-analysis-header">
-                            <div><span>${isAlternative(item) ? 'Why this grade-based alternative matches' : index === 0 ? 'Why this is your best match' : 'Why this course matches'}</span><h3>${escapeHtml(displayCourseName(item.course))}</h3></div>
-                            <strong>${matchScore}% match</strong>
+                            <div><span>${isEvidenceSelected(item) ? 'Why this subject-based suggestion' : item.model_basis ? 'Why the model suggests this course' : isAlternative(item) ? 'Why this grade-based alternative matches' : index === 0 ? 'Why this is your best match' : 'Why this course matches'}</span><h3>${escapeHtml(displayCourseName(item.course))}</h3></div>
+                            <strong>${matchScore}% recommendation match</strong>
                         </div>
                         <p class="course-analysis-reason course-fit-narrative"><i class="fa-solid fa-lightbulb"></i>${escapeHtml(fitExplanation)}</p>
                         <div class="course-analysis-signals" aria-label="Why this course matches">
-                            <div class="course-analysis-signal"><span>Recommendation match</span><strong>${matchScore}%</strong><small>${isAlternative(item) ? 'Math, Science, and English only: 85% strongest-area fit and 15% observed core-grade profile fit.' : 'Final ranking score, including course relevance signals.'}</small></div>
-                            <div class="course-analysis-signal"><span>Grade-profile similarity</span><strong>${profileSimilarity}%</strong><small>Similarity between your grades and the course reference profile.</small></div>
+                            <div class="course-analysis-signal"><span>Recommendation match</span><strong>${profileSimilarity}%</strong><small>Grade-profile similarity between your available grades and the course reference. Separate from model support; does not determine ML ranking.</small></div>
+                            ${item.model_basis ? `<div class="course-analysis-signal"><span>Synthetic model support</span><strong>${Number(item.match_score ?? 0).toFixed(2)}%</strong><small>Classifier support across all active courses before eligibility filtering. This determines ML ranking, not the recommendation match meter.</small></div>` : ''}
                             <div class="course-analysis-signal"><span>${strandLabel ? `${escapeHtml(strandLabel)} cluster` : 'Cluster'}</span><strong>${isAlternative(item) ? 'Grade-based alternative' : strandLabel ? (item.strand_alignment ? 'Aligned' : 'Not aligned') : 'Not provided'}</strong><small>${isAlternative(item) ? 'This separate list considers courses outside your cluster using grades, not cluster eligibility.' : strandLabel ? 'Only courses tagged for the selected cluster are eligible.' : 'No cluster was identified; matches are ranked from your strongest grades.'}</small></div>
                         </div>
-                        <p class="course-analysis-disclaimer">This is a relative academic match, not an admission probability or eligibility decision.</p>
+                        <p class="course-analysis-disclaimer">${item.model_basis ? 'Experimental model trained on synthetic course-profile examples, not real student outcomes. Not validated on real students. ' : ''}This is a relative academic match, not an admission probability or eligibility decision.</p>
                     </div>
                 `;
                 courseAnalysis.hidden = false;

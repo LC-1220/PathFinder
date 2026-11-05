@@ -66,11 +66,7 @@ from ocr.docling_service import _subjects_from_table
 from ocr.parser import normalize_ocr_text, parse_report_card_structure
 
 
-#Optional Nearest Neighbor Model for Course Recommendations
-try:
-    from sklearn.neighbors import NearestNeighbors
-except Exception:
-    NearestNeighbors = None
+from course_ml import MODEL_BASIS, MODEL_PATH, NOTICE as MODEL_NOTICE, catalog_fingerprint, model_for_catalog
 
 #Admin Configuration
 UPLOAD_FOLDER = "static/profile_pictures"
@@ -100,7 +96,7 @@ SYSTEM_SETTING_DEFAULTS = {
 #Subject Required Categories
 CATEGORY_NAMES = ["math", "science", "english", "technology", "business", "social"]
 
-_NEAREST_NEIGHBOR_MODEL = None
+_COURSE_MODEL_CACHE = None
 _COURSE_TRAINING_DATA_CACHE = None
 
 
@@ -500,11 +496,11 @@ def _extract_subject_scores(subjects_text):
             score_map["science"].append(grade)
         elif any(token in lowered for token in ["english", "communication", "speech", "writing", "literature", "oral", "reading", "nihongo", "japanese", "chinese", "korean", "spanish", "french", "german", "language"]):
             score_map["english"].append(grade)
-        elif any(token in lowered for token in ["program", "computer", "ict", "information", "technology", "software", "database", "digital", "web", "network", "coding", "engineering", "electronics", "robotics"]):
+        elif any(token in lowered for token in ["program", "computer", "ict", "information", "technology", "software", "database", "digital", "web", "network", "coding", "engineering", "electronics", "robotics", "algorithm", "data structure", "python", "javascript", "java", "c++", "c#", "technical drawing", "drafting", "architectural design", "building design", "autocad", "computer aided design", "computer-aided design", "building information modeling"]) or _contains_subject_term(lowered, "cad"):
             score_map["technology"].append(grade)
         elif any(token in lowered for token in ["business", "accounting", "management", "marketing", "economics", "entrepreneur", "finance", "tourism", "hospitality", "tour operations", "tour guiding", "travel services", "public administration", "legal"]):
             score_map["business"].append(grade)
-        elif any(token in lowered for token in ["history", "sociology", "psych", "political", "social", "criminology", "education", "culture", "governance", "filipino", "philosophy", "humanities", "religion"]) or re.search(r"\b(?:arts?|design|music|media|creative|visual|performing)\b", lowered):
+        elif any(token in lowered for token in ["history", "sociology", "psych", "political", "social", "criminology", "education", "culture", "governance", "filipino", "philosophy", "humanities", "religion", "pedagogy", "teaching", "child development", "criminal", "justice"]) or re.search(r"\b(?:arts?|design|music|media|creative|visual|performing)\b", lowered):
             score_map["social"].append(grade)
 
     return score_map
@@ -550,9 +546,17 @@ def _extract_subject_field_scores(subjects_text):
         "math_general": [],
         "communication": [],
         "business": [],
+        "entrepreneurship": [],
         "tourism_hospitality": [],
         "social_humanities": [],
         "arts_humanities": [],
+        "teaching": [],
+        "psychology": [],
+        "civics": [],
+        "criminal_justice": [],
+        "navigation": [],
+        "programming": [],
+        "architectural_design": [],
     }
     source_text = str(subjects_text or "")
     cleaned_text = _clean_subjects_for_recommendation(source_text)
@@ -576,9 +580,17 @@ def _extract_subject_field_scores(subjects_text):
         "math_general": ("general mathematics", "mathematics in the modern world", "mathematics", "math"),
         "communication": ("english", "filipino", "language", "communication", "speech", "writing", "literature", "reading", "oral", "nihongo", "japanese", "chinese", "korean", "spanish", "french", "german"),
         "business": ("business", "account", "accounting", "accountancy", "management", "marketing", "economics", "entrepreneur", "entrepreneurship", "finance", "tourism", "hospitality"),
+        "entrepreneurship": ("entrepreneurship", "entrepreneurial"),
         "tourism_hospitality": ("tourism", "hospitality", "tour operations", "tour guiding", "travel services"),
         "social_humanities": ("history", "sociology", "psychology", "political", "social", "criminology", "education", "philosophy", "governance", "culture", "humanities", "religion"),
         "arts_humanities": ("art", "arts", "design", "music", "media", "creative", "visual", "performing"),
+        "teaching": ("pedagogy", "teaching", "teacher education", "child development", "early childhood education", "elementary education", "secondary education", "special needs education", "inclusive education", "curriculum", "classroom instruction"),
+        "psychology": ("psychology", "human behavior", "human behaviour", "mental processes", "personal development"),
+        "civics": ("politics", "political", "governance", "civics", "public administration"),
+        "criminal_justice": ("criminology", "criminal", "justice", "law enforcement", "forensic"),
+        "navigation": ("navigation", "seamanship", "nautical", "ship operations"),
+        "programming": ("programming", "coding", "software development", "software engineering", "algorithms", "algorithm", "data structures", "web development", "application development", "python", "java", "javascript", "c++", "c#"),
+        "architectural_design": ("drafting", "technical drawing", "architectural design", "building design", "computer aided design", "computer-aided design", "autocad", "cad", "building information modeling"),
     }
     seen = set()
     for raw_line in lines:
@@ -664,7 +676,7 @@ COURSE_PROFILE_FIELD_LABELS = {
 }
 
 
-def _course_subject_field_evidence(category, field_scores):
+def _course_subject_field_evidence(category, field_scores, priorities=None):
     field_labels = {
         "quantitative": "Math and quantitative subjects",
         "general_sciences": "General sciences",
@@ -679,8 +691,18 @@ def _course_subject_field_evidence(category, field_scores):
         "business": "Business subjects",
         "social_humanities": "Social sciences and humanities",
         "arts_humanities": "Arts and creative subjects",
+        "teaching": "Teaching and learner development",
+        "psychology": "Psychology and human behavior",
+        "civics": "Politics and governance",
+        "criminal_justice": "Criminal justice and law enforcement",
+        "navigation": "Navigation and seamanship",
+        "physics": "Physics",
+        "chemistry": "Chemistry",
+        "tourism_hospitality": "Tourism and hospitality",
+        "programming": "Programming and software development",
+        "architectural_design": "Architectural design and drafting",
     }
-    field_priorities = COURSE_FIELD_PRIORITIES.get(category, {})
+    field_priorities = COURSE_FIELD_PRIORITIES.get(category, {}) if priorities is None else priorities
     return [
         {
             "field": field_labels[field],
@@ -692,7 +714,44 @@ def _course_subject_field_evidence(category, field_scores):
     ]
 
 
-def _recommendation_field_evidence(category, field_scores, subject_scores, course_features):
+def _recommendation_field_evidence(category, field_scores, subject_scores, course_features, *, course_name=""):
+    name = course_name.lower()
+    priorities = None
+    if any(term in name for term in ("computer science", "information technology", "software engineering", "data science", "bscs", "bsit")):
+        priorities = {"programming": "major", "quantitative": "supporting", "technology": "supporting", "communication": "supporting"}
+    elif "computer engineering" in name:
+        priorities = {"programming": "major", "quantitative": "supporting", "physical_sciences": "supporting", "technology": "supporting", "communication": "supporting"}
+    elif "architecture" in name and not any(term in name for term in ("naval", "marine")):
+        priorities = {"architectural_design": "major", "quantitative": "supporting", "physical_sciences": "supporting", "arts_humanities": "supporting"}
+    elif category == "Social Sciences & Education" and "education" in name:
+        priorities = {"teaching": "major", "communication": "supporting", "social_humanities": "supporting"}
+    elif "psychology" in name:
+        priorities = {"psychology": "major", "life_sciences": "supporting", "communication": "supporting"}
+    elif "political science" in name or "public administration" in name:
+        priorities = {"civics": "major", "social_humanities": "supporting", "communication": "supporting"}
+    elif "criminology" in name:
+        priorities = {"criminal_justice": "major", "civics": "supporting", "social_humanities": "supporting", "communication": "supporting"}
+    elif "communication" in name:
+        priorities = {"communication": "major", "social_humanities": "supporting", "arts_humanities": "supporting"}
+    elif category == "Hospitality & Tourism":
+        priorities = {"tourism_hospitality": "major", "foreign_languages": "major", "communication": "supporting", "business": "supporting"}
+    elif category == "Maritime & Transportation":
+        if not field_scores["quantitative"] or not (field_scores["physics"] or field_scores["navigation"]):
+            return []
+        priorities = {"quantitative": "major", "physics": "major", "navigation": "major", "communication": "supporting"}
+    elif category == "Allied Health" and course_name:
+        priorities = {
+            "life_sciences": "major", "health_studies": "major",
+            "physical_sciences": "supporting", "communication": "supporting",
+        }
+        if "pharmacy" in name:
+            priorities = {"chemistry": "major", "life_sciences": "supporting", "health_studies": "supporting", "communication": "supporting"}
+        elif "medical technology" in name:
+            priorities["chemistry"] = "major"
+        elif "radiologic" in name:
+            priorities["physics"] = "major"
+    if priorities is not None:
+        return _course_subject_field_evidence(category, field_scores, priorities)
     evidence = _course_subject_field_evidence(category, field_scores)
     if category in COURSE_FIELD_PRIORITIES:
         return evidence
@@ -1208,6 +1267,8 @@ def _sanitize_recommendations(payload):
             "category": item.get("category") or categorize_course(course_name, item.get("description") or ""),
             "confidence": item.get("confidence", 0),
             "match_score": item.get("match_score", item.get("confidence", 0)),
+            "model_basis": item.get("model_basis") if item.get("model_basis") == MODEL_BASIS else "",
+            **({"selection_basis": "subject_evidence"} if item.get("selection_basis") == "subject_evidence" else {}),
             "core_grade_fit": item.get("core_grade_fit", 0),
             "strand_grade_based": bool(item.get("strand_grade_based", False)),
             "field_fit": item.get("field_fit"),
@@ -1230,19 +1291,25 @@ def _sanitize_recommendations(payload):
         })
     return valid
 
-# Build Course Recommendation Model (constructs a nearest neighbor model based on course features) Machine Learning Approach
-def _build_course_model():
-    global _NEAREST_NEIGHBOR_MODEL
-    if NearestNeighbors is None:
-        return None
-    if _NEAREST_NEIGHBOR_MODEL is not None:
-        return _NEAREST_NEIGHBOR_MODEL
+def _build_course_model(observed_indices=None, *, training_data=None):
+    global _COURSE_MODEL_CACHE
+    if training_data is None:
+        training_data = _course_training_data()
+    if not training_data:
+        raise ValueError("The recommendation catalog has no active courses.")
+    if observed_indices is None:
+        observed_indices = tuple(range(len(CATEGORY_NAMES)))
+    key = (
+        tuple(observed_indices),
+        catalog_fingerprint(training_data),
+        MODEL_PATH.stat().st_mtime_ns if MODEL_PATH.exists() else None,
+    )
+    cached = _COURSE_MODEL_CACHE
+    if cached is not None and cached[0] == key:
+        return cached[1]
 
-    training_data = _course_training_data()
-    feature_matrix = np.asarray([_weighted_features(sample["features"]) for sample in training_data], dtype=float)
-    model = NearestNeighbors(n_neighbors=min(8, len(training_data)), metric="euclidean")
-    model.fit(feature_matrix)
-    _NEAREST_NEIGHBOR_MODEL = model
+    model = model_for_catalog(training_data, observed_indices)
+    _COURSE_MODEL_CACHE = (key, model)
     return model
 
 def _is_degree_program(value):
@@ -1316,6 +1383,16 @@ def _rank_course_recommendations(subjects_text, current_course="", strand="", *,
     if not any(subject_scores.values()):
         return []
 
+    observed_indices = tuple(
+        index for index, category in enumerate(CATEGORY_NAMES) if subject_scores[category]
+    )
+    query = [[
+        _average(subject_scores[CATEGORY_NAMES[index]])
+        for index in observed_indices
+    ]]
+    model = _build_course_model(observed_indices, training_data=training_data)
+    log_support = dict(zip(model.classes_, model.predict_log_proba(query)[0]))
+
     strongest = _infer_strengths_from_features(features)
     field_scores = _extract_subject_field_scores(subjects_text)
     tourism_average = _average(field_scores["tourism_hospitality"])
@@ -1352,16 +1429,14 @@ def _rank_course_recommendations(subjects_text, current_course="", strand="", *,
     observed_areas = [category for category in CATEGORY_NAMES if subject_scores[category]]
     student_top_area = max(observed_areas, key=lambda category: _average(subject_scores[category])) if len(observed_areas) > 1 else None
     recommendations = []
-    for sample in training_data:
+    for catalog_index, sample in enumerate(training_data):
         distance = _observed_weighted_distance(subject_scores, sample["features"])
-        if distance is None:
-            continue
         category = categorize_course(sample["course"], sample.get("description", ""))
         strand_alignment = bool(strand_key and strand_key in sample.get("strands", []))
         if strand_key and strand_alignment == outside_strand:
             continue
         field_evidence = _recommendation_field_evidence(
-            category, field_scores, subject_scores, sample["features"]
+            category, field_scores, subject_scores, sample["features"], course_name=sample["course"]
         )
         major_evidence = [entry for entry in field_evidence if entry["priority"] == "major"]
         # A similar reference profile cannot qualify a course on supporting grades alone.
@@ -1435,16 +1510,19 @@ def _rank_course_recommendations(subjects_text, current_course="", strand="", *,
         item = {
             "course": sample["course"],
             "description": sample.get("description", ""),
-            "reason": reason,
+            "reason": f"{reason} Course-specific evidence checks are guidance safeguards, not admission requirements. {MODEL_NOTICE}",
             "category": category,
             "confidence": round(grade_similarity, 2),
-            "match_score": _display_match_score(ranking_score),
+            "match_score": round(float(np.exp(log_support[sample["course"]])) * 100, 2),
+            "model_basis": MODEL_BASIS,
             "core_grade_fit": round(_core_grade_fit(features, sample["features"]), 2),
             "field_fit": round(field_fit, 2) if field_fit is not None else None,
             "subject_field_evidence": field_evidence,
             "strand_alignment": strand_alignment,
             "strand_label": strand_key,
             "_ranking_score": ranking_score,
+            "_model_log_support": float(log_support[sample["course"]]),
+            "_catalog_index": catalog_index,
         }
         if strand_alignment:
             item["reason"] += f" It aligns with the {strand_key} cluster."
@@ -1456,10 +1534,10 @@ def _rank_course_recommendations(subjects_text, current_course="", strand="", *,
             )
         recommendations.append(item)
 
-    recommendations.sort(
-        key=lambda item: (item["_ranking_score"], item["confidence"]),
-        reverse=True,
-    )
+    # Classifier support determines order; domain evidence only breaks exact ties.
+    recommendations.sort(key=lambda item: (
+        -item["_model_log_support"], -item["_ranking_score"], item["_catalog_index"],
+    ))
 
     if recommendations and not outside_strand:
         recommendations[0]["strand_grade_based"] = bool(strand_key)
@@ -1483,12 +1561,48 @@ def _rank_course_recommendations(subjects_text, current_course="", strand="", *,
             recommendations[0]["reason"] += f" No cluster was detected, so this ranking uses your highest grade areas: {area_summary}."
     for item in recommendations:
         item.pop("_ranking_score", None)
+        item.pop("_model_log_support", None)
+        item.pop("_catalog_index", None)
     return recommendations
 
 
 # Recommend only courses cataloged for the student's cluster.
 def recommend_course(subjects_text, current_course="", strand=""):
-    return _rank_course_recommendations(subjects_text, current_course, strand)[:5]
+    return _select_recommendations(
+        _rank_course_recommendations(subjects_text, current_course, strand), subjects_text, 5,
+    )
+
+
+def _select_recommendations(ranked, subjects_text, limit):
+    selected = ranked[:limit]
+    if not selected or len(ranked) <= limit:
+        return selected
+    fields = _extract_subject_field_scores(_recommendation_subjects_only(subjects_text))
+    if not fields["entrepreneurship"]:
+        return selected
+    entrepreneurship_grade = _average(fields["entrepreneurship"])
+    highest_grade = max(grade for grades in fields.values() for grade in grades)
+    if entrepreneurship_grade < highest_grade:
+        return selected
+    if any(_contains_subject_term(item["course"].lower(), "entrepreneurship") for item in selected):
+        return selected
+    candidate = next((
+        item for item in ranked[limit:]
+        if _contains_subject_term(item["course"].lower(), "entrepreneurship")
+    ), None)
+    if candidate is None:
+        return selected
+    selected[-1] = {
+        **candidate,
+        "selection_basis": "subject_evidence",
+        "reason": (
+            f"Included because Entrepreneurship ({entrepreneurship_grade:.1f}) is one of your "
+            "highest graded recognized subjects. This slot is selected by subject evidence, "
+            "not model rank; other displayed courses retain their model order. "
+            + candidate["reason"]
+        ),
+    }
+    return selected
 
 
 def _recommendation_limit():
@@ -1516,10 +1630,12 @@ def _grade_based_alternatives(subjects_text, strand):
 
 def _configured_recommendations(subjects_text, current_course="", strand=""):
     limit = _recommendation_limit()
-    recommendations = recommend_course(subjects_text, current_course, strand)
+    recommendations = _select_recommendations(
+        _rank_course_recommendations(subjects_text, current_course, strand), subjects_text, limit,
+    )
     for item in recommendations:
         item["recommendation_basis"] = "strand" if item.get("strand_label") else "grades"
-    alternatives = _grade_based_alternatives(subjects_text, strand)
+    alternatives = _select_recommendations(_grade_based_alternatives(subjects_text, strand), subjects_text, 1)
     return _limit_recommendations(recommendations + alternatives, limit)
 
 # Calculate the average profile for a given course based on historical training data
@@ -2155,9 +2271,6 @@ async def generate_recommendations(req):
         profile.get("course", ""),
         profile.get("strand", ""),
     )
-    if not recommendations:
-        return JSONResponse({"success": False, "message": "No course matches could be generated from the saved grades."})
-
     payload = json.dumps(recommendations)
     sess.pop("latest_recommendations", None)
     conn = _db_conn()
@@ -2176,7 +2289,10 @@ async def generate_recommendations(req):
     conn.close()
     top_course = (recommendations[0] or {}).get("course", "") if recommendations else ""
     _record_student_activity(req, "recommendations_generated", f"{len(recommendations)} courses; top match: {top_course}" if top_course else f"{len(recommendations)} courses")
-    return JSONResponse({"success": True, "count": len(recommendations)})
+    result = {"success": True, "count": len(recommendations)}
+    if not recommendations:
+        result["message"] = "No courses have enough course-specific grade evidence. Previous suggestions were cleared."
+    return JSONResponse(result)
 
 
 # Define the route for user registration
@@ -2681,9 +2797,9 @@ async def admin_save_system_settings(req):
 
 
 def _reset_course_catalog_cache():
-    global _COURSE_TRAINING_DATA_CACHE, _NEAREST_NEIGHBOR_MODEL
+    global _COURSE_TRAINING_DATA_CACHE, _COURSE_MODEL_CACHE
     _COURSE_TRAINING_DATA_CACHE = None
-    _NEAREST_NEIGHBOR_MODEL = None
+    _COURSE_MODEL_CACHE = None
 
 
 def _validate_course_payload(data):
@@ -4458,10 +4574,6 @@ def admin_recalculate_recommendations(req, profile_id: str):
         profile[1] or "",
         profile[2] or "",
     )
-    if not recommendations:
-        conn.close()
-        return JSONResponse({"success": False, "message": "No recommendations could be generated from this profile's saved grades."}, status_code=400)
-
     payload = json.dumps(recommendations)
     cursor.execute("UPDATE student_profiles SET recommendation = ? WHERE id = ?", (payload, profile_id))
     cursor.execute(
@@ -4471,7 +4583,10 @@ def admin_recalculate_recommendations(req, profile_id: str):
     conn.commit()
     conn.close()
     _record_admin_activity(req.session, "recommendations_recalculated", target_label=f"profile:{profile_id}", details=f"count={len(recommendations)}")
-    return JSONResponse({"success": True, "count": len(recommendations), "recommendations": recommendations})
+    result = {"success": True, "count": len(recommendations), "recommendations": recommendations}
+    if not recommendations:
+        result["message"] = "No courses have enough course-specific grade evidence. Previous suggestions were cleared."
+    return JSONResponse(result)
 
 
 # Define the route for saving a student profile
@@ -4881,7 +4996,8 @@ def _results_email_content(profile, recommendations):
         "",
     ]
     for index, item in enumerate(recommendations, start=1):
-        text_lines.append(f"{index}. {item.get('course', '')} - {score_text(item)} match")
+        score_label = "synthetic model support" if item.get("model_basis") == MODEL_BASIS else "match"
+        text_lines.append(f"{index}. {item.get('course', '')} - {score_text(item)} {score_label}")
         if item.get("reason"):
             text_lines.append(f"   {item['reason']}")
     text_lines += [
@@ -4896,6 +5012,7 @@ def _results_email_content(profile, recommendations):
     def recommendation_card(index, item):
         course = esc(item.get("course", ""))
         score = esc(score_text(item))
+        score_label = "synthetic model support" if item.get("model_basis") == MODEL_BASIS else "match"
         rank_color = "#b8c2ff" if index == 1 else "#d7dcf2"
         rank_text = "#273bc5" if index == 1 else "#4b5875"
         reason = (
@@ -4918,7 +5035,7 @@ def _results_email_content(profile, recommendations):
             f"<div style='display:inline-block;padding:7px 10px;border-radius:20px;"
             f"background:#eef0ff;color:#3548d4;font-size:13px;font-weight:700;white-space:nowrap'>"
             f"{score}</div><div style='margin-top:5px;color:#7a849a;font-size:10px;"
-            f"text-transform:uppercase;letter-spacing:.5px'>match</div></td>"
+            f"text-transform:uppercase;letter-spacing:.5px'>{score_label}</div></td>"
             "</tr></table></td></tr>"
         )
 

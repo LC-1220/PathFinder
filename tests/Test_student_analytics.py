@@ -336,14 +336,13 @@ def test_retired_tvl_ranks_all_courses_and_ict_maps_to_ICTECH(monkeypatch):
         {"course": "BS in Mechanical Engineering", "features": [90, 90, 80, 80, 70, 70], "description": "Engineering", "strands": ["STEM"]},
         {"course": "BS in Accountancy", "features": [80, 80, 80, 70, 95, 80], "description": "Accountancy", "strands": ["BE"]},
     ])
-    subjects = "math 85\nscience 85\nenglish 85\ntechnology 85\nbusiness 85\nsocial studies 85"
+    subjects = "math 85\nscience 85\nenglish 85\ncomputer programming 85\nbusiness 85\nsocial studies 85"
 
     broad_tvl = recommend_course(subjects, strand="TVL Track A")
     ict_only = recommend_course(subjects, strand="Information and Communications Technology (ICT)")
 
     assert {item["course"] for item in broad_tvl} == {
         "BS in Information Technology",
-        "BS in Hospitality Management",
         "BS in Mechanical Engineering",
         "BS in Accountancy",
     }
@@ -414,7 +413,8 @@ def test_high_tourism_grade_prioritizes_hospitality_management_for_ht(monkeypatc
 
     assert recommendations[0]["course"] == "BS in Hospitality Management"
     assert recommendations[0]["match_score"] == max(item["match_score"] for item in recommendations)
-    assert recommendations[0]["match_score"] > recommendations[0]["confidence"]
+    assert recommendations[0]["model_basis"] == app.MODEL_BASIS
+    assert 0 <= recommendations[0]["match_score"] <= 100
     assert "tourism-related subject average is 96.0" in recommendations[0]["reason"]
 
 
@@ -602,7 +602,7 @@ def test_university_catalog_loads_course_strand_assignments(monkeypatch):
     assert "university_course_strands" in executed[0]
     assert app._sanitize_recommendations([{"course": "Software Engineering"}, {"course": expected[0]}]) == [
         {"course": expected[0], "description": "", "reason": "", "category": app.categorize_course(expected[0]),
-            "confidence": 0, "match_score": 0, "core_grade_fit": 0, "strand_grade_based": False, "field_fit": None,
+            "confidence": 0, "match_score": 0, "model_basis": "", "core_grade_fit": 0, "strand_grade_based": False, "field_fit": None,
             "subject_field_evidence": [], "strand_alignment": False, "strand_label": "", "recommendation_basis": "grades"}
     ]
 

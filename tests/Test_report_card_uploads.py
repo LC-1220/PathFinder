@@ -339,11 +339,11 @@ def test_new_upload_recalculates_real_recommendations_and_persists_them(monkeypa
     monkeypatch.setattr(app, "_course_training_data", lambda: catalog)
     monkeypatch.setattr(app, "_get_system_settings", lambda: {**app.SYSTEM_SETTING_DEFAULTS, "recommendation_limit": 3})
     monkeypatch.setattr(app, "_record_student_activity", lambda *args, **kwargs: None)
-    old_subjects = "General Mathematics - 95\nOral Communication - 80"
+    old_subjects = "General Mathematics - 95\nOral Communication - 80\nComputer Programming - 75"
     old_recommendations = app._configured_recommendations(old_subjects)
     assert old_recommendations[0]["course"] == "BS in Computer Science"
     connection = ProfileConnection((
-        7, "20-0002-791", "Student", "", "Name", "", "87.50", "95, 80",
+        7, "20-0002-791", "Student", "", "Name", "", "83.33", "95, 80, 75",
         old_subjects, "BSCS-DS", None,
     ))
     monkeypatch.setattr(app, "_db_conn", lambda: connection)
@@ -407,7 +407,7 @@ def test_degree_program_is_not_used_as_shs_strand(monkeypatch, degree):
         {"course": "BS in Hospitality Management", "features": [80, 80, 85, 70, 95, 80],
          "description": "Hospitality", "strands": ["HT"]},
     ])
-    recommendations = app.recommend_course("Mathematics - 85\nEntrepreneurship - 95", strand=degree)
+    recommendations = app.recommend_course("Mathematics - 85\nTour Guiding Services - 95", strand=degree)
     assert len(recommendations) == 1
     assert recommendations[0]["strand_label"] == ""
     assert not recommendations[0]["strand_alignment"]
@@ -530,7 +530,7 @@ def test_retired_strand_uses_grade_based_recommendations(monkeypatch, retired):
         {"course": "BS in Hospitality Management", "features": [80, 80, 85, 70, 95, 80],
          "description": "Hospitality", "strands": ["HT"]},
     ])
-    recommendations = app.recommend_course("Mathematics - 85\nEntrepreneurship - 95", strand=retired)
+    recommendations = app.recommend_course("Mathematics - 85\nTour Guiding Services - 95", strand=retired)
     assert len(recommendations) == 1
     assert recommendations[0]["strand_label"] == ""
     assert app._grade_based_alternatives("Mathematics - 85", retired) == []
@@ -589,7 +589,7 @@ def test_manual_regeneration_repairs_legacy_zero_matches(monkeypatch):
     monkeypatch.setattr(app, "_get_system_settings", lambda: app.SYSTEM_SETTING_DEFAULTS)
     monkeypatch.setattr(app, "_get_user_latest_profile", lambda user_id: {
         "course": "", "strand": "BSCS-DS",
-        "subjects": "Mathematics - 85\nEntrepreneurship - 95",
+        "subjects": "Mathematics - 85\nTour Guiding Services - 95",
     })
     statements = []
     cursor = SimpleNamespace(execute=lambda query, params: statements.append((query, params)), fetchone=lambda: (7,))

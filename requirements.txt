@@ -8,6 +8,7 @@ psycopg[binary]
 python-dotenv
 jinja2
 scikit-learn
+joblib
 opencv-python-headless
 # OCR stack pinned to the versions verified locally; unpinned installs can leave Docling without an OCR engine.
 docling==2.130.0

@@ -97,13 +97,102 @@ cannot qualify Entrepreneurship, and general education subjects cannot qualify
 Physical Education. Sports/Physical Education is categorized separately from
 general education. Unclassified programs require grades in their highest stored
 reference area; flat profiles without a distinct major area do not qualify.
-All six observed subject areas can influence ranking, including technology,
-business, and social studies. Major-field grade averages contribute 30% of the
-score. Relative subject strengths contribute up to 35%, with the remainder based
-on observed weighted profile distance. Missing key areas reduce the score;
-specific-subject bonuses are capped at six points. Missing grades are not
-replaced with zero grades. Candidates are sorted before rounding, and displayed
-scores above 95 approach 100 smoothly rather than all being capped at 100.
+Conservative program-specific evidence checks additionally require:
+programming/software-development subjects for Computer Science, Computer
+Engineering, Information Technology, Software Engineering, and Data Science degrees
+(math, physics, or general ICT alone do not qualify Computer Engineering); architectural
+design/drafting/technical drawing or CAD for Architecture (not Naval Architecture);
+teaching/learner-development subjects for non-PE Education degrees;
+psychology/human-behavior subjects for Psychology; politics/governance for
+Political Science; criminal-justice subjects for Criminology; and quantitative
+grades plus Physics or navigation/seamanship for Marine Transportation.
+Chemistry/Earth Science alone do not count as navigation evidence. Allied Health
+uses life-science/health evidence rather than generic Earth Science; Pharmacy
+requires Chemistry, with Chemistry also accepted for Medical Technology and
+Physics for Radiologic Technology. Communication requires language/communication
+evidence rather than generic social studies; Hospitality/Tourism requires tourism,
+hospitality, or foreign-language subjects, not English/business subjects alone.
+Broad supporting subjects cannot bypass these
+checks. These are conservative application policies, **not official admission
+requirements or validated suitability labels**. SHS records may not contain the
+specialized subjects, so fewer or no results are intentional; consult an adviser
+rather than treating an omitted program as an eligibility rejection.
+There is deliberately no minimum model-support cutoff: eligible low-support
+courses remain exploratory suggestions. Synthetic results are labeled as model
+suggestions, not a validated "best match." Saved student results are regenerated
+from stored grades on reload; historical admin snapshots retain their original
+results as records of past recommendations.
+Both groups use a supervised scikit-learn `GaussianNB` classifier trained on
+**synthetic**, catalog-derived examples. `course_ml.py` generates 1,500 examples per
+active course by perturbing its six reference grades with category noise
+(standard deviation 4) and a shared grade offset (standard deviation 2), bounded
+to 0-100. Labels name the originating prototype, **not verified course suitability**.
+No student data is read or generated as if it were real.
+
+Displayed selection has one explicit subject-evidence safeguard: when the average
+of recognized Entrepreneurship subjects is tied for or above the highest
+recognized subject grade, an eligible Entrepreneurship degree is included.
+If it falls outside the displayed limit, it replaces the last slot; remaining
+courses keep their ML order. This applies separately to cluster-matched results
+and the single outside-cluster alternative, without bypassing active-catalog,
+cluster, or major-evidence checks. Already displayed Entrepreneurship degrees are
+not reordered. Neither classifier support nor profile-similarity percentages are
+changed. Added cards are labeled as subject-evidence selections, not top model
+predictions. This is a guidance policy, not validated suitability.
+
+The fixed seed preserves the original 300 scenarios per course (240 train,
+30 validation, 30 test). A separate seed adds 1,200 training-only scenarios per
+course, without changing the original validation/test grades or labels.
+Additional scenarios duplicating a held-out grade vector are resampled.
+Duplicate vectors within training are allowed; they do not leak across partitions.
+The partitions remain balanced per course. Related scenarios never
+cross partitions; scenarios with duplicate clipped grade vectors are grouped
+together as well. Identical course prototypes receive identical synthetic examples;
+the model cannot learn distinctions absent from the six input grades.
+The test set is not used to fit or tune the model. The JSON report includes
+synthetic-only top-1/top-3 agreement, macro F1, a core-subject-only test, and
+indistinguishable course groups. These metrics do **not** establish real-world
+accuracy or improvement over the previous recommender.
+The report also refits the original 240-example-per-course training baseline and
+compares it on the identical held-out examples. More synthetic examples are not
+guaranteed to improve these metrics; no settings are selected using test scores.
+
+Generate the CSV, catalog snapshot, trained model, and evaluation report:
+
+```powershell
+.\.venv\Scripts\python.exe -m course_ml --source database
+```
+
+Outputs are saved under `ml_artifacts`. This reads only active course profiles,
+never student records or uploads, and does not change the database.
+Use `--source schema` for an offline run against seeded profiles; `--output-dir`
+can select another output directory. The running app uses the default directory.
+The joblib artifact must be trusted, locally generated application data: **never
+load an uploaded or third-party joblib file**.
+
+The backend loads the trained artifact and ranks all courses by unrounded
+classifier log support before cluster/major-evidence filtering. Existing domain
+scores only break exact ties; the separate Entrepreneurship subject-evidence
+selection safeguard described above can reserve a displayed slot. `match_score` is relative
+classifier support (0-100) across all active courses, not an admission/success
+probability. Detail dialogs label it **Synthetic model support**, and explanations
+disclose the synthetic training basis. Student cards instead display
+**Recommendation match** using the separate `confidence` field: weighted
+grade-profile similarity (Math/Science/English weights 3; other areas 1),
+calculated as `max(0, 100 - weighted RMS grade difference)`. The label, percentage,
+bar width, accessible text, and detail-dialog match percentage use that same
+value; it is not forced to a target percentage or used to change ML ranking.
+Missing categories are omitted by fitting the same training partition on observed
+columns; they are not replaced with zeros.
+
+Catalog changes invalidate the cache. A catalog/artifact mismatch or absent
+artifact produces an explicit server warning and deterministic in-memory synthetic
+retraining, not a rule-only fallback. Training-revision changes also invalidate
+saved models. Re-run the command to persist an updated snapshot; the backend
+detects the artifact modification time and reloads it on the next recommendation.
+Restart the backend after Python changes. Student uploads do not
+become training labels. Real student outcomes or adviser-reviewed labels and
+independent evaluation are still needed to claim improved practical accuracy.
 FCL / Filipino Christian Living and PE / Physical Education are excluded from
 both recommendation groups' scoring and strongest-grade calculations. Their OCR
 extraction, saved grade rows, and GWA remain unchanged.
@@ -115,7 +204,8 @@ Maritime Transportation is assessed using quantitative and physical-science grad
 not business grades alone. Subject labels use whole-term matches, so "Earth" does
 not also count as "Art."
 The configured result limit applies to primary recommendations; only the single
-highest-ranked grade-based alternative is included. Both groups are
+highest-ranked grade-based alternative is included, unless the Entrepreneurship
+subject-evidence safeguard selects that alternative slot. Both groups are
 saved with recommendation history and restored on reload for signed-in students;
 **Saved recommendations** also reopens the saved results after starting another
 report-card upload; starting an upload does not delete the saved recommendations.

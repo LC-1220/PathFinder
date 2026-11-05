@@ -1,0 +1,90 @@
+{
+  "model_basis": "synthetic_gaussian_nb_v1",
+  "training_revision": 3,
+  "notice": "Experimental model trained on synthetic course-profile examples, not real student outcomes. Model support is not an admission or success probability.",
+  "real_world_accuracy": null,
+  "seed": 20261105,
+  "algorithm": "GaussianNB",
+  "scikit_learn_version": "1.9.1",
+  "features": [
+    "math",
+    "science",
+    "english",
+    "technology",
+    "business",
+    "social"
+  ],
+  "catalog_fingerprint": "b0177b255cb42ae374349153284bca3696fcd0cb2bb55734bc30335f79e39756",
+  "courses": 42,
+  "total_samples": 63000,
+  "partition_counts": {
+    "train": 60480,
+    "validation": 1260,
+    "test": 1260
+  },
+  "generation": {
+    "label": "Originating catalog course; not adviser-verified suitability",
+    "category_noise_stddev": 4,
+    "shared_grade_offset_stddev": 2,
+    "grade_bounds": [
+      0,
+      100
+    ],
+    "scenarios_per_course": 1500,
+    "extra_training_scenarios_per_course": 1200,
+    "partition": "Original 240 train / 30 validation / 30 test scenarios per course; 1200 extra train only",
+    "selection": "Fixed model and generation settings; no tuning on test results",
+    "extra_training_seed": 20261106
+  },
+  "identical_course_profiles": [
+    [
+      "Bachelor of Arts in Psychology",
+      "Bachelor of Science in Psychology"
+    ],
+    [
+      "BS in Aircraft Maintenance and Technology",
+      "BS in Mechanical Engineering"
+    ],
+    [
+      "BS in Aviation Electronics Technology",
+      "BS in Electrical Engineering"
+    ],
+    [
+      "Bachelor of Early Childhood Education",
+      "Bachelor of Elementary Education"
+    ]
+  ],
+  "validation_synthetic_only": {
+    "samples": 1260,
+    "top_1_agreement": 0.5555555555555556,
+    "top_3_agreement": 0.8650793650793651,
+    "macro_f1": 0.5296255838474703
+  },
+  "test_synthetic_only": {
+    "samples": 1260,
+    "top_1_agreement": 0.49603174603174605,
+    "top_3_agreement": 0.8134920634920635,
+    "macro_f1": 0.47403170692098034
+  },
+  "test_partial_core_only_synthetic": {
+    "samples": 1260,
+    "top_1_agreement": 0.2507936507936508,
+    "top_3_agreement": 0.5507936507936508,
+    "macro_f1": 0.22060551218976632
+  },
+  "baseline_same_held_out_examples": {
+    "training_samples": 10080,
+    "validation_synthetic_only": {
+      "samples": 1260,
+      "top_1_agreement": 0.5619047619047619,
+      "top_3_agreement": 0.8650793650793651,
+      "macro_f1": 0.5374638508285207
+    },
+    "test_synthetic_only": {
+      "samples": 1260,
+      "top_1_agreement": 0.4984126984126984,
+      "top_3_agreement": 0.8150793650793651,
+      "macro_f1": 0.47644652689458156
+    }
+  }
+}

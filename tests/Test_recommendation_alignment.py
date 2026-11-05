@@ -9,7 +9,7 @@ def _use_catalog(monkeypatch, courses):
     ])
 
 
-def test_strongest_subject_alignment_beats_raw_grade_level_closeness(monkeypatch):
+def test_nearest_profile_beats_rule_based_strength_alignment(monkeypatch):
     # Closer overall level, but this course emphasizes English while the student is strongest in Math.
     _use_catalog(monkeypatch, [
         {"course": "BS in English-Leaning Program", "features": [86, 84, 89, 70, 70, 70]},
@@ -18,9 +18,9 @@ def test_strongest_subject_alignment_beats_raw_grade_level_closeness(monkeypatch
 
     recommendations = app.recommend_course("Mathematics - 90\nScience - 80\nEnglish - 85", strand="STEM")
 
-    assert recommendations[0]["course"] == "BS in Math-Leaning Program"
-    assert recommendations[0]["confidence"] < recommendations[1]["confidence"]
-    assert "Your strongest area, Math, is one of this course's key subjects." in recommendations[0]["reason"]
+    assert recommendations[0]["course"] == "BS in English-Leaning Program"
+    assert recommendations[0]["confidence"] > recommendations[1]["confidence"]
+    assert recommendations[0]["match_score"] > recommendations[1]["match_score"]
 
 
 def test_student_with_a_courses_exact_profile_gets_that_course(monkeypatch):

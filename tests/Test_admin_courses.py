@@ -80,7 +80,7 @@ def catalog(monkeypatch):
     monkeypatch.setattr(app, "_is_full_admin_session", lambda sess: sess.get("role") == app.ROLE_SUPER_ADMIN)
     monkeypatch.setattr(app, "_record_admin_activity", lambda sess, action, **kwargs: activity.append((action, kwargs)))
     monkeypatch.setattr(app, "_COURSE_TRAINING_DATA_CACHE", object())
-    monkeypatch.setattr(app, "_NEAREST_NEIGHBOR_MODEL", object())
+    monkeypatch.setattr(app, "_COURSE_MODEL_CACHE", object())
     return cursor, connection, activity
 
 
@@ -162,7 +162,7 @@ def test_create_course_normalizes_input_and_resets_recommendation_cache(catalog)
     assert strand_rows == [(saved["course"], "ICTech"), (saved["course"], "STEM")]
     assert connection.committed
     assert app._COURSE_TRAINING_DATA_CACHE is None
-    assert app._NEAREST_NEIGHBOR_MODEL is None
+    assert app._COURSE_MODEL_CACHE is None
     assert activity == [("course_created", {"target_label": saved["course"]})]
 
 
@@ -233,7 +233,7 @@ def test_deactivate_course_keeps_course_and_clusters(catalog):
     assert not any(query.startswith("DELETE") for query, _ in cursor.statements)
     assert ("SELECT COUNT(*) FROM university_courses WHERE COALESCE(is_active, TRUE)", ()) in cursor.statements
     assert connection.committed
-    assert app._NEAREST_NEIGHBOR_MODEL is None
+    assert app._COURSE_MODEL_CACHE is None
     assert activity == [("course_deactivated", {"target_label": "Old Course"})]
 
 

@@ -67,6 +67,10 @@ def screenshot_subjects():
 
 def test_cluster_matches_require_major_related_grades(catalog, screenshot_subjects):
     recommendations = app.recommend_course(screenshot_subjects, strand="ARSSH")
+    assert recommendations == []
+    recommendations = app.recommend_course(
+        screenshot_subjects + "\nCriminal Justice - 91\nTeaching Methods - 90", strand="ARSSH"
+    )
 
     assert {item["course"] for item in recommendations} == {
         "BS in Criminology", "Bachelor of Secondary Education",
@@ -81,9 +85,11 @@ def test_alternative_does_not_match_business_from_english_alone(catalog, screens
     alternatives = app._grade_based_alternatives(screenshot_subjects, "ARSSH")
 
     assert "BS in Entrepreneurship" not in {item["course"] for item in alternatives}
+    assert "BS in Tourism Management" not in {item["course"] for item in alternatives}
+    alternatives = app._grade_based_alternatives(screenshot_subjects + "\nTour Guiding Services - 90", "ARSSH")
     tourism = next(item for item in alternatives if item["course"] == "BS in Tourism Management")
     assert any(
-        field["field"] == "Communication and languages" and field["priority"] == "major"
+        field["field"] == "Tourism and hospitality" and field["priority"] == "major"
         for field in tourism["subject_field_evidence"]
     )
     assert tourism["field_fit"] is not None
@@ -93,7 +99,7 @@ def test_alternative_does_not_match_business_from_english_alone(catalog, screens
 @pytest.mark.parametrize(("subject", "strand", "expected"), [
     ("Entrepreneurship - 96", "ARSSH", "BS in Entrepreneurship"),
     ("Computer Programming - 97", "BE", "BS in Information Technology"),
-    ("Social Studies - 93", "STEM", "BS in Criminology"),
+    ("Criminal Justice - 93", "STEM", "BS in Criminology"),
 ])
 def test_alternatives_use_non_core_major_subjects(catalog, subject, strand, expected):
     alternatives = app._grade_based_alternatives(subject, strand)
@@ -124,13 +130,15 @@ def test_no_major_evidence_does_not_fill_either_group(monkeypatch):
     assert app._configured_recommendations("English - 87.5", strand="ARSSH") == []
 
 
-def test_general_science_is_major_evidence_without_counting_social_science(catalog):
+def test_generic_science_and_social_science_do_not_imply_specific_majors(catalog):
     science = app._grade_based_alternatives("General Science - 90", "BE")
     social = app._grade_based_alternatives("Social Science - 90", "BE")
+    biology = app._grade_based_alternatives("Biology - 90", "BE")
 
-    assert "BS in Nursing" in {item["course"] for item in science}
+    assert "BS in Nursing" not in {item["course"] for item in science}
     assert "BS in Nursing" not in {item["course"] for item in social}
-    assert "BS in Criminology" in {item["course"] for item in social}
+    assert "BS in Nursing" in {item["course"] for item in biology}
+    assert "BS in Criminology" not in {item["course"] for item in social}
 
 
 def test_earth_and_space_science_is_not_misclassified_as_arts(catalog):
@@ -166,7 +174,7 @@ def test_marine_transportation_requires_navigation_related_major_grades(monkeypa
     assert business_only == []
     assert navigation_grades[0]["course"] == "BS in Marine Transportation"
     assert [entry["field"] for entry in navigation_grades[0]["subject_field_evidence"]] == [
-        "Math and quantitative subjects", "Physics and physical sciences",
+        "Math and quantitative subjects", "Physics",
     ]
 
 

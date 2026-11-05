@@ -67,3 +67,37 @@ def test_course_name_formatter_loads_before_page_script(template, script):
     source = (Path(__file__).resolve().parents[1] / "templates" / template).read_text(encoding="utf-8")
 
     assert source.index("CourseNames.js") < source.index(script)
+
+
+def test_synthetic_model_scores_are_disclosed_in_student_and_admin_views():
+    root = Path(__file__).resolve().parents[1]
+    student = (root / "static" / "StudentApp.js").read_text(encoding="utf-8")
+    admin = (root / "static" / "Admin.js").read_text(encoding="utf-8")
+
+    assert student.count("Synthetic model support") >= 2
+    assert "Not validated on real students" in student
+    assert "85% strongest-area fit" not in student
+    assert "Synthetic model support" in admin
+    assert "Top model suggestion" in student
+    assert "No courses have enough recognized course-specific grade evidence" in student
+
+
+def test_student_match_meter_uses_profile_similarity_not_classifier_support():
+    source = (Path(__file__).resolve().parents[1] / "static" / "StudentApp.js").read_text(encoding="utf-8")
+    meter = source.split('<div class="match-meter"', 1)[1].split('<div class="recommendation-actions">', 1)[0]
+
+    assert "<span>Recommendation match</span>" in meter
+    assert "Number(item.confidence ?? 0).toFixed(2)" in meter
+    assert "Math.min(100, Number(item.confidence ?? 0))" in meter
+    assert "based on grade-profile similarity" in meter
+    assert "item.match_score" not in meter
+    assert "const matchScore = Number(item.confidence ?? 0).toFixed(2);" in source
+    assert "does not determine ML ranking" in source
+
+
+def test_subject_evidence_selections_are_not_labeled_as_model_predictions():
+    source = (Path(__file__).resolve().parents[1] / "static" / "StudentApp.js").read_text(encoding="utf-8")
+    assert "item.selection_basis === 'subject_evidence'" in source
+    assert "isEvidenceSelected(item) ? 'Strong subject evidence'" in source
+    assert source.count("isEvidenceSelected(item) ? 'Why this subject-based suggestion'") == 2
+    assert "isEvidenceSelected(item) ? 'Subject-evidence suggestion'" in source
