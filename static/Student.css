@@ -345,7 +345,9 @@ body[data-home-mode="true"] .DMT{background:transparent;padding-top:34px;height:
 
 .recommendation-dialog{position:fixed;inset:0;z-index:1100;display:grid;place-items:center;padding:20px;background:rgba(14,21,45,.52);backdrop-filter:blur(8px);}
 .recommendation-dialog[hidden]{display:none;}
-.recommendation-dialog-content{position:relative;width:min(860px,100%);max-height:min(90vh,900px);overflow-y:auto;border-radius:8px;background:#fff;box-shadow:0 28px 80px rgba(10,18,50,.28);padding:20px;animation:recommendation-dialog-scale .55s cubic-bezier(.16,1,.3,1) both;}
+.recommendation-dialog-content{position:relative;width:min(860px,100%);max-height:min(90vh,900px);overflow-y:auto;scrollbar-width:none;transform-origin:top left;border-radius:8px;background:#fff;box-shadow:0 28px 80px rgba(10,18,50,.28);padding:20px;}
+.recommendation-dialog-content::-webkit-scrollbar{display:none;}
+html:has(> body.student-page){scrollbar-gutter:stable;}
 @keyframes recommendation-dialog-scale{from{opacity:0;transform:scale(.94);}to{opacity:1;transform:scale(1);}}
 .recommendation-dialog-close{position:sticky;top:0;z-index:1;display:grid;place-items:center;margin:0 0 -36px auto;width:36px;height:36px;border:1px solid #dfe4f7;border-radius:6px;background:#fff;color:#25345d;cursor:pointer;}
 .recommendation-dialog-close:focus-visible{outline:3px solid #4c5bdf;outline-offset:2px;}
@@ -1390,6 +1392,29 @@ button:disabled{
     color:gray;
     font-size: 18px;
 }
+
+.student-logout-dialog{
+    margin:auto;
+    width:min(420px,calc(100% - 24px));
+    max-height:calc(100dvh - 24px);
+    padding:0;
+    overflow-y:auto;
+    border:1px solid #dfe4f7;
+    border-radius:14px;
+    background:#fff;
+    box-shadow:0 24px 70px rgba(10,18,50,.28);
+}
+.student-logout-dialog::backdrop{background:rgba(14,21,45,.52);backdrop-filter:blur(8px);}
+.student-logout-dialog .logout-content{width:100%;min-height:0;padding:28px;}
+.student-logout-dialog h2{color:#17213b;font-size:23px;}
+.student-logout-dialog .logoutTxt{margin:12px 0 24px;font-size:14px;line-height:1.6;}
+.student-logout-dialog .logout-buttons{display:flex;gap:10px;}
+.student-logout-dialog :is(.Logoutbtn,.Logoutbtn2){display:flex;align-items:center;justify-content:center;flex:1;min-width:0;width:auto;min-height:44px;margin:0;padding:10px 14px;border-radius:8px;font-size:14px;font-weight:800;text-decoration:none;}
+html.student-dark .student-logout-dialog,
+html.student-dark .student-logout-dialog .logout-content{border-color:#2f3850;background:#171c2b;color:#eef0fb;}
+html.student-dark .student-logout-dialog h2{color:#eef0fb;}
+html.student-dark .student-logout-dialog .logoutTxt{color:#a1a9c3;}
+html.student-dark .student-logout-dialog .Logoutbtn{border-color:#353e57;background:#1f2537;color:#d3d8ea;}
 
 .terms-modal-overlay{
     position: fixed;

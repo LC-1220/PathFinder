@@ -1,0 +1,222 @@
+:root {
+  --ui-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --ui-fast: 160ms;
+  --ui-duration: 280ms;
+}
+
+@media screen {
+  html {
+    scroll-behavior: smooth;
+    scroll-padding-top: 88px;
+  }
+
+  :where(.admin-page, .student-page, .login-page) :is(button, .btn, .entry-button, summary, [role="button"]) {
+    touch-action: manipulation;
+    transition: background-color var(--ui-fast) ease,
+      border-color var(--ui-fast) ease,
+      color var(--ui-fast) ease,
+      box-shadow var(--ui-duration) var(--ui-ease),
+      transform var(--ui-duration) var(--ui-ease),
+      scale var(--ui-fast) var(--ui-ease);
+  }
+
+  :where(.admin-page, .student-page, .login-page) :is(input, select, textarea) {
+    transition: border-color var(--ui-fast) ease,
+      background-color var(--ui-fast) ease,
+      box-shadow var(--ui-fast) ease;
+  }
+
+  :where(.admin-page, .student-page, .login-page) :is(button, a, summary, [role="button"], input, select, textarea):focus-visible {
+    outline: 2px solid currentColor;
+    outline-offset: 3px;
+  }
+
+  :where(.admin-page, .student-page, .login-page) :is(button, input, select, textarea):disabled {
+    cursor: not-allowed;
+  }
+
+  :where(.admin-page, .student-page, .login-page) :is(button, .btn, .entry-button):not(:disabled):active {
+    scale: 0.98;
+  }
+
+  .admin-page .admin-dashboard-page.wrap,
+  .student-page .student-tools-container {
+    padding-bottom: clamp(32px, 5vw, 64px);
+  }
+
+  .admin-page :is(.admin-panel-heading, .admin-student-list-heading, .course-catalog-heading),
+  .student-page :is(.saved-grades-header, .recommendation-heading, .settings-avatar-row) {
+    gap: clamp(12px, 2vw, 24px);
+  }
+
+  .admin-page :is(.admin-section-card, .admin-students-section, .admin-dashboard-content),
+  .student-page :is(.DMT, .Course-Container, .saved-grades-panel, .ocr-review-panel, .inline-recommendations),
+  .login-page > .container {
+    animation: ui-content-enter var(--ui-duration) var(--ui-ease);
+  }
+
+  :where(.admin-page, .student-page, .login-page) :is(dialog[open], .settings-dialog, .admin-settings-card,
+    .student-editor-dialog, .subadmin-profile-dialog, .report-review-dialog,
+    .recommendation-detail-dialog, .email-results-dialog,
+    .terms-modal, .logout-confirm-dialog, .pf-cropper-dialog) {
+    animation: ui-dialog-enter var(--ui-duration) var(--ui-ease);
+  }
+
+  :where(.admin-page, .student-page, .login-page) dialog::backdrop {
+    animation: ui-content-enter var(--ui-fast) ease;
+  }
+
+  :where(.admin-page, .student-page) :is(.profile-menu, .admin-profile-menu):not([hidden]),
+  :where(.admin-page, .student-page) :is(.settings-tab-panel, .admin-settings-tab-panel):not([hidden]) {
+    animation: ui-content-enter var(--ui-fast) ease;
+  }
+
+  .admin-page :is(.admin-view-link, .admin-settings-tab),
+  .student-page :is(.profile-menu a, .settings-tab, .sidebar a) {
+    transition: background-color var(--ui-fast) ease, color var(--ui-fast) ease;
+  }
+
+  .admin-page :is(.admin-students-table, .admin-accounts-table) tbody tr {
+    transition: background-color var(--ui-fast) ease;
+  }
+
+  .admin-page .admin-bar-track > i,
+  .student-page :is(.match-meter-track > span, .progress-fill) {
+    transition: width 450ms var(--ui-ease);
+  }
+
+  .student-page .Course-Container {
+    padding-inline: clamp(12px, 2.5vw, 28px);
+  }
+
+  .student-page .DMT {
+    height: auto;
+    min-height: 100px;
+    padding-inline: clamp(16px, 3vw, 32px);
+  }
+
+  .student-page .MT {
+    font-size: clamp(26px, 3.2vw, 38px);
+    line-height: 1.2;
+    text-wrap: balance;
+  }
+
+  .student-page :is(.focus-subtitle, .recommendation-heading h2, .settings-panel-header h2),
+  .login-page h1 {
+    text-wrap: balance;
+  }
+
+  .student-page .focus-account > span {
+    max-width: min(32vw, 240px);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .student-page :is(.settings-dialog, .email-results-dialog, .terms-modal),
+  .admin-page :is(.admin-settings-card, .student-editor-dialog, .subadmin-profile-dialog,
+    .report-review-dialog, .recommendation-detail-dialog) {
+    max-height: calc(100dvh - 32px);
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+  }
+
+  .student-page :is(.student-entry-fields, .review-fields, .analytics-grid) > *,
+  .admin-page :is(.cards, .summary-grid, .system-settings-grid) > * {
+    min-width: 0;
+  }
+
+  .student-page .inline-recommendation-card[role="button"] {
+    transition: border-color var(--ui-fast) ease,
+      box-shadow var(--ui-duration) var(--ui-ease),
+      transform var(--ui-duration) var(--ui-ease);
+  }
+
+  .login-page .container {
+    width: min(440px, 100%);
+  }
+
+  .login-page #loginForm {
+    padding: clamp(28px, 5vw, 40px) clamp(20px, 4vw, 32px);
+  }
+
+  .login-page .container :is(button, .entry-button, .admin-login summary):not(:disabled):active {
+    scale: 0.98;
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .student-page .inline-recommendation-card[role="button"]:hover {
+      transform: translateY(-3px);
+    }
+
+    .login-page .container :is(button, .entry-button, .admin-login summary):not(:disabled):is(:hover, :focus-visible) {
+      scale: 1.015;
+    }
+  }
+
+  @media (max-width: 620px) {
+    html {
+      scroll-padding-top: 76px;
+    }
+
+    .admin-page :is(.admin-panel-heading, .course-catalog-heading),
+    .student-page .saved-grades-header {
+      flex-wrap: wrap;
+    }
+
+    .admin-page .course-catalog-toolbar .admin-filter-control {
+      flex: 1 1 140px;
+      min-width: 0;
+    }
+
+    .admin-page .course-catalog-toolbar select {
+      width: 100%;
+      min-width: 0;
+    }
+
+    .student-page :is(.settings-dialog, .email-results-dialog, .terms-modal),
+    .admin-page :is(.admin-settings-card, .student-editor-dialog, .subadmin-profile-dialog,
+      .report-review-dialog, .recommendation-detail-dialog) {
+      max-height: calc(100dvh - 20px);
+    }
+
+    .student-page :is(.settings-save-button, .review-primary-btn),
+    .admin-page :is(.course-row-actions button, .admin-filter-control select) {
+      min-height: 40px;
+    }
+  }
+}
+
+@keyframes ui-content-enter {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes ui-dialog-enter {
+  from { opacity: 0; translate: 0 8px; }
+  to { opacity: 1; translate: 0 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto !important;
+  }
+
+  :is(.admin-page, .student-page, .login-page),
+  :is(.admin-page, .student-page, .login-page) *,
+  :is(.admin-page, .student-page, .login-page) *::before,
+  :is(.admin-page, .student-page, .login-page) *::after,
+  :is(.admin-page, .student-page, .login-page) dialog::backdrop {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+
+  .student-page .inline-recommendation-card[role="button"]:is(:hover, :active) {
+    transform: none;
+  }
+
+  .login-page .container :is(button, .entry-button, .admin-login summary):not(:disabled):is(:hover, :focus-visible, :active) {
+    scale: 1;
+  }
+}

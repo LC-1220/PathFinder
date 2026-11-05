@@ -2129,10 +2129,30 @@ function clearInputs() {
             if(!dialog.hidden) document.body.style.overflow = dialog.dataset.previousOverflow || '';
             dialog.hidden = true;
             let activeCard = null;
+            const dialogContent = dialog.querySelector('.recommendation-dialog-content');
+            let courseDialogAnimation = null;
+            function openDialog(trigger){
+                activeCard = trigger;
+                const source = (trigger.closest('.inline-recommendation-card') || trigger).getBoundingClientRect();
+                courseDialogAnimation?.cancel();
+                dialog.dataset.previousOverflow = document.body.style.overflow;
+                dialog.hidden = false;
+                document.body.style.overflow = 'hidden';
+                dialogContent.scrollTop = 0;
+                const destination = dialogContent.getBoundingClientRect();
+                if(!window.matchMedia('(prefers-reduced-motion: reduce)').matches){
+                    courseDialogAnimation = dialogContent.animate([
+                        {transform: `translate(${source.left - destination.left}px, ${source.top - destination.top}px) scale(${source.width / destination.width}, ${source.height / destination.height})`, opacity: 0.6},
+                        {transform: 'none', opacity: 1},
+                    ], {duration: 360, easing: 'cubic-bezier(0.22, 1, 0.36, 1)'});
+                }
+                closeButton.focus({preventScroll:true});
+            }
             function closeDialog(){
+                courseDialogAnimation?.cancel();
                 dialog.hidden = true;
                 document.body.style.overflow = dialog.dataset.previousOverflow || '';
-                activeCard?.focus();
+                activeCard?.focus({preventScroll:true});
             }
             closeButton.onclick = closeDialog;
             dialog.onclick = event => { if(event.target === dialog) closeDialog(); };
@@ -2245,11 +2265,7 @@ function clearInputs() {
                     <p class="course-analysis-note">${escapeHtml(comparison.narrative || 'Course reference profiles are guidance, not actual student averages or admission requirements.')}</p>
                     <p class="course-analysis-disclaimer">These similarity estimates are guidance, not admission probabilities. Course reference profiles are not actual student averages or admission requirements.</p>
                 `;
-                activeCard = list.querySelectorAll('.inline-recommendation-card')[index];
-                dialog.dataset.previousOverflow = document.body.style.overflow;
-                dialog.hidden = false;
-                document.body.style.overflow = 'hidden';
-                closeButton.focus();
+                openDialog(list.querySelectorAll('.inline-recommendation-card')[index]);
             }
 
             function renderMatchExplanation(index){
@@ -2299,11 +2315,7 @@ function clearInputs() {
                 `;
                 courseAnalysis.hidden = false;
                 analytics.hidden = true;
-                activeCard = list.querySelectorAll('.recommendation-match-explanation')[index];
-                dialog.dataset.previousOverflow = document.body.style.overflow;
-                dialog.hidden = false;
-                document.body.style.overflow = 'hidden';
-                closeButton.focus();
+                openDialog(list.querySelectorAll('.recommendation-match-explanation')[index]);
             }
 
             list.querySelectorAll('.recommendation-match-explanation').forEach((button, index) => {
@@ -2360,7 +2372,7 @@ function clearInputs() {
             ` : '';
             section.style.display = 'block';
             setJourneyStep(4);
-            if(shouldScroll) section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            if(shouldScroll) section.scrollIntoView({ block: 'start' });
         }
 
         function setSavedProfileView(saved){
@@ -2384,7 +2396,7 @@ function clearInputs() {
         window.showStudentUpload = () => {
             setSavedProfileView(false);
             document.getElementById('inline-recommendations').style.display = 'none';
-            document.getElementById('dropzone')?.scrollIntoView({behavior:'smooth',block:'center'});
+            document.getElementById('dropzone')?.scrollIntoView({block:'center'});
         }
 
         document.querySelectorAll('a[href="#inline-recommendations"]').forEach(link => {
@@ -2407,7 +2419,7 @@ function clearInputs() {
                         return;
                     }
                     window.restoreSavedProfileView(profile);
-                    document.getElementById('inline-recommendations').scrollIntoView({behavior:'smooth',block:'start'});
+                    document.getElementById('inline-recommendations').scrollIntoView({block:'start'});
                 }catch(error){
                     console.error('Error showing saved recommendations:', error);
                     alert(error.message || 'Could not load saved recommendations.');
@@ -2452,7 +2464,7 @@ function clearInputs() {
                     : 'OCR will extract the student number, first name, middle initial, last name, and SHS cluster together with the subjects and grades.';
             }
             setJourneyStep(1);
-            document.getElementById('dropzone')?.scrollIntoView({behavior:'smooth',block:'center'});
+            document.getElementById('dropzone')?.scrollIntoView({block:'center'});
         }
 
         document.getElementById('upload-another')?.addEventListener('click', resetRecommendationFlow);
@@ -3041,7 +3053,7 @@ function clearInputs() {
 
             panel.style.display = 'block';
             setJourneyStep(3);
-            panel.scrollIntoView({behavior:'smooth',block:'start'});
+            panel.scrollIntoView({block:'start'});
         }
 
         if(dropzone){
@@ -3334,7 +3346,7 @@ async function showSavedGrades(shouldScroll = true){
         ? rows.map(row => `<tr><td>${escapeText(row.subject)}</td><td>${escapeText(row.grade)}</td><td>${escapeText(row.status || 'Recorded')}</td></tr>`).join('')
         : '<tr><td colspan="3">No saved subjects were found.</td></tr>';
     panel.hidden = false;
-    if(shouldScroll) panel.scrollIntoView({behavior: 'smooth', block: 'start'});
+    if(shouldScroll) panel.scrollIntoView({block: 'start'});
     document.getElementById('close-saved-grades').onclick = () => { panel.hidden = true; };
 }
 
@@ -3356,16 +3368,6 @@ function toggleProfile() {
     }
 }
 
-console.log("Logout.js loaded");
-
-function openLogout() {
-    console.log("openLogout function called");
-    document.getElementById("logoutPopup").style.display = "flex";
-}
-
-function closeLogout() {
-    document.getElementById("logoutPopup").style.display = "none";
-}
 document.addEventListener('DOMContentLoaded', () => {
     const modal = document.getElementById('settings-modal');
     if (!modal) return;

@@ -5,13 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="{{ url_for('static', filename='Student.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='ProfileCropper.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='UIFlow.css') }}">
 <link href="https://fonts.googleapis.com/css2?family=Nunito:ital,wght@0,200..1000;1,200..1000&family=Roboto:ital,wght@0,100..900;1,100..900&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/7.0.1/css/all.min.css" integrity="sha512-2SwdPD6INVrV/lHTZbO2nodKhrnDdJK9/kg2XD1r9uGqPo1cUbujc+IYdlYdEErWNu69gVcYgdxlmVmzTWnetw==" crossorigin="anonymous" referrerpolicy="no-referrer" />
     <script>try { document.documentElement.classList.toggle('student-dark', localStorage.getItem('pathfinder-student-theme') === 'dark'); } catch (error) {}</script>
     <title>PathFinder</title>
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='images/PathFinder2.png') }}">
 </head>
-<body data-home-mode="{{ 'true' if home_mode|default(false) else 'false' }}" data-guest="{{ 'true' if is_guest|default(false) else 'false' }}">
+<body class="student-page" data-home-mode="{{ 'true' if home_mode|default(false) else 'false' }}" data-guest="{{ 'true' if is_guest|default(false) else 'false' }}">
         {% if home_mode|default(false) %}
         <header class="focus-header">
             <a href="/home" class="focus-brand"><img src="{{ url_for('static', filename='images/PathFinder2.png') }}" alt="" width="36" height="36"><span>PathFinder</span></a>
@@ -31,7 +32,7 @@
                     <button type="button" class="profile-menu-action" data-open-settings><i class="fa-solid fa-user-gear"></i> Profile settings</button>
                     {% endif %}
                     <button id="student-theme-toggle" class="profile-menu-theme" type="button" aria-pressed="false"><i class="fa-solid fa-moon" aria-hidden="true"></i><span>Dark mode</span></button>
-                    <a href="/logout" class="profile-menu-logout"><i class="fa-solid fa-right-from-bracket"></i> Log out</a>
+                    <a href="/logout" class="profile-menu-logout" data-student-logout><i class="fa-solid fa-right-from-bracket"></i> Log out</a>
                 </div>
             </div>
         </header>
@@ -90,7 +91,7 @@
             </li>
  
              <li>
-                <a href="#" onclick="openLogout(); return false;" class="logo">
+                <a href="/logout" class="logo" data-student-logout>
                     <span class="icon" ><i class="fa-solid fa-right-from-bracket"></i></span>
                     <span class="text">Logout</span>
                 </a>
@@ -101,18 +102,6 @@
         </div>
         <button class="mobile-menu-toggle" type="button" aria-label="Open navigation" aria-expanded="false"><i class="fa-solid fa-bars"></i></button>
 
-        <div class="logout-popup" id="logoutPopup">
-            <div class="logout-content">
-                <h2>Are you sure you <br> want to log out?</h2>
-                <p class="logoutTxt">Log out of PathFinder as</p>
-                <p class="logoutTxt">{{ email }}?</p>
-                <div class="logout-buttons">
-                    <a href="/logout"><button class="Logoutbtn2">Logout</button></a>
-                    <button class="Logoutbtn" onclick="closeLogout()">Cancel</button>   
-                </div>
-            </div>
-        </div>
- 
         <div class="usercontainer">
             <div class="user">
                 <img id="profilePicture" src="{{ profile_image }}" referrerpolicy="no-referrer" onerror="this.onerror=null;this.src='/static/profile_pictures/default.svg'" alt="Profile Picture">
@@ -228,6 +217,17 @@
                         <div class="recommendation-disclaimer"><i class="fa-solid fa-circle-info"></i><p>Course matches are academic guidance based on the grades provided. They do not guarantee admission, eligibility, or career outcomes. Consider your interests and speak with a guidance counselor before deciding.</p></div>
                         <div class="result-actions">
                             <button id="upload-another" type="button"><i class="fa-solid fa-arrow-rotate-left"></i> Upload another report card</button>
+                            <dialog id="logoutPopup" class="student-logout-dialog" aria-labelledby="student-logout-title" aria-describedby="student-logout-description">
+                                <form method="dialog" class="logout-content">
+                                    <h2 id="student-logout-title">Log out of PathFinder?</h2>
+                                    <p id="student-logout-description" class="logoutTxt">{{ 'Your guest session will end.' if is_guest|default(false) else 'You will be signed out of your account.' }}</p>
+                                    <div class="logout-buttons">
+                                        <button class="Logoutbtn" type="submit" autofocus>Cancel</button>
+                                        <a href="/logout" class="Logoutbtn2">Log out</a>
+                                    </div>
+                                </form>
+                            </dialog>
+
                             {% if can_email_results|default(false) %}
                             <button id="email-results" type="button" data-email="{{ email }}"><i class="fa-solid fa-envelope"></i> Email my results</button>
                             {% endif %}

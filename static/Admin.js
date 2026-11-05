@@ -632,34 +632,50 @@ let expandedGraphCard = null;
 let expandedGraphPlaceholder = null;
 let graphReturnFocus = null;
 let graphCloseTimer = null;
+let graphExpandAnimation = null;
+const GRAPH_EXPAND_DURATION = 360;
 
 function resizeExpandedChart(card){
   card?.querySelectorAll('canvas').forEach(canvas => Chart.getChart(canvas)?.resize());
 }
 
+function graphTransform(from, to){
+  return `translate(${from.left - to.left}px, ${from.top - to.top}px) scale(${from.width / to.width}, ${from.height / to.height})`;
+}
+
 function openExpandedGraph(card, returnFocus){
   if(!graphExpandOverlay || !graphExpandStage || expandedGraphCard || !card) return;
+  const source = card.getBoundingClientRect();
+  const gridColumn = getComputedStyle(card).gridColumn;
   expandedGraphCard = card;
   graphReturnFocus = returnFocus || card.querySelector('.graph-expand-trigger') || card;
   expandedGraphPlaceholder = document.createElement('div');
   expandedGraphPlaceholder.className = 'graph-expand-placeholder';
-  expandedGraphPlaceholder.style.height = `${card.getBoundingClientRect().height}px`;
+  expandedGraphPlaceholder.style.height = `${source.height}px`;
+  expandedGraphPlaceholder.style.gridColumn = gridColumn;
   card.before(expandedGraphPlaceholder);
   card.classList.add('graph-expand-card');
   graphExpandStage.append(card);
   graphExpandOverlay.hidden = false;
   graphExpandOverlay.setAttribute('aria-hidden', 'false');
   document.body.classList.add('graph-expanded-open');
-  requestAnimationFrame(() => {
-    graphExpandOverlay.classList.add('is-visible');
-    card.classList.add('is-expanded');
-    resizeExpandedChart(card);
-    closeExpandedGraphButton?.focus();
-  });
+  card.classList.add('is-expanded');
+  resizeExpandedChart(card);
+  const destination = card.getBoundingClientRect();
+  graphExpandOverlay.classList.add('is-visible');
+  if(!window.matchMedia('(prefers-reduced-motion: reduce)').matches){
+    graphExpandAnimation = card.animate(
+      [{transform: graphTransform(source, destination)}, {transform: 'none'}],
+      {duration: GRAPH_EXPAND_DURATION, easing: 'cubic-bezier(0.22, 1, 0.36, 1)', fill: 'both'}
+    );
+  }
+  closeExpandedGraphButton?.focus({preventScroll:true});
 }
 
 function restoreExpandedGraph(){
   if(!expandedGraphCard || !expandedGraphPlaceholder) return;
+  graphExpandAnimation?.cancel();
+  graphExpandAnimation = null;
   expandedGraphPlaceholder.before(expandedGraphCard);
   expandedGraphPlaceholder.remove();
   expandedGraphCard.classList.remove('graph-expand-card', 'is-expanded');
@@ -676,12 +692,23 @@ function restoreExpandedGraph(){
 
 function closeExpandedGraph(){
   if(!expandedGraphCard || graphCloseTimer) return;
+  const current = expandedGraphCard.getBoundingClientRect();
+  graphExpandAnimation?.cancel();
+  graphExpandAnimation = null;
+  const expanded = expandedGraphCard.getBoundingClientRect();
+  const destination = expandedGraphPlaceholder.getBoundingClientRect();
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if(!reducedMotion){
+    graphExpandAnimation = expandedGraphCard.animate(
+      [{transform: graphTransform(current, expanded)}, {transform: graphTransform(destination, expanded)}],
+      {duration: GRAPH_EXPAND_DURATION, easing: 'cubic-bezier(0.22, 1, 0.36, 1)', fill: 'both'}
+    );
+  }
   graphExpandOverlay.classList.remove('is-visible');
-  expandedGraphCard.classList.remove('is-expanded');
   graphCloseTimer = window.setTimeout(() => {
     graphCloseTimer = null;
     restoreExpandedGraph();
-  }, window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 320);
+  }, reducedMotion ? 0 : GRAPH_EXPAND_DURATION);
 }
 
 document.querySelector('.cards.admin-dashboard-content')?.addEventListener('click', event => {
@@ -1048,7 +1075,7 @@ function setAdminPage(key, page){
   adminListPages[key] = page;
   adminListConfig[key].render();
   const section = document.getElementById(adminListConfig[key].section);
-  if(section && section.getBoundingClientRect().top < 0) section.scrollIntoView({behavior: 'smooth', block: 'start'});
+  if(section && section.getBoundingClientRect().top < 0) section.scrollIntoView({block: 'start'});
 }
 
 function resetAdminPage(key){

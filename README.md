@@ -45,6 +45,15 @@ FastHTML serves the website pages and templates. FastAPI provides the versioned 
 - Interactive API documentation is available at `/api/v1/docs`; the OpenAPI schema is at `/api/v1/openapi.json`.
 - Browser API calls use the versioned FastAPI routes under `/api/v1`.
 
+## UI motion and layout
+
+Student, Admin, and sign-in pages load `static/UIFlow.css` after their page
+styles for shared interaction timing, panel and dialog entrances, fluid spacing,
+and mobile adjustments. Navigation scrolling follows CSS `scroll-behavior`
+instead of forcing animation in JavaScript. The operating system's
+`prefers-reduced-motion` setting disables motion on all three interfaces.
+Existing light/dark colors and account permissions are unchanged.
+
 ## OCR provider
 
 Install the Docling provider in the same virtual environment:
