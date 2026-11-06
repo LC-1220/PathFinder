@@ -218,17 +218,6 @@
                         <div class="recommendation-disclaimer"><i class="fa-solid fa-circle-info"></i><p>Course matches are academic guidance based on the grades provided. They do not guarantee admission, eligibility, or career outcomes. Consider your interests and speak with a guidance counselor before deciding.</p></div>
                         <div class="result-actions">
                             <button id="upload-another" type="button"><i class="fa-solid fa-arrow-rotate-left"></i> Upload another report card</button>
-                            <dialog id="logoutPopup" class="student-logout-dialog" aria-labelledby="student-logout-title" aria-describedby="student-logout-description">
-                                <form method="dialog" class="logout-content">
-                                    <h2 id="student-logout-title">Log out of PathFinder?</h2>
-                                    <p id="student-logout-description" class="logoutTxt">{{ 'Your guest session will end.' if is_guest|default(false) else 'You will be signed out of your account.' }}</p>
-                                    <div class="logout-buttons">
-                                        <button class="Logoutbtn" type="submit" autofocus>Cancel</button>
-                                        <a href="/logout" class="Logoutbtn2">Log out</a>
-                                    </div>
-                                </form>
-                            </dialog>
-
                             {% if can_email_results|default(false) %}
                             <button id="email-results" type="button" data-email="{{ email }}"><i class="fa-solid fa-envelope"></i> Email my results</button>
                             {% endif %}
@@ -238,6 +227,17 @@
                 </section>
             </div>
         </div>
+
+        <dialog id="logoutPopup" class="student-logout-dialog" aria-labelledby="student-logout-title" aria-describedby="student-logout-description">
+            <form method="dialog" class="logout-content">
+                <h2 id="student-logout-title">Log out of PathFinder?</h2>
+                <p id="student-logout-description" class="logoutTxt">{{ 'Your guest session will end.' if is_guest|default(false) else 'You will be signed out of your account.' }}</p>
+                <div class="logout-buttons">
+                    <button class="Logoutbtn" type="submit" autofocus>Cancel</button>
+                    <a href="/logout" class="Logoutbtn2">Log out</a>
+                </div>
+            </form>
+        </dialog>
 
         <dialog id="fresh-start-dialog" class="student-logout-dialog" aria-labelledby="fresh-start-title" aria-describedby="fresh-start-description">
             <form method="dialog" class="logout-content">

@@ -47,6 +47,10 @@ FastHTML serves the website pages and templates. FastAPI provides the versioned 
 
 ## Sessions and student profile removal
 
+Student and guest logout confirmation is available before any report-card upload
+and after results are shown. Cancel or Escape returns to the current page without
+signing out; confirming Log out ends the session.
+
 Students, guests, Admins, and Sub Admins are signed out after **15 minutes of
 inactivity**. The server checks the signed session's activity timestamp before
 handling page or API requests; expired API calls return HTTP 401 with

@@ -5736,7 +5736,7 @@ def _finish_report_card_upload(req, file_bytes, filename, upload_id, user_id, on
             cursor.execute(
                 "UPDATE report_card_uploads SET ocr_status = 'failed', ocr_error = ?, processed_at = CURRENT_TIMESTAMP WHERE id = ?",
                 (str(exc)[:1000], upload_id),
-            )
+             )
             conn.commit()
             conn.close()
         _record_student_activity(req, "report_card_upload_failed", str(exc)[:300], target_label=filename)

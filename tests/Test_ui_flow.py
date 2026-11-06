@@ -1,3 +1,4 @@
+from html.parser import HTMLParser
 from pathlib import Path
 
 import pytest
@@ -57,6 +58,27 @@ def test_student_logout_confirmation_is_available_in_every_layout(home_mode, is_
     assert 'method="dialog" class="logout-content"' in html
     assert 'href="/logout" class="Logoutbtn2"' in html
     assert "Logout.js" in html
+
+    class DialogParentParser(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.parents = []
+            self.logout_parents = None
+
+        def handle_starttag(self, tag, attrs):
+            if dict(attrs).get("id") == "logoutPopup":
+                self.logout_parents = self.parents.copy()
+            if tag not in {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"}:
+                self.parents.append(tag)
+
+        def handle_endtag(self, tag):
+            if tag in self.parents:
+                index = len(self.parents) - 1 - self.parents[::-1].index(tag)
+                del self.parents[index:]
+
+    parser = DialogParentParser()
+    parser.feed(html)
+    assert parser.logout_parents == ["html", "body"]
 
 
 @pytest.mark.parametrize(("template", "script"), [
