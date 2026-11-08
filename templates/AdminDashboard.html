@@ -171,24 +171,29 @@
         <div class="card admin-chart-monthly" data-expandable-graph tabindex="0" aria-label="Expand Monthly uploads graph">
           <div class="admin-panel-heading"><div><span class="admin-panel-kicker">ACTIVITY</span><h4>Monthly uploads</h4></div><button class="graph-expand-trigger" type="button" aria-label="Expand Monthly uploads graph" title="Expand graph"><i class="fa-solid fa-up-right-and-down-left-from-center" aria-hidden="true"></i></button></div>
           <div class="chart-wrap"><canvas id="chartMonthly"></canvas></div>
+          <p class="chart-interpretation" id="interpretMonthly" aria-live="polite"></p>
         </div>
         <div class="card admin-chart-strand" data-expandable-graph tabindex="0" aria-label="Expand Students per cluster graph">
           <div class="admin-panel-heading"><div><span class="admin-panel-kicker">STUDENT MIX</span><h4>Students per cluster</h4></div><button class="graph-expand-trigger" type="button" aria-label="Expand Students per cluster graph" title="Expand graph"><i class="fa-solid fa-up-right-and-down-left-from-center" aria-hidden="true"></i></button></div>
           <div class="chart-wrap"><canvas id="chartStrand"></canvas></div>
+          <p class="chart-interpretation" id="interpretStrand" aria-live="polite"></p>
         </div>
         <div class="card admin-chart-gwa" data-expandable-graph tabindex="0" aria-label="Expand GWA distribution graph">
           <div class="admin-panel-heading"><div><span class="admin-panel-kicker">PERFORMANCE</span><h4>GWA distribution</h4></div><button class="graph-expand-trigger" type="button" aria-label="Expand GWA distribution graph" title="Expand graph"><i class="fa-solid fa-up-right-and-down-left-from-center" aria-hidden="true"></i></button></div>
           <div class="chart-wrap"><canvas id="chartGwa"></canvas></div>
+          <p class="chart-interpretation" id="interpretGwa" aria-live="polite"></p>
         </div>
         <div class="card admin-chart-top-courses" data-expandable-graph tabindex="0" aria-label="Expand Top recommended graph">
           <div class="admin-panel-heading"><div><span class="admin-panel-kicker">COURSE MATCHES</span><h4>Top recommended</h4></div><button class="graph-expand-trigger" type="button" aria-label="Expand Top recommended graph" title="Expand graph"><i class="fa-solid fa-up-right-and-down-left-from-center" aria-hidden="true"></i></button></div>
           <div id="topRecommended"></div>
+          <p class="chart-interpretation" id="interpretTopRecommended" aria-live="polite"></p>
         </div>
         <div class="card admin-chart-all-courses" data-expandable-graph tabindex="0" aria-label="Expand Recommended courses graph">
           <div class="admin-panel-heading"><div><span class="admin-panel-kicker">FULL CATALOG</span><h4>Recommended courses</h4></div><button class="graph-expand-trigger" type="button" aria-label="Expand Recommended courses graph" title="Expand graph"><i class="fa-solid fa-up-right-and-down-left-from-center" aria-hidden="true"></i></button></div>
           <div id="allRecommended" class="panel-scroll">
             <div class="no-courses">Loading recommended courses...</div>
           </div>
+          <p class="chart-interpretation" id="interpretAllRecommended" aria-live="polite"></p>
         </div>
     </div>
 

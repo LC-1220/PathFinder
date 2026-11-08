@@ -522,7 +522,7 @@ function renderGwa(ctxElem, labels, values){
   const colors = sequentialChartColors(values, adminChartPalette.greens);
   chartGwa = new Chart(ctxElem, {
     type: 'bar',
-    data: { labels, datasets: [{ label: 'Students', data: values, backgroundColor: colors, borderColor: colors, borderWidth: 1, borderRadius: 4 }] },
+    data: { labels, datasets: [{ label: 'Students', data: values, backgroundColor: colors, borderColor: colors, borderWidth: 1, borderRadius: 4, maxBarThickness: 56, categoryPercentage: 0.6 }] },
     options: {
       responsive: true,
       maintainAspectRatio: false,
@@ -626,6 +626,79 @@ function renderAllRecommended(containerElem, list){
   });
   html += '</div>';
   containerElem.innerHTML = html;
+}
+
+function setChartInterpretation(id, text){
+  const node = document.getElementById(id);
+  if(node) node.textContent = text;
+}
+
+function percentageShare(count, total){
+  return total ? Math.round((Number(count) / total) * 100) : 0;
+}
+
+function interpretMonthlyUploads(months, uploads){
+  const values = uploads.map(value => Number(value) || 0);
+  const total = values.reduce((sum, value) => sum + value, 0);
+  if(!total) return 'No report card uploads have been recorded yet, so no monthly activity trend can be observed.';
+  const peak = Math.max(...values);
+  const peakMonths = months.filter((_, index) => values[index] === peak);
+  const activeMonths = values.filter(value => value > 0).length;
+  return `This graph shows ${total} report card ${total === 1 ? 'upload' : 'uploads'} recorded across the year. ` +
+    `Activity peaked in ${peakMonths.join(' and ')} with ${peak} ${peak === 1 ? 'upload' : 'uploads'} (${percentageShare(peak, total)}% of the total), ` +
+    `and ${activeMonths} of 12 months registered upload activity.`;
+}
+
+function interpretStrandMix(labels, values){
+  const counts = values.map(value => Number(value) || 0);
+  const total = counts.reduce((sum, value) => sum + value, 0);
+  if(!labels.length || !total) return 'No student profiles have been recorded yet, so the cluster distribution cannot be interpreted.';
+  const maxCount = Math.max(...counts);
+  const leaders = labels.filter((_, index) => counts[index] === maxCount);
+  let text = `This chart shows how the ${total} profiled ${total === 1 ? 'student is' : 'students are'} distributed across ${labels.length} academic ${labels.length === 1 ? 'cluster' : 'clusters'}. ` +
+    `${leaders.join(' and ')} ${leaders.length === 1 ? 'has' : 'have'} the largest share with ${maxCount} ${maxCount === 1 ? 'student' : 'students'} (${percentageShare(maxCount, total)}%)`;
+  if(labels.length > 1 && leaders.length < labels.length){
+    const minCount = Math.min(...counts);
+    const smallest = labels.filter((_, index) => counts[index] === minCount);
+    text += `, while ${smallest.join(' and ')} ${smallest.length === 1 ? 'has' : 'have'} the smallest with ${minCount} (${percentageShare(minCount, total)}%)`;
+  }
+  return `${text}.`;
+}
+
+function interpretGwaDistribution(labels, values){
+  const counts = values.map(value => Number(value) || 0);
+  const total = counts.reduce((sum, value) => sum + value, 0);
+  if(!labels.length || !total) return 'No grades have been recorded yet, so the GWA distribution cannot be interpreted.';
+  const maxCount = Math.max(...counts);
+  const dominant = labels.filter((_, index) => counts[index] === maxCount);
+  return `This graph groups the ${total} profiled ${total === 1 ? 'student' : 'students'} by their general weighted average. ` +
+    `Most students fall within the ${dominant.join(' and ')} ${dominant.length === 1 ? 'range' : 'ranges'} with ${maxCount} ${maxCount === 1 ? 'student' : 'students'} (${percentageShare(maxCount, total)}%), ` +
+    `making it the most common performance level among profiled students.`;
+}
+
+function interpretTopRecommendedCourses(list, allList){
+  if(!list || !list.length) return 'No course recommendations have been generated yet, so top matches cannot be interpreted.';
+  const total = (allList || list).reduce((sum, item) => sum + (Number(item.count) || 0), 0);
+  const top = list[0];
+  const topCount = Number(top.count) || 0;
+  const topShare = percentageShare(topCount, total);
+  const listedTotal = list.reduce((sum, item) => sum + (Number(item.count) || 0), 0);
+  let text = `This ranking shows the courses the system recommends most often. ${displayCourseName(top.course)} leads with ${topCount} ${topCount === 1 ? 'recommendation' : 'recommendations'} (${topShare}% of all ${total})`;
+  if(list.length > 1) text += `, and the top ${list.length} courses together account for ${percentageShare(listedTotal, total)}% of every recommendation made`;
+  return `${text}.`;
+}
+
+function interpretAllRecommendedCourses(list){
+  if(!list || !list.length) return 'No course recommendations have been generated yet, so the catalog spread cannot be interpreted.';
+  const total = list.reduce((sum, item) => sum + (Number(item.count) || 0), 0);
+  const sorted = [...list].sort((a, b) => (Number(b.count) || 0) - (Number(a.count) || 0));
+  const topThree = sorted.slice(0, 3);
+  const topThreeTotal = topThree.reduce((sum, item) => sum + (Number(item.count) || 0), 0);
+  let text = `This list shows how the ${total} ${total === 1 ? 'recommendation is' : 'recommendations are'} spread across ${list.length} ${list.length === 1 ? 'course' : 'courses'} in the catalog`;
+  if(list.length > 3){
+    text += `. The top three courses (${topThree.map(item => displayCourseName(item.course)).join(', ')}) account for ${percentageShare(topThreeTotal, total)}% of all recommendations, while the remaining ${list.length - 3} ${list.length - 3 === 1 ? 'course shares' : 'courses share'} the rest`;
+  }
+  return `${text}.`;
 }
 
 const graphExpandOverlay = document.getElementById('graph-expand-overlay');
@@ -2176,21 +2249,27 @@ async function loadDashboard(){
     document.getElementById('statActiveUsers').innerText = formatCount(stats.active_users);
 
     const gwaBuckets = stats.gwa_buckets || {};
-    const gLabels = Object.keys(gwaBuckets);
-    const gValues = gLabels.map(k => gwaBuckets[k] || 0);
+    const gwaEntries = Object.entries(gwaBuckets).filter(([, count]) => Number(count) > 0);
+    const gLabels = gwaEntries.map(([label]) => label);
+    const gValues = gwaEntries.map(([, count]) => Number(count));
     renderGwa(document.getElementById('chartGwa'), gLabels, gValues);
+    setChartInterpretation('interpretGwa', interpretGwaDistribution(gLabels, gValues));
 
     renderTopRecommended(document.getElementById('topRecommended'), stats.top_recommended || [], stats.all_recommended_courses || []);
     renderAllRecommended(document.getElementById('allRecommended'), stats.all_recommended_courses || []);
+    setChartInterpretation('interpretTopRecommended', interpretTopRecommendedCourses(stats.top_recommended || [], stats.all_recommended_courses || []));
+    setChartInterpretation('interpretAllRecommended', interpretAllRecommendedCourses(stats.all_recommended_courses || []));
 
     const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
     const uploads = months.map(m => stats.monthly_uploads?.[m] || 0);
     renderLineChart(document.getElementById('chartMonthly'), months, uploads);
+    setChartInterpretation('interpretMonthly', interpretMonthlyUploads(months, uploads));
 
     const strandCounts = stats.strand_counts || {};
     const strandLabels = Object.keys(strandCounts);
     const strandValues = strandLabels.map(k => strandCounts[k]);
     renderStrandPie(document.getElementById('chartStrand'), strandLabels, strandValues);
+    setChartInterpretation('interpretStrand', interpretStrandMix(strandLabels, strandValues));
 
     adminStudents = await fetchStudents();
     updateStudentFilterOptions();

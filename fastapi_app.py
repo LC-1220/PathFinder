@@ -4050,18 +4050,20 @@ def admin_stats(req):
 
     avg_gwa = round(sum(gwa_nums) / len(gwa_nums), 2) if gwa_nums else None
     # Calculate the average GWA and distribution buckets for admin statistics
-    buckets = {"0-59": 0, "60-69": 0, "70-79": 0, "80-89": 0, "90-100": 0}
+    buckets = {"Below 75": 0, "75-79": 0, "80-84": 0, "85-89": 0, "90-94": 0, "95-100": 0}
     for v in gwa_nums:
-        if v < 60:
-            buckets["0-59"] += 1
-        elif v < 70:
-            buckets["60-69"] += 1
+        if v < 75:
+            buckets["Below 75"] += 1
         elif v < 80:
-            buckets["70-79"] += 1
+            buckets["75-79"] += 1
+        elif v < 85:
+            buckets["80-84"] += 1
         elif v < 90:
-            buckets["80-89"] += 1
+            buckets["85-89"] += 1
+        elif v < 95:
+            buckets["90-94"] += 1
         else:
-            buckets["90-100"] += 1
+            buckets["95-100"] += 1
 
     cursor.execute(
         """

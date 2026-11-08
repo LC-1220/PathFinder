@@ -425,6 +425,7 @@ html.student-dark .analysis-reference-marker{border-color:#171c2b;background:#a9
 .analysis-series b{color:#454d6c;text-align:right;}
 .analysis-missing-grade{margin:0;color:#737a91;font-size:11px;line-height:1.4;}
 .course-analysis-note{margin:16px 0 0;color:#66708a;font-size:12px;font-weight:700;}
+.viz-interpretation{margin:10px 0 0;padding-top:8px;border-top:1px dashed #dfe3f0;color:#66708a;font-size:12px;font-weight:500;line-height:1.5;}
 .course-analysis-disclaimer{margin:6px 0 0;color:#737a91;font-size:11px;line-height:1.4;}
 .course-fit-subjects{margin-top:18px;padding:16px;border:1px solid #e1e5f4;border-radius:6px;background:#f8f9ff;}
 .course-fit-subjects h4{margin:0 0 10px;color:#202947;font-size:13px;}
@@ -1843,6 +1844,7 @@ html.student-dark .course-analysis-summary span,
 html.student-dark .analysis-series,
 html.student-dark .analysis-missing-grade,
 html.student-dark .course-analysis-note,
+html.student-dark .viz-interpretation,
 html.student-dark .course-analysis-disclaimer,
 html.student-dark .course-fit-subjects li span,
 html.student-dark .course-fit-subjects>p,
@@ -1850,6 +1852,7 @@ html.student-dark .analytics-heading p,
 html.student-dark .analytics-stat span,
 html.student-dark .comparison-row,
 html.student-dark .recommendation-empty{color:#a1a9c3;}
+html.student-dark .viz-interpretation{border-top-color:#2f3850;}
 html.student-dark .inline-recommendation-card,
 html.student-dark .recommendation-dialog-content,
 html.student-dark .inline-course-analysis,

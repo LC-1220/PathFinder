@@ -2155,10 +2155,22 @@ body.logout-confirm-open {
 .admin-page .admin-chart-monthly .chart-wrap,
 .admin-page .admin-chart-strand .chart-wrap {
   min-height: 245px;
-  max-height: 275px;
+}
+.admin-page .admin-chart-monthly .chart-wrap,
+.admin-page .admin-chart-strand .chart-wrap,
+.admin-page .admin-chart-gwa .chart-wrap {
+  max-height: none;
+}
+.admin-page .admin-chart-monthly .chart-wrap canvas,
+.admin-page .admin-chart-strand .chart-wrap canvas,
+.admin-page .admin-chart-gwa .chart-wrap canvas {
+  position: absolute;
+  inset: 0;
 }
 .admin-page .panel-scroll {
-  max-height: 260px;
+  flex: 1 1 0;
+  min-height: 240px;
+  max-height: none;
   padding: 2px 0 0;
 }
 .admin-page #allRecommended {
@@ -4343,6 +4355,8 @@ html:has(> body.admin-page) {
   max-height: 70vh;
 }
 .admin-page .graph-expand-card .panel-scroll {
+  flex: 1 1 auto;
+  height: min(68vh, 680px);
   max-height: min(68vh, 680px);
 }
 .admin-page .graph-expand-card .admin-recommendation-bars {
@@ -4551,6 +4565,17 @@ body.graph-expanded-open {
 .admin-page .admin-chart-all-courses .admin-bar-label b {
   color: #800000;
 }
+.admin-page .chart-interpretation {
+  margin: auto 0 0;
+  padding-top: 10px;
+  border-top: 1px dashed rgba(128, 0, 0, 0.18);
+  color: #5c6672;
+  font: 400 11.5px "DM Sans", sans-serif;
+  line-height: 1.45;
+}
+.admin-page .chart-interpretation:empty {
+  display: none;
+}
 @supports not (backdrop-filter: blur(1px)) {
   .admin-page .cards > .card.admin-chart-monthly,
   .admin-page .cards > .card.admin-chart-strand,
@@ -4668,6 +4693,10 @@ body.graph-expanded-open {
   }
   html.admin-dark .admin-page :is(.admin-chart-monthly, .admin-chart-strand, .admin-chart-gwa, .admin-chart-top-courses, .admin-chart-all-courses) :is(.admin-panel-heading h4, .admin-panel-kicker, .admin-bar-label, .admin-bar-label b, .graph-expand-trigger) {
     color: var(--admin-ink);
+  }
+  html.admin-dark .admin-page .chart-interpretation {
+    border-top-color: var(--admin-line);
+    color: #b8aeb0;
   }
   html.admin-dark .admin-page :is(.admin-bar-track, .graph-expand-close, .report-secondary-action, .student-report-button, .subadmin-view-button, .admin-account-actions button, .btn-secondary) {
     background: #382e30;

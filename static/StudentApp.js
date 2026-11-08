@@ -2182,6 +2182,11 @@ function clearInputs() {
                 .replace(/</g, '&lt;')
                 .replace(/>/g, '&gt;')
                 .replace(/"/g, '&quot;');
+            const describeMatchMeter = item => {
+                const confidence = Math.max(0, Math.min(100, Number(item.confidence ?? 0)));
+                const tier = confidence >= 70 ? 'a strong' : confidence >= 40 ? 'a moderate' : 'a light';
+                return `The filled bar means your grade profile is ${confidence.toFixed(2)}% similar to this course's reference profile — ${tier} match, not an admission probability.`;
+            };
             const recommendationsList = Array.isArray(recommendations) ? recommendations : [];
             const primary = recommendationsList.filter(item => item.recommendation_basis !== 'grade_alternative')
                 .slice(0, configuredRecommendationLimit);
@@ -2223,6 +2228,7 @@ function clearInputs() {
                                 <div class="match-meter-label"><span>Recommendation match</span><strong>${Number(item.confidence ?? 0).toFixed(2)}%</strong></div>
                                 <div class="match-meter-track"><span style="width:${Math.max(0, Math.min(100, Number(item.confidence ?? 0)))}%"></span></div>
                             </div>
+                            <p class="viz-interpretation">${describeMatchMeter(item)}</p>
                             <div class="recommendation-actions">
                                 <button class="recommendation-match-explanation" type="button" aria-haspopup="dialog">${isEvidenceSelected(item) ? 'Why this subject-based suggestion' : item.model_basis ? 'Why the model suggests this' : isAlternative(item) ? 'Why this alternative matches' : index === 0 ? 'Why this is your best match' : 'Why this course matches'} <i class="fa-solid fa-lightbulb" aria-hidden="true"></i></button>
                             </div>
@@ -2248,6 +2254,16 @@ function clearInputs() {
                 const fieldEvidence = Array.isArray(item.subject_field_evidence) ? item.subject_field_evidence : [];
                 const fieldAverage = item.field_fit === null || item.field_fit === undefined ? null : Number(item.field_fit);
                 const strandLabel = String(item.strand_label || '').trim();
+                const scaleInterpretation = hasDifference
+                    ? (difference === 0
+                        ? 'The marker sits exactly at the center, which means your average equals the course reference.'
+                        : `The marker sits to the ${difference > 0 ? 'right' : 'left'} of center: your average is ${Math.abs(difference).toFixed(2)} grade points ${difference > 0 ? 'above' : 'below'} the course reference, so your overall performance is ${difference > 0 ? 'stronger than the typical profile for this course.' : 'below the typical profile for this course — this is guidance, not a disqualification.'}`)
+                    : 'No interpretation is available because there is no grade comparison for this course.';
+                const gradedRows = rows.filter(row => row.student !== null && row.student !== undefined && Number.isFinite(Number(row.student)));
+                const metReference = gradedRows.filter(row => Number(row.student) >= Number(row.course || 0)).length;
+                const barsInterpretation = gradedRows.length
+                    ? `Each pair of bars compares your grade with the course reference for one subject: you meet or exceed the reference in ${metReference} of ${gradedRows.length} graded subject${gradedRows.length === 1 ? '' : 's'}.`
+                    : 'No graded subjects were available to compare against the course reference profile.';
                 courseAnalysis.innerHTML = `
                     <div class="course-analysis-header">
                         <div><span>${isEvidenceSelected(item) ? 'Subject-evidence suggestion' : item.model_basis ? 'Experimental model suggestion' : index === 0 ? 'Your best match' : 'Recommended course'}</span><h3>${escapeHtml(displayCourseName(item.course))}</h3></div>
@@ -2273,6 +2289,7 @@ function clearInputs() {
                             ${hasDifference ? `<span class="analysis-reference-marker" style="left:${differencePosition}%" aria-hidden="true"></span>` : ''}
                         </div>
                         <p>${hasDifference ? 'Centered at 0: your average equals the course reference. Scale: -100 to +100 grade points.' : 'No grade comparison available.'}</p>
+                        <p class="viz-interpretation">${scaleInterpretation}</p>
                     </div>
                     <div class="course-analysis-bars">
                         ${rows.map(row => `
@@ -2283,6 +2300,7 @@ function clearInputs() {
                             </div>
                         `).join('')}
                     </div>
+                    <p class="viz-interpretation">${barsInterpretation}</p>
                     <p class="course-analysis-note">${escapeHtml(comparison.narrative || 'Course reference profiles are guidance, not actual student averages or admission requirements.')}</p>
                     <p class="course-analysis-disclaimer">These similarity estimates are guidance, not admission probabilities. Course reference profiles are not actual student averages or admission requirements.</p>
                 `;
@@ -2381,6 +2399,11 @@ function clearInputs() {
                 : evidenceCount >= 3 && topConfidence >= 35
                     ? 'Moderate'
                     : 'Limited';
+            const qualityExplanation = evidenceQuality === 'Strong'
+                ? 'enough grade data was available to support these matches well'
+                : evidenceQuality === 'Moderate'
+                    ? 'the matches are reasonably supported, though more complete grades would improve accuracy'
+                    : 'few grades were available, so these matches should be interpreted with caution';
 
             analytics.innerHTML = items.length ? `
                 <div class="analytics-heading">
@@ -2393,6 +2416,7 @@ function clearInputs() {
                     <div class="analytics-stat"><i class="fa-solid fa-chart-line"></i><strong>${Number.isFinite(average) ? average.toFixed(1) : 'N/A'}</strong><span>average grade</span></div>
                     <div class="analytics-stat"><i class="fa-solid fa-arrows-left-right"></i><strong>${spread === null ? 'N/A' : spread.toFixed(1)}</strong><span>grade-point spread</span></div>
                 </div>
+                <p class="viz-interpretation">These figures show the evidence behind your matches: ${evidenceCount} subject${evidenceCount === 1 ? ' was' : 's were'} analyzed${Number.isFinite(average) ? `, with an average grade of ${average.toFixed(1)}` : ''}${spread === null ? '' : ` and a ${spread.toFixed(1)}-point gap between your highest and lowest grades`}. Evidence quality is ${evidenceQuality.toLowerCase()} — ${qualityExplanation}.</p>
             ` : '';
             section.style.display = 'block';
             setJourneyStep(4);
